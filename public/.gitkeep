@@ -1,0 +1,9 @@
+# public/
+
+This directory is served as static public assets alongside `src/`.
+
+Place any additional static files here:
+- `favicon.ico`
+- `robots.txt`
+- `sitemap.xml`
+- `manifest.json` (PWA)

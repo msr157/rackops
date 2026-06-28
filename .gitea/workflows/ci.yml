@@ -1,0 +1,175 @@
+name: CI — Build, Verify & Deploy
+
+# ─────────────────────────────────────────────
+# Gitea Actions CI Pipeline
+# Runs ONLY on the main branch.
+# Deploys to Dokploy only when ALL steps pass.
+# Compatible with a self-hosted Gitea runner.
+# ─────────────────────────────────────────────
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  IMAGE_NAME: rackops
+  IMAGE_TAG:  ${{ gitea.sha }}
+
+jobs:
+  ci:
+    name: Build · Verify · Deploy
+    runs-on: self-hosted          # targets your self-hosted Gitea Actions runner
+    timeout-minutes: 20
+
+    steps:
+      # ── 1. Checkout ─────────────────────────────────────
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # ── 2. Validate repository structure ────────────────
+      - name: Validate repository structure
+        run: |
+          echo "📋 Validating required files..."
+
+          REQUIRED_FILES=(
+            "Dockerfile"
+            "docker-compose.yml"
+            "nginx.conf"
+            "src/index.html"
+            "src/style.css"
+            "src/app.js"
+          )
+
+          MISSING=0
+          for f in "${REQUIRED_FILES[@]}"; do
+            if [ ! -f "$f" ]; then
+              echo "❌ Missing: $f"
+              MISSING=$((MISSING + 1))
+            else
+              echo "✅ Found:   $f"
+            fi
+          done
+
+          if [ "$MISSING" -gt 0 ]; then
+            echo "::error::Repository validation failed — $MISSING file(s) missing."
+            exit 1
+          fi
+
+          echo "✅ Repository validation passed."
+
+      # ── 3. Build Docker image ────────────────────────────
+      - name: Build Docker image
+        run: |
+          echo "🐳 Building Docker image..."
+          docker build \
+            --tag  "${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}" \
+            --tag  "${{ env.IMAGE_NAME }}:latest" \
+            --file Dockerfile \
+            --no-cache \
+            .
+          echo "✅ Docker image built successfully."
+
+      # ── 4. Verify image builds correctly ─────────────────
+      - name: Verify Docker image
+        run: |
+          echo "🔍 Verifying Docker image..."
+
+          # Check image exists
+          docker image inspect "${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}" > /dev/null 2>&1 \
+            || { echo "❌ Image not found after build"; exit 1; }
+
+          # Check image size is reasonable (< 100 MB)
+          SIZE=$(docker image inspect "${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}" \
+            --format='{{.Size}}')
+          MAX_SIZE=$((100 * 1024 * 1024))   # 100 MB in bytes
+
+          if [ "$SIZE" -gt "$MAX_SIZE" ]; then
+            echo "⚠️  Image size ${SIZE} bytes exceeds 100 MB threshold."
+          fi
+
+          echo "✅ Image verified. Size: ${SIZE} bytes."
+
+      # ── 5. Run health check ──────────────────────────────
+      - name: Run container health check
+        run: |
+          echo "🏥 Running health check..."
+
+          # Start container in detached mode
+          docker run \
+            --detach \
+            --name  rackops-ci-test \
+            --publish 8989:80 \
+            "${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}"
+
+          # Wait for container to start
+          echo "⏳ Waiting for container to be ready..."
+          sleep 8
+
+          # Health check — must return HTTP 200
+          HTTP_STATUS=$(wget -qO- --server-response http://localhost:8989/health 2>&1 \
+            | grep "HTTP/" | awk '{print $2}' | tail -1)
+
+          # Also check the main page
+          MAIN_STATUS=$(wget -qO- --server-response http://localhost:8989/ 2>&1 \
+            | grep "HTTP/" | awk '{print $2}' | tail -1)
+
+          echo "  /health → HTTP $HTTP_STATUS"
+          echo "  /       → HTTP $MAIN_STATUS"
+
+          # Cleanup
+          docker stop  rackops-ci-test || true
+          docker rm    rackops-ci-test || true
+
+          # Assert
+          if [ "$HTTP_STATUS" != "200" ]; then
+            echo "❌ Health check failed — /health returned HTTP $HTTP_STATUS"
+            exit 1
+          fi
+
+          if [ "$MAIN_STATUS" != "200" ]; then
+            echo "❌ Main page check failed — / returned HTTP $MAIN_STATUS"
+            exit 1
+          fi
+
+          echo "✅ Health check passed."
+
+      # ── 6. Trigger Dokploy deployment ────────────────────
+      - name: Deploy to Dokploy
+        env:
+          DOKPLOY_WEBHOOK_URL: ${{ secrets.DOKPLOY_WEBHOOK_URL }}
+        run: |
+          echo "🚀 Triggering Dokploy deployment..."
+
+          if [ -z "$DOKPLOY_WEBHOOK_URL" ]; then
+            echo "::error::DOKPLOY_WEBHOOK_URL secret is not set."
+            exit 1
+          fi
+
+          HTTP_CODE=$(wget \
+            --method=POST \
+            --header="Content-Type: application/json" \
+            --body-data='{"event":"deploy","branch":"main","service":"rackops"}' \
+            --server-response \
+            --spider \
+            --output-document=/dev/null \
+            "$DOKPLOY_WEBHOOK_URL" 2>&1 \
+            | grep "HTTP/" | awk '{print $2}' | tail -1)
+
+          echo "  Dokploy webhook → HTTP $HTTP_CODE"
+
+          if [ "$HTTP_CODE" != "200" ] && [ "$HTTP_CODE" != "201" ] && [ "$HTTP_CODE" != "204" ]; then
+            echo "❌ Dokploy webhook failed — HTTP $HTTP_CODE"
+            exit 1
+          fi
+
+          echo "✅ Dokploy deployment triggered successfully."
+
+      # ── Cleanup stale images ─────────────────────────────
+      - name: Cleanup old Docker images
+        if: always()
+        run: |
+          docker image prune -f --filter "until=24h" || true
+          echo "🧹 Cleanup complete."

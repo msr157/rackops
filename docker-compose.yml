@@ -1,0 +1,46 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────
+# RackOps — docker-compose.yml
+# Dokploy-compatible production compose file
+# ─────────────────────────────────────────────
+
+services:
+  rackops:
+    image: rackops:latest           # built by Gitea CI before deployment
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rackops
+    restart: unless-stopped
+
+    ports:
+      - "80:80"                     # change host port if behind reverse proxy
+
+    environment:
+      - APP_ENV=${APP_ENV:-production}
+      - APP_NAME=${APP_NAME:-rackops}
+      - DOKPLOY_DEPLOY_URL=${DOKPLOY_DEPLOY_URL:-}
+
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+    labels:
+      # Traefik / reverse-proxy labels (enable when using Dokploy's proxy)
+      - "traefik.enable=true"
+      - "traefik.http.routers.rackops.rule=Host(`${DOMAIN:-rackops.local}`)"
+      - "traefik.http.routers.rackops.entrypoints=websecure"
+      - "traefik.http.routers.rackops.tls=true"
+      - "traefik.http.services.rackops.loadbalancer.server.port=80"
+
+    networks:
+      - rackops-net
+
+networks:
+  rackops-net:
+    driver: bridge
+    name: rackops-net

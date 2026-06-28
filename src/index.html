@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="RackOps — Intelligent infrastructure orchestration. Automate, monitor, and scale your rack infrastructure with confidence." />
+  <title>RackOps — Intelligent Infrastructure Orchestration</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- Navigation -->
+  <nav class="navbar" id="navbar">
+    <div class="container nav-container">
+      <a href="#" class="logo" aria-label="RackOps Home">
+        <span class="logo-icon">⬡</span>
+        <span class="logo-text">RackOps</span>
+      </a>
+      <ul class="nav-links" id="nav-links">
+        <li><a href="#features">Features</a></li>
+        <li><a href="#about">About</a></li>
+        <li><a href="#architecture">Architecture</a></li>
+        <li><a href="#cta" class="btn-nav">Get Started</a></li>
+      </ul>
+      <button class="hamburger" id="hamburger" aria-label="Toggle menu" aria-expanded="false">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+  </nav>
+
+  <!-- Hero Section -->
+  <section class="hero" id="hero">
+    <div class="hero-bg">
+      <div class="grid-overlay"></div>
+      <div class="glow glow-1"></div>
+      <div class="glow glow-2"></div>
+    </div>
+    <div class="container hero-content">
+      <div class="badge" aria-label="Status">
+        <span class="badge-dot"></span>
+        Production Ready
+      </div>
+      <h1 class="hero-title">
+        Intelligent<br />
+        <span class="gradient-text">Infrastructure</span><br />
+        Orchestration
+      </h1>
+      <p class="hero-subtitle">
+        RackOps gives your team full visibility and control over rack infrastructure.
+        Automate provisioning, monitor health in real-time, and deploy with confidence.
+      </p>
+      <div class="hero-actions">
+        <a href="#cta" class="btn btn-primary" id="hero-cta">Start Deploying</a>
+        <a href="#features" class="btn btn-ghost">Explore Features</a>
+      </div>
+      <div class="hero-stats">
+        <div class="stat">
+          <span class="stat-value">99.9%</span>
+          <span class="stat-label">Uptime SLA</span>
+        </div>
+        <div class="stat-divider"></div>
+        <div class="stat">
+          <span class="stat-value">&lt; 30s</span>
+          <span class="stat-label">Deploy Time</span>
+        </div>
+        <div class="stat-divider"></div>
+        <div class="stat">
+          <span class="stat-value">Zero</span>
+          <span class="stat-label">Downtime Deploys</span>
+        </div>
+      </div>
+    </div>
+    <div class="scroll-indicator" aria-hidden="true">
+      <div class="scroll-line"></div>
+    </div>
+  </section>
+
+  <!-- Features Section -->
+  <section class="features" id="features">
+    <div class="container">
+      <div class="section-header">
+        <span class="section-tag">Features</span>
+        <h2>Built for production<br /><span class="gradient-text">from day one</span></h2>
+        <p>Every feature is designed with reliability, scalability, and developer experience in mind.</p>
+      </div>
+      <div class="features-grid">
+
+        <div class="feature-card" data-delay="0">
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          </div>
+          <h3>Automated Provisioning</h3>
+          <p>Spin up racks and resources in seconds using declarative configs. No manual steps, no drift.</p>
+          <div class="feature-tag">Zero Touch</div>
+        </div>
+
+        <div class="feature-card featured" data-delay="100">
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          </div>
+          <h3>Real-Time Health Monitoring</h3>
+          <p>Continuous health checks, alerting, and dashboards. Know about issues before your users do.</p>
+          <div class="feature-tag">Live</div>
+        </div>
+
+        <div class="feature-card" data-delay="200">
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+          </div>
+          <h3>CI/CD Integration</h3>
+          <p>Seamless GitHub → Gitea → Docker → Dokploy pipeline. Deploy only when all checks pass.</p>
+          <div class="feature-tag">Automated</div>
+        </div>
+
+        <div class="feature-card" data-delay="300">
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+          </div>
+          <h3>Secrets Management</h3>
+          <p>Encrypted credentials, GitHub Secrets integration, and role-based access out of the box.</p>
+          <div class="feature-tag">Secure</div>
+        </div>
+
+        <div class="feature-card" data-delay="400">
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/></svg>
+          </div>
+          <h3>Multi-Environment Support</h3>
+          <p>Separate development, QA, and production environments with branch-based deployments.</p>
+          <div class="feature-tag">Scalable</div>
+        </div>
+
+        <div class="feature-card" data-delay="500">
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+          </div>
+          <h3>Observability & Logs</h3>
+          <p>Structured logging, metrics export, and full audit trails for every operation across your fleet.</p>
+          <div class="feature-tag">Insights</div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- About Section -->
+  <section class="about" id="about">
+    <div class="container about-grid">
+      <div class="about-visual">
+        <div class="terminal" aria-label="Terminal preview">
+          <div class="terminal-header">
+            <span class="dot red"></span>
+            <span class="dot yellow"></span>
+            <span class="dot green"></span>
+            <span class="terminal-title">rackops deploy</span>
+          </div>
+          <div class="terminal-body" id="terminal-body">
+            <div class="terminal-line"><span class="prompt">$</span> rackops deploy --env production</div>
+            <div class="terminal-line output" id="t1">✓ Connecting to cluster...</div>
+            <div class="terminal-line output" id="t2">✓ Running health checks...</div>
+            <div class="terminal-line output" id="t3">✓ Building Docker image...</div>
+            <div class="terminal-line output" id="t4">✓ Pushing to registry...</div>
+            <div class="terminal-line output" id="t5">✓ Triggering Dokploy webhook...</div>
+            <div class="terminal-line success" id="t6">🚀 Deployed to production!</div>
+          </div>
+        </div>
+      </div>
+      <div class="about-content">
+        <span class="section-tag">About</span>
+        <h2>Infrastructure that<br /><span class="gradient-text">just works</span></h2>
+        <p>RackOps was built to eliminate the friction between code and production. We believe infrastructure should be boring — reliable, predictable, and automated.</p>
+        <p>From a single self-hosted server to a multi-region rack fleet, RackOps scales with you without changing how your team works.</p>
+        <ul class="about-list">
+          <li>
+            <svg class="check-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg>
+            Self-hosted or cloud — your choice
+          </li>
+          <li>
+            <svg class="check-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg>
+            GitOps workflow built in
+          </li>
+          <li>
+            <svg class="check-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg>
+            Open source and auditable
+          </li>
+          <li>
+            <svg class="check-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg>
+            Zero vendor lock-in
+          </li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- Architecture Section -->
+  <section class="architecture" id="architecture">
+    <div class="container">
+      <div class="section-header">
+        <span class="section-tag">Architecture</span>
+        <h2>End-to-end<br /><span class="gradient-text">CI/CD pipeline</span></h2>
+        <p>Every commit flows through a validated, automated pipeline before touching production.</p>
+      </div>
+      <div class="pipeline">
+        <div class="pipeline-step" data-step="1">
+          <div class="pipeline-icon">💻</div>
+          <div class="pipeline-label">Laptop</div>
+          <div class="pipeline-sub">git push</div>
+        </div>
+        <div class="pipeline-arrow">→</div>
+        <div class="pipeline-step" data-step="2">
+          <div class="pipeline-icon">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+          </div>
+          <div class="pipeline-label">GitHub</div>
+          <div class="pipeline-sub">source of truth</div>
+        </div>
+        <div class="pipeline-arrow">→</div>
+        <div class="pipeline-step" data-step="3">
+          <div class="pipeline-icon">⚡</div>
+          <div class="pipeline-label">Actions</div>
+          <div class="pipeline-sub">mirror to Gitea</div>
+        </div>
+        <div class="pipeline-arrow">→</div>
+        <div class="pipeline-step" data-step="4">
+          <div class="pipeline-icon">🦊</div>
+          <div class="pipeline-label">Gitea CI</div>
+          <div class="pipeline-sub">build & test</div>
+        </div>
+        <div class="pipeline-arrow">→</div>
+        <div class="pipeline-step" data-step="5">
+          <div class="pipeline-icon">🐳</div>
+          <div class="pipeline-label">Docker</div>
+          <div class="pipeline-sub">image verified</div>
+        </div>
+        <div class="pipeline-arrow">→</div>
+        <div class="pipeline-step active" data-step="6">
+          <div class="pipeline-icon">🚀</div>
+          <div class="pipeline-label">Dokploy</div>
+          <div class="pipeline-sub">production</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA Section -->
+  <section class="cta-section" id="cta">
+    <div class="container">
+      <div class="cta-card">
+        <div class="cta-glow"></div>
+        <div class="cta-content">
+          <h2>Ready to deploy?</h2>
+          <p>Clone the repo, configure your secrets, and push to main.<br />Your infrastructure will take it from there.</p>
+          <div class="cta-code">
+            <code>git clone https://github.com/your-org/rackops.git<br />cd rackops &amp;&amp; git push origin main</code>
+            <button class="copy-btn" id="copy-btn" aria-label="Copy command" onclick="copyCommand()">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"></path></svg>
+            </button>
+          </div>
+          <a href="#" class="btn btn-primary btn-large" id="docs-link">Read the Docs</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="container footer-inner">
+      <div class="footer-brand">
+        <a href="#" class="logo" aria-label="RackOps Home">
+          <span class="logo-icon">⬡</span>
+          <span class="logo-text">RackOps</span>
+        </a>
+        <p>Intelligent infrastructure orchestration.<br />Built for production teams.</p>
+      </div>
+      <div class="footer-links">
+        <div class="footer-col">
+          <h4>Product</h4>
+          <ul>
+            <li><a href="#features">Features</a></li>
+            <li><a href="#architecture">Architecture</a></li>
+            <li><a href="#about">About</a></li>
+          </ul>
+        </div>
+        <div class="footer-col">
+          <h4>Deploy</h4>
+          <ul>
+            <li><a href="#cta">Quick Start</a></li>
+            <li><a href="#cta">Docker</a></li>
+            <li><a href="#cta">Dokploy</a></li>
+          </ul>
+        </div>
+        <div class="footer-col">
+          <h4>Open Source</h4>
+          <ul>
+            <li><a href="https://github.com/your-org/rackops" target="_blank" rel="noopener">GitHub</a></li>
+            <li><a href="LICENSE">License (MIT)</a></li>
+            <li><a href="docs/">Documentation</a></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <div class="container">
+        <p>© 2026 RackOps. Released under the MIT License.</p>
+        <p>Built with ❤️ for self-hosted infrastructure teams.</p>
+      </div>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

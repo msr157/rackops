@@ -1,0 +1,41 @@
+# ─────────────────────────────────────────────
+# .dockerignore — exclude from Docker build ctx
+# ─────────────────────────────────────────────
+
+# Git
+.git
+.gitignore
+.github
+.gitea
+
+# Docs & metadata
+README.md
+LICENSE
+docs/
+
+# Dev files
+*.md
+*.log
+*.env
+*.env.*
+.env.example
+
+# Node (if ever added)
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# OS generated
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test artifacts
+coverage/
+test-results/
