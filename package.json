@@ -1,29 +1,19 @@
 {
-  "name": "rackops",
+  "name": "rackops-monorepo",
   "private": true,
-  "version": "2.0.0",
-  "type": "module",
+  "packageManager": "pnpm@11.10.0",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc --noEmit && vite build",
-    "lint": "tsc --noEmit",
-    "preview": "vite preview"
-  },
-  "dependencies": {
-    "@react-three/drei": "^10.0.6",
-    "@react-three/fiber": "^9.1.2",
-    "gsap": "^3.13.0",
-    "lenis": "^1.2.3",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "three": "^0.175.0"
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "go:build": "go build ./...",
+    "go:test": "go test ./...",
+    "go:vet": "go vet ./...",
+    "dev:lite": "go run ./cmd/rackops-lite",
+    "dev:enterprise": "go run ./cmd/rackops-enterprise -port 8081",
+    "dev:agent": "go run ./cmd/agent -server http://localhost:8080 -interval 3s"
   },
   "devDependencies": {
-    "@types/react": "^19.0.10",
-    "@types/react-dom": "^19.0.4",
-    "@types/three": "^0.175.0",
-    "@vitejs/plugin-react": "^4.3.4",
-    "typescript": "~5.7.3",
-    "vite": "^6.2.0"
+    "turbo": "^2.5.0"
   }
 }

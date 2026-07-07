@@ -30,10 +30,15 @@ logs/
 npm-debug.log*
 yarn-error.log*
 
-# Node (if ever added)
+# Node
 node_modules/
 dist/
 build/
+.turbo/
+
+# Go
+bin/
+*.exe
 
 # Docker artifacts
 *.tar

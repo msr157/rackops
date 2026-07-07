@@ -1,0 +1,32 @@
+.ro-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-family: var(--font-mono);
+}
+
+.ro-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.ro-status-online {
+  color: var(--teal);
+}
+
+.ro-status-online .ro-status-dot {
+  background: var(--teal);
+  box-shadow: 0 0 8px var(--teal-glow);
+}
+
+.ro-status-stale {
+  color: var(--warn);
+}
+
+.ro-status-stale .ro-status-dot {
+  background: var(--warn);
+}

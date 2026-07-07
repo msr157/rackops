@@ -20,10 +20,20 @@ docs/
 *.env.*
 .env.example
 
-# Node (if ever added)
-node_modules/
+# Node (any depth — pnpm workspaces have nested node_modules)
+**/node_modules
+**/dist
+**/.turbo
 npm-debug.log*
 yarn-error.log*
+
+# Go (not needed in the website image)
+cmd/
+internal/
+go.mod
+go.sum
+bin/
+*.exe
 
 # OS generated
 .DS_Store

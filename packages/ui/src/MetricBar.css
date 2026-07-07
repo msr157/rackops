@@ -1,0 +1,40 @@
+.ro-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ro-metric-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 0.8rem;
+}
+
+.ro-metric-label {
+  color: var(--text-secondary);
+}
+
+.ro-metric-value {
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+
+.ro-metric-track {
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+
+.ro-metric-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--gradient);
+  transition: width var(--transition);
+}
+
+.ro-metric-fill.warn {
+  background: var(--warn);
+}

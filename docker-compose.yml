@@ -7,10 +7,10 @@ version: "3.9"
 
 services:
   rackops:
-    image: rackops:latest           # built by Gitea CI before deployment
+    image: rackops:latest
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: .                    # monorepo root (pnpm workspace needs it)
+      dockerfile: apps/website/Dockerfile
     container_name: rackops
     restart: unless-stopped
 
