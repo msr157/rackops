@@ -1,0 +1,36 @@
+/* RackOps website theme — terminal-industrial.
+   Website-only tokens; the product dashboards use packages/ui tokens instead. */
+
+:root {
+  /* canvas */
+  --bg-0: #050706;
+  --bg-1: #0a0d0b;
+  --surface: #0e1210;
+  --surface-2: #141915;
+
+  /* ink */
+  --ink: #e9eee9;
+  --ink-2: #9aa69d;
+  --ink-3: #58635b;
+
+  /* the one signal color */
+  --signal: #3df582;
+  --signal-dim: #1f7a44;
+  --signal-glow: rgba(61, 245, 130, 0.14);
+
+  /* status (terminal semantics only) */
+  --warn: #ffb224;
+
+  /* hairlines */
+  --rule: rgba(233, 238, 233, 0.08);
+  --rule-strong: rgba(233, 238, 233, 0.18);
+
+  /* type */
+  --font-display: 'Space Grotesk', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  /* geometry */
+  --radius: 2px;
+  --nav-height: 64px;
+  --transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}

@@ -3,10 +3,10 @@ import './Navbar.css';
 
 const LINKS = [
   { href: '#problem', label: 'Problem' },
-  { href: '#solution', label: 'Solution' },
-  { href: '#architecture', label: 'Architecture' },
-  { href: '#features', label: 'Features' },
-  { href: '#cta', label: 'Get Started', cta: true },
+  { href: '#platform', label: 'Platform' },
+  { href: '#ai', label: 'Intelligence' },
+  { href: '#editions', label: 'Editions' },
+  { href: '#access', label: 'Early Access', cta: true },
 ];
 
 export default function Navbar() {
@@ -28,9 +28,16 @@ export default function Navbar() {
   return (
     <nav className={`navbar ${scrolled ? 'scrolled' : ''}`} id="navbar">
       <div className="container nav-container">
-        <a href="#hero" className="logo" aria-label="RackOps Home" onClick={(e) => { e.preventDefault(); handleClick('#hero'); }}>
-          <span className="logo-icon" aria-hidden="true">⬡</span>
-          <span className="logo-text">RackOps</span>
+        <a
+          href="#hero"
+          className="logo"
+          aria-label="RackOps Home"
+          onClick={(e) => {
+            e.preventDefault();
+            handleClick('#hero');
+          }}
+        >
+          rackops
         </a>
         <ul className={`nav-links ${open ? 'open' : ''}`} id="nav-links">
           {LINKS.map((link) => (
@@ -38,7 +45,10 @@ export default function Navbar() {
               <a
                 href={link.href}
                 className={link.cta ? 'btn-nav' : undefined}
-                onClick={(e) => { e.preventDefault(); handleClick(link.href); }}
+                onClick={(e) => {
+                  e.preventDefault();
+                  handleClick(link.href);
+                }}
               >
                 {link.label}
               </a>
@@ -51,7 +61,9 @@ export default function Navbar() {
           aria-expanded={open}
           onClick={() => setOpen((v) => !v)}
         >
-          <span /><span /><span />
+          <span />
+          <span />
+          <span />
         </button>
       </div>
     </nav>

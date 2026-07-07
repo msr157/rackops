@@ -13,8 +13,6 @@ WORKDIR /build
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json turbo.json ./
 COPY apps/website/package.json apps/website/
 COPY packages/tsconfig/package.json packages/tsconfig/
-COPY packages/ui/package.json packages/ui/
-COPY packages/api/package.json packages/api/
 
 RUN pnpm install --frozen-lockfile --filter @rackops/website...
 

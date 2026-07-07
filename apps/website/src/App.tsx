@@ -5,10 +5,12 @@ import Navbar from '@/components/layout/Navbar';
 import Footer from '@/components/layout/Footer';
 import Hero from '@/components/sections/Hero';
 import Problem from '@/components/sections/Problem';
+import Shift from '@/components/sections/Shift';
 import Solution from '@/components/sections/Solution';
-import Architecture from '@/components/sections/Architecture';
-import Features from '@/components/sections/Features';
+import Platform from '@/components/sections/Platform';
 import AI from '@/components/sections/AI';
+import Audience from '@/components/sections/Audience';
+import Editions from '@/components/sections/Editions';
 import CTA from '@/components/sections/CTA';
 
 export default function App() {
@@ -28,10 +30,12 @@ export default function App() {
       <main>
         <Hero />
         <Problem />
+        <Shift />
         <Solution />
-        <Architecture />
-        <Features />
+        <Platform />
         <AI />
+        <Audience />
+        <Editions />
         <CTA />
       </main>
       <Footer />

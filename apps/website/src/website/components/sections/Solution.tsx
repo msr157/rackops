@@ -1,56 +1,88 @@
+import { useEffect, useRef } from 'react';
+import { gsap } from '@/lib/gsap';
 import { useScrollReveal } from '@/hooks/useScrollReveal';
+import { useReducedMotion } from '@/hooks/useReducedMotion';
+import SectionRule from '@/components/SectionRule';
 import './Solution.css';
 
-const HARDWARE = [
-  { id: 'cpu', label: 'CPUs', value: '12 cores · 24 threads', status: 'healthy' },
-  { id: 'gpu', label: 'GPUs', value: 'RTX 4090 · 24GB VRAM', status: 'healthy' },
-  { id: 'npu', label: 'NPUs', value: 'Intel AI Boost', status: 'idle' },
-  { id: 'mem', label: 'Memory', value: '64 GB · 78% free', status: 'healthy' },
-  { id: 'storage', label: 'Storage', value: '2.4 TB NVMe · 61% used', status: 'warn' },
-  { id: 'thermal', label: 'Thermals', value: '42°C · Optimal', status: 'healthy' },
+const PILLARS = [
+  {
+    index: 'SEE / 01',
+    name: 'Node Agent',
+    body: 'A lightweight agent on every machine reads the hardware itself: CPU, GPU, memory, disks, network, power, thermals. Not the app layer — the metal.',
+  },
+  {
+    index: 'CONNECT / 02',
+    name: 'Private Mesh',
+    body: 'Every machine linked over an encrypted mesh — across racks, buildings, and continents. Works behind CGNAT. No port forwarding, no VPN config.',
+  },
+  {
+    index: 'RUN / 03',
+    name: 'Control Plane',
+    body: "One view of the whole fleet. It doesn't just show where workloads are running — it decides where they should run.",
+  },
 ];
 
+const QUOTE = 'Other tools check whether the app is running. RackOps decides where it should run.';
+
 export default function Solution() {
-  const sectionRef = useScrollReveal<HTMLElement>();
+  const sectionRef = useScrollReveal<HTMLElement>(0.1);
+  const reducedMotion = useReducedMotion();
+  const quoteRef = useRef<HTMLParagraphElement>(null);
+
+  useEffect(() => {
+    if (reducedMotion) return;
+
+    const ctx = gsap.context(() => {
+      const words = quoteRef.current?.querySelectorAll('.solution-quote-word');
+      if (!words?.length) return;
+      gsap.fromTo(
+        words,
+        { opacity: 0.18 },
+        {
+          opacity: 1,
+          stagger: 0.06,
+          ease: 'none',
+          scrollTrigger: {
+            trigger: quoteRef.current,
+            start: 'top 80%',
+            end: 'bottom 45%',
+            scrub: 0.5,
+          },
+        },
+      );
+    }, sectionRef);
+
+    return () => ctx.revert();
+  }, [reducedMotion, sectionRef]);
 
   return (
-    <section className="solution" id="solution" ref={sectionRef}>
-      <div className="container solution-grid">
-        <div className="solution-content reveal">
-          <span className="section-tag">Hardware-Aware</span>
-          <h2>
-            Infrastructure that
-            <br />
-            <span className="gradient-text">understands itself</span>
-          </h2>
-          <p>
-            Most platforms understand applications. RackOps understands the hardware
-            running them — continuously discovering CPUs, GPUs, NPUs, memory, storage,
-            network, power, and thermals across your entire fleet.
-          </p>
-          <p>
-            Intelligent workload placement evaluates available resources and automatically
-            selects the most suitable machine. Infrastructure decisions become automatic,
-            not manual.
-          </p>
+    <section className="section solution" id="solution" ref={sectionRef}>
+      <div className="container">
+        <SectionRule index="03" name="System" />
+        <h2 className="reveal">See. Connect. Run.</h2>
+
+        <div className="solution-pillars">
+          {PILLARS.map((pillar, i) => (
+            <article
+              key={pillar.name}
+              className="solution-pillar reveal"
+              style={{ transitionDelay: `${i * 110}ms` }}
+            >
+              <p className="mono-label signal">{pillar.index}</p>
+              <h3>{pillar.name}</h3>
+              <p className="solution-pillar-body">{pillar.body}</p>
+            </article>
+          ))}
         </div>
-        <div className="solution-panel glass-card reveal">
-          <div className="panel-header">
-            <span className="panel-dot" />
-            <span>Live Hardware Discovery</span>
-          </div>
-          <div className="hardware-grid">
-            {HARDWARE.map((item) => (
-              <div key={item.id} className={`hardware-module ${item.status}`}>
-                <div className="module-indicator" />
-                <div className="module-info">
-                  <span className="module-label">{item.label}</span>
-                  <span className="module-value">{item.value}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+
+        <p className="solution-quote" ref={quoteRef}>
+          {QUOTE.split(' ').map((word, i) => (
+            <span key={i} className="solution-quote-word">
+              {word}{' '}
+            </span>
+          ))}
+        </p>
       </div>
     </section>
   );
