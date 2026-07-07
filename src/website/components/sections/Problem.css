@@ -1,0 +1,83 @@
+.problem {
+  padding: 120px 0;
+  background: var(--bg-surface);
+}
+
+.problem-visual {
+  display: flex;
+  justify-content: center;
+}
+
+.tools-cloud {
+  position: relative;
+  width: min(700px, 100%);
+  height: 400px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tool-chip {
+  position: absolute;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  padding: 8px 16px;
+  border-radius: 100px;
+  white-space: nowrap;
+  transition: none;
+}
+
+.tool-chip:nth-child(1)  { top: 8%;  left: 10%; }
+.tool-chip:nth-child(2)  { top: 5%;  right: 12%; }
+.tool-chip:nth-child(3)  { top: 22%; left: 2%; }
+.tool-chip:nth-child(4)  { top: 18%; right: 5%; }
+.tool-chip:nth-child(5)  { top: 35%; left: 8%; }
+.tool-chip:nth-child(6)  { top: 32%; right: 8%; }
+.tool-chip:nth-child(7)  { top: 50%; left: 3%; }
+.tool-chip:nth-child(8)  { top: 48%; right: 3%; }
+.tool-chip:nth-child(9)  { bottom: 28%; left: 12%; }
+.tool-chip:nth-child(10) { bottom: 30%; right: 10%; }
+.tool-chip:nth-child(11) { bottom: 12%; left: 20%; }
+.tool-chip:nth-child(12) { bottom: 10%; right: 18%; }
+.tool-chip:nth-child(13) { bottom: 22%; left: 35%; }
+.tool-chip:nth-child(14) { bottom: 20%; right: 32%; }
+.tool-chip:nth-child(15) { top: 42%; left: 42%; }
+
+.convergence-core {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 32px;
+  background: var(--glass);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-glow);
+  font-weight: 700;
+  font-size: 18px;
+}
+
+.convergence-core .logo-icon {
+  font-size: 36px;
+  background: var(--gradient);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+@media (max-width: 640px) {
+  .tools-cloud {
+    height: 360px;
+  }
+
+  .tool-chip {
+    font-size: 11px;
+    padding: 6px 12px;
+  }
+}

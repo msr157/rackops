@@ -1,11 +1,17 @@
 # ─────────────────────────────────────────────────────
-# Stage 1: Build
-# Copies static source files — no compilation needed
+# Stage 1: Build static site with Vite
 # ─────────────────────────────────────────────────────
-FROM alpine:3.20 AS builder
+FROM node:22-alpine AS builder
 
 WORKDIR /build
-COPY src/ ./
+
+COPY package.json package-lock.json* ./
+RUN npm install
+
+COPY index.html vite.config.ts tsconfig.json tsconfig.node.json ./
+COPY src/ ./src/
+
+RUN npm run build
 
 # ─────────────────────────────────────────────────────
 # Stage 2: Production runtime (nginx on Alpine)
@@ -14,24 +20,15 @@ FROM nginx:1.27-alpine
 
 LABEL maintainer="rackops"
 LABEL org.opencontainers.image.title="rackops"
-LABEL org.opencontainers.image.description="RackOps — Intelligent Infrastructure Orchestration"
+LABEL org.opencontainers.image.description="RackOps — The Infrastructure Operating System"
 LABEL org.opencontainers.image.licenses="MIT"
 
-# Remove default nginx placeholder content
 RUN rm -rf /usr/share/nginx/html/*
 
-# Copy static files from builder stage
-COPY --from=builder /build/ /usr/share/nginx/html/
-
-# Copy custom nginx configuration
+COPY --from=builder /build/dist/ /usr/share/nginx/html/
 COPY nginx.conf /etc/nginx/nginx.conf
 
-# Expose HTTP only — TLS is terminated upstream (Dokploy / Traefik)
 EXPOSE 80
 
-# Healthcheck — curl is available on nginx:alpine
-# Probes the /health endpoint added in nginx.conf
-HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-  CMD curl -fs http://localhost/health || exit 1
-
-# nginx starts via its own default CMD — no override needed
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD curl -fs http://127.0.0.1/health || exit 1

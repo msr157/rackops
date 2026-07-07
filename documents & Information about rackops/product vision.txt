@@ -1,0 +1,131 @@
+Product Vision
+RackOps
+The Operating System for Modern Infrastructure
+RackOps isn't another deployment tool.
+It isn't another Kubernetes dashboard.
+It isn't another monitoring platform.
+It isn't another VPN.
+It isn't another CI/CD solution.
+RackOps brings infrastructure together into one unified platform.
+One Platform Instead of Twenty Tools
+Today's infrastructure is fragmented.
+Docker
+Kubernetes
+Grafana
+Prometheus
+Jenkins
+NetBird
+Tailscale
+Portainer
+Traefik
+SSH
+Monitoring
+Storage
+Backups
+Logs
+Security
+...
+Every tool solves one problem.
+Every tool has its own interface.
+Every tool has its own learning curve.
+RackOps provides a single control plane that brings these capabilities together through one consistent experience.
+Infrastructure That Understands Hardware
+Most platforms understand applications.
+RackOps understands the infrastructure running them.
+It continuously discovers and visualizes:
+CPUs
+GPUs
+NPUs
+Memory
+Storage
+Network
+Power
+Thermals
+Hardware health
+Giving operators a real-time understanding of every machine in their fleet.
+Intelligent Workload Placement
+Instead of asking:
+"Which server should I deploy this on?"
+RackOps evaluates available resources and recommends—or automatically selects—the most suitable machine based on available compute, storage, hardware capabilities and system health.
+Infrastructure decisions become automatic instead of manual.
+Built Around Simplicity
+Modern infrastructure is powerful, but increasingly complex.
+RackOps is designed to simplify that experience through an interface that makes servers feel approachable.
+Hardware, storage, networking and workloads are presented visually, making infrastructure management understandable without requiring deep platform expertise.
+Integrated, Not Reinvented
+RackOps doesn't try to replace every infrastructure project.
+It provides the platform that connects them.
+Need object storage?
+Deploy MinIO.
+Need Git hosting?
+Deploy Gitea.
+Need CI/CD?
+Deploy Jenkins.
+Need monitoring?
+Deploy Prometheus and Grafana.
+RackOps manages the infrastructure around these services while allowing users to choose the tools that best fit their environment.
+RackOps Lite
+Designed for:
+Home labs
+Developers
+Makers
+Small businesses
+Self-hosted enthusiasts
+Includes:
+One-click deployment
+Secure remote connectivity
+Hardware monitoring
+Storage visualization
+Logs
+Alerts
+AI-powered assistance
+Simple backups
+Everything needed to operate self-hosted infrastructure without unnecessary complexity.
+RackOps Enterprise
+Designed for organizations operating production infrastructure.
+Includes:
+Multi-server management
+Cluster orchestration
+RBAC & SSO
+GPU scheduling
+High availability
+Policy management
+Audit logs
+AI-assisted operations
+Enterprise monitoring
+Private deployments
+Built for teams managing infrastructure at scale.
+Secure Connectivity by Default
+Many self-hosted environments operate behind CGNAT or restrictive networks.
+RackOps includes secure mesh connectivity, allowing machines to connect without requiring complex networking configuration, VPN setup, or port forwarding.
+Remote infrastructure becomes accessible with minimal setup.
+AI That Understands Infrastructure
+RackOps integrates AI as an operational assistant.
+Instead of only reporting issues, it helps explain them.
+Examples include:
+Why a deployment failed
+Why a machine is overheating
+Which server is best suited for a workload
+Which storage device is approaching failure
+Recommended actions before issues become outages
+AI becomes part of day-to-day infrastructure operations rather than a separate tool.
+One Unified Experience
+Deploy Applications
+Monitor Infrastructure
+Manage Hardware
+Visualize Storage
+Operate Clusters
+Secure Networking
+Automate Workloads
+Observe Health
+Receive Intelligent Insights
+One Dashboard. One Control Plane. One Infrastructure Platform.
+I think one small positioning change makes this even stronger.
+Instead of saying "The Operating System for Modern Infrastructure," I'd consider:
+The Infrastructure Operating System
+It's shorter, easier to remember, and immediately communicates that RackOps sits above servers, clusters, networking, and services as the unified layer that ties everything together. It's a category-defining statement rather than just a product description.
+one  more thing we will be doing unique is with rackops user will have a simple directory and storage structure easy to understand like windows and hardware discoverability.
+
+we are building two products one is rackops lite other is rackops enterprise
+lite is for homelabbers stuck behind cgnat and no prot forwardinging kind of mix scenarios, and rackops enterprise requires user to have static ip's.
+We don't want to be another dokploy or coolify etc, User should be able to connect multiple servers orchaestrate operations simpler manner in a single dashboard across different types of servers and manage them efficiently.

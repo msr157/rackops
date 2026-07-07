@@ -1,0 +1,42 @@
+.fleet-scene {
+  position: relative;
+  width: 100%;
+  height: 420px;
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: radial-gradient(ellipse at 50% 80%, rgba(99, 102, 241, 0.08) 0%, transparent 60%);
+}
+
+.fleet-scene canvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.fleet-labels {
+  position: absolute;
+  bottom: 16px;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  gap: 24px;
+  flex-wrap: wrap;
+  pointer-events: none;
+}
+
+.fleet-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  background: rgba(5, 7, 13, 0.7);
+  padding: 4px 10px;
+  border-radius: 100px;
+  border: 1px solid var(--border);
+}
+
+@media (max-width: 640px) {
+  .fleet-scene {
+    height: 300px;
+  }
+}

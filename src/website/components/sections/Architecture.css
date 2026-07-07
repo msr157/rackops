@@ -1,0 +1,93 @@
+.architecture {
+  padding: 120px 0;
+  background: var(--bg-surface);
+}
+
+.architecture-fleet {
+  margin-bottom: 64px;
+}
+
+.pipeline {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  padding: 48px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+}
+
+.pipeline-group {
+  display: flex;
+  align-items: center;
+}
+
+.pipeline-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 20px;
+  border-radius: var(--radius-md);
+  transition: var(--transition);
+}
+
+.pipeline-step:hover,
+.pipeline-step.active {
+  background: rgba(99, 102, 241, 0.08);
+}
+
+.pipeline-icon {
+  font-size: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+}
+
+.pipeline-icon svg {
+  width: 26px;
+  height: 26px;
+  fill: var(--text-secondary);
+}
+
+.pipeline-step.active .pipeline-icon svg {
+  fill: var(--accent-light);
+}
+
+.pipeline-label {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.pipeline-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.pipeline-arrow {
+  font-size: 20px;
+  color: var(--border-accent);
+  padding: 0 4px;
+}
+
+@media (max-width: 640px) {
+  .pipeline {
+    flex-direction: column;
+    padding: 32px 20px;
+  }
+
+  .pipeline-group {
+    flex-direction: column;
+  }
+
+  .pipeline-arrow {
+    transform: rotate(90deg);
+  }
+}
