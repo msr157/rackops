@@ -1,17 +1,27 @@
 # ─────────────────────────────────────────────────────
-# Stage 1: Build static site with Vite
+# RackOps website — build from the monorepo root:
+#   docker build -f apps/website/Dockerfile .
 # ─────────────────────────────────────────────────────
+
+# Stage 1: Build static site with Vite (pnpm workspace)
 FROM node:22-alpine AS builder
 
+RUN corepack enable
 WORKDIR /build
 
-COPY package.json package-lock.json* ./
-RUN npm install
+# Manifests first so the install layer caches across source changes.
+COPY pnpm-workspace.yaml pnpm-lock.yaml package.json turbo.json ./
+COPY apps/website/package.json apps/website/
+COPY packages/tsconfig/package.json packages/tsconfig/
+COPY packages/ui/package.json packages/ui/
+COPY packages/api/package.json packages/api/
 
-COPY index.html vite.config.ts tsconfig.json tsconfig.node.json ./
-COPY src/ ./src/
+RUN pnpm install --frozen-lockfile --filter @rackops/website...
 
-RUN npm run build
+COPY packages/ ./packages/
+COPY apps/website/ ./apps/website/
+
+RUN pnpm --filter @rackops/website build
 
 # ─────────────────────────────────────────────────────
 # Stage 2: Production runtime (nginx on Alpine)
@@ -25,8 +35,8 @@ LABEL org.opencontainers.image.licenses="MIT"
 
 RUN rm -rf /usr/share/nginx/html/*
 
-COPY --from=builder /build/dist/ /usr/share/nginx/html/
-COPY nginx.conf /etc/nginx/nginx.conf
+COPY --from=builder /build/apps/website/dist/ /usr/share/nginx/html/
+COPY apps/website/nginx.conf /etc/nginx/nginx.conf
 
 EXPOSE 80
 

@@ -1,196 +1,85 @@
 # RackOps
 
-> Intelligent Infrastructure Orchestration — deploy with confidence.
+> **The Infrastructure Operating System** — One Dashboard. One Control Plane. One Platform.
 
-[![CI Status](https://gitea.yourdomain.com/your-org/rackops/actions/workflows/ci.yml/badge.svg)](https://gitea.yourdomain.com/your-org/rackops/actions)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+RackOps unifies servers, clusters, networking, GPUs, and workloads into a single intelligent
+control plane. A node agent reads the hardware on every machine; the control plane shows the
+fleet and decides where work should run. See [`docs/product/`](docs/product/) for the full
+product vision and roadmap.
 
----
+Two products, one codebase:
 
-## Overview
-
-**RackOps** is a production-ready infrastructure orchestration platform delivered as a containerised static web application. It ships with a fully automated CI/CD pipeline spanning GitHub, Gitea, Docker, and Dokploy — meaning a single `git push` triggers the entire chain from source code to live production.
-
----
-
-## Features
-
-| Feature | Description |
-|---|---|
-| 🚀 Automated Provisioning | Zero-touch rack and resource provisioning |
-| 🏥 Health Monitoring | Real-time health checks at `/health` |
-| 🔒 Secrets Management | GitHub Secrets + Gitea Secrets integration |
-| 🌿 Multi-Environment | `main`, `qa`, `development` branch strategy |
-| 🐳 Docker First | Multi-stage build with nginx:alpine base |
-| ⚡ CI/CD Pipeline | GitHub → Gitea → Docker → Dokploy |
-| 🔁 Auto Mirror | GitHub auto-mirrors to Gitea on every push |
-
----
-
-## Local Development
-
-Clone and serve the static site locally:
-
-```bash
-git clone https://github.com/your-org/rackops.git
-cd rackops
-
-# Option 1: Python (zero dependencies)
-python -m http.server 3000 --directory src
-
-# Option 2: Docker
-docker compose up --build
-```
-
-Open `http://localhost:3000` (Python) or `http://localhost:80` (Docker).
-
----
-
-## Docker
-
-### Build manually
-
-```bash
-docker build -t rackops:latest .
-docker run -p 80:80 rackops:latest
-```
-
-### Using Docker Compose
-
-```bash
-docker compose up -d
-```
-
-The site is immediately available at `http://localhost`.
-
-### Health check
-
-```
-GET /health  →  {"status":"ok","service":"rackops"}
-```
-
----
-
-## Environment Variables
-
-Create a `.env` file based on the defaults below (never commit it):
-
-```env
-APP_ENV=production
-APP_NAME=rackops
-DOMAIN=rackops.yourdomain.com
-DOKPLOY_DEPLOY_URL=https://dokploy.yourdomain.com/api/deploy/rackops
-```
-
----
-
-## Branch Strategy
-
-| Branch | Purpose | Deploys to |
+| Product | For | Highlights |
 |---|---|---|
-| `main` | Stable production code | Production (Dokploy) |
-| `qa` | QA / acceptance testing | Staging |
-| `development` | Active feature work | Dev environment |
+| **RackOps Lite** | Homelabs, developers, small teams (works behind CGNAT) | One-click deploys, hardware monitoring, storage viz, alerts, AI assist |
+| **RackOps Enterprise** | Organizations running production infrastructure | Multi-server management, clusters, RBAC & SSO, GPU scheduling, audit logs |
 
-**Rule:** Only pushes to `main` trigger deployment. PRs flow `development → qa → main`.
-
----
-
-## CI/CD Architecture
+## Monorepo layout
 
 ```
-Laptop
-  │
-  │  git push origin main
-  ▼
-GitHub (source of truth)
-  │
-  │  .github/workflows/mirror.yml
-  │  Mirrors entire repo to Gitea
-  ▼
-Gitea
-  │
-  │  .gitea/workflows/ci.yml
-  │  Self-hosted Gitea Actions Runner
-  ▼
-CI Pipeline
-  ├─ 1. Checkout
-  ├─ 2. Validate repository structure
-  ├─ 3. Build Docker image
-  ├─ 4. Verify Docker image
-  ├─ 5. Run health check (HTTP 200 required)
-  └─ 6. Trigger Dokploy webhook  ← only if all above pass
-          │
-          ▼
-       Dokploy → Production
+cmd/                     Go binaries: agent, rackops-lite, rackops-enterprise
+internal/                Shared Go: api (wire types), hwinfo, agent, server, enterprise
+apps/
+  website/               Marketing site (React + Vite + Three.js) — deployed via Dokploy
+  dashboard-lite/        RackOps Lite dashboard
+  dashboard-enterprise/  RackOps Enterprise dashboard
+packages/
+  ui/                    Design tokens + shared React components
+  api/                   TS wire types + API client + hooks
+  tsconfig/              Shared TypeScript configs
+docs/
+  product/               Product vision, overview, pitch deck
+  ops/                   Deployment cluster notes (Swarm, Dokploy, networking)
 ```
 
-**Fail-safe:** If any CI step fails, the pipeline stops immediately and Dokploy is **never called**.
+## Quickstart (MVP)
 
----
-
-## Deployment — Dokploy
-
-### Required Secrets
-
-#### GitHub Secrets (for mirror workflow)
-
-| Secret | Description |
-|---|---|
-| `GITEA_USER` | Gitea username |
-| `GITEA_TOKEN` | Gitea personal access token |
-| `GITEA_URL` | Gitea base URL, e.g. `https://gitea.yourdomain.com` |
-| `GITEA_REPO` | Gitea repo path, e.g. `your-org/rackops` |
-
-#### Gitea Secrets (for CI workflow)
-
-| Secret | Description |
-|---|---|
-| `DOKPLOY_WEBHOOK_URL` | Full Dokploy deployment webhook URL |
-
-### Deploy
+Requirements: Go ≥ 1.22, Node ≥ 22, pnpm.
 
 ```bash
-git add .
-git commit -m "Initial production bootstrap"
-git push origin main
+pnpm install
+
+# Terminal 1 — control plane (REST API on :8080)
+pnpm dev:lite
+
+# Terminal 2 — node agent (reports this machine's CPU/RAM/disk/network)
+pnpm dev:agent
+
+# Terminal 3 — dashboard (http://localhost:5173)
+pnpm --filter @rackops/dashboard-lite dev
 ```
 
-That's it. The full pipeline runs automatically.
+You'll see this machine appear as a live node card with real hardware stats.
 
----
+Enterprise variant: `pnpm dev:enterprise` (:8081) + `pnpm --filter @rackops/dashboard-enterprise dev` (:5174).
 
-## Project Structure
+## Development
 
-```
-rackops/
-│
-├── .github/
-│   └── workflows/
-│       └── mirror.yml          # GitHub → Gitea mirror on push to main
-│
-├── .gitea/
-│   └── workflows/
-│       └── ci.yml              # Gitea CI: build → health check → deploy
-│
-├── src/
-│   ├── index.html              # Landing page (HTML5)
-│   ├── style.css               # Dark theme stylesheet (CSS3)
-│   └── app.js                  # Interactivity (Vanilla JS)
-│
-├── docs/
-│   └── branch-strategy.md      # Branching and workflow documentation
-│
-├── Dockerfile                  # Multi-stage production build
-├── docker-compose.yml          # Dokploy-compatible compose file
-├── nginx.conf                  # Production nginx configuration
-├── .dockerignore               # Docker build context exclusions
-├── .gitignore                  # Git exclusions
-├── LICENSE                     # MIT License
-└── README.md                   # This file
+```bash
+pnpm lint        # typecheck every JS workspace (tsc --noEmit)
+pnpm build       # build website + dashboards
+pnpm go:test     # Go tests
+pnpm go:build    # compile all Go binaries
 ```
 
----
+Website production image (built from repo root):
+
+```bash
+docker build -f apps/website/Dockerfile -t rackops-website .
+```
+
+## Status
+
+Early MVP (roadmap Phase 1 — Agent & Discovery). Working today: agent → control plane →
+dashboard live hardware telemetry. Not yet implemented (stubbed, not faked): auth,
+persistence, mesh networking, clusters, RBAC, GPU scheduling.
+
+## CI/CD
+
+GitHub Actions on `main` / `qa` / `development`: typecheck+build all workspaces, Go
+vet/build/test, and a production Docker build of the website. Pushes to `main` are deployed
+automatically by Dokploy via its GitHub webhook onto a 3-node Docker Swarm
+(see [`docs/ops/`](docs/ops/)).
 
 ## License
 

@@ -1,0 +1,19 @@
+{
+  "name": "rackops-monorepo",
+  "private": true,
+  "packageManager": "pnpm@11.10.0",
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "go:build": "go build ./...",
+    "go:test": "go test ./...",
+    "go:vet": "go vet ./...",
+    "dev:lite": "go run ./cmd/rackops-lite",
+    "dev:enterprise": "go run ./cmd/rackops-enterprise -port 8081",
+    "dev:agent": "go run ./cmd/agent -server http://localhost:8080 -interval 3s"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.0"
+  }
+}

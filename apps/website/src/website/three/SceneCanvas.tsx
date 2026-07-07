@@ -64,14 +64,12 @@ function MeshConnections() {
         points.push(...curve.getPoints(24));
       }
     }
-    return new THREE.BufferGeometry().setFromPoints(points);
+    const geom = new THREE.BufferGeometry().setFromPoints(points);
+    const mat = new THREE.LineBasicMaterial({ color: '#14b8a6', transparent: true, opacity: 0.35 });
+    return new THREE.Line(geom, mat);
   }, []);
 
-  return (
-    <line geometry={lines}>
-      <lineBasicMaterial color="#14b8a6" transparent opacity={0.35} />
-    </line>
-  );
+  return <primitive object={lines} />;
 }
 
 function ControlPlane() {

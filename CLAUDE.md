@@ -4,58 +4,62 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-RackOps is a **single-page marketing/landing website** for an infrastructure-orchestration product. Despite the infra-heavy documentation, the source code (`src/`) is purely a client-side React site — there is no backend, API, or database in this repo. It is built into static files and served by nginx.
+The **RackOps monorepo**. RackOps is "The Infrastructure Operating System" — a control plane + node-agent platform (see `docs/product/` for vision, pitch deck, and roadmap). Two products share one codebase — **RackOps Lite** (homelabs/CGNAT) and **RackOps Enterprise** (orgs, RBAC/clusters) — plus the marketing **website**.
 
-> Note: `README.md` is **stale**. It describes an older vanilla HTML/CSS/JS site (`src/index.html`, `style.css`, `app.js`) and a GitHub→Gitea mirror pipeline. Both are gone. The repo is now React 19 + TypeScript + Vite + Three.js, and CI runs directly on GitHub Actions (see commits `05fc604`, `f26b454`). Trust the code over the README.
+Three languages of structure:
+- **Go** (single module `github.com/msr157/rackops` at repo root): `cmd/` binaries + `internal/` shared code.
+- **TypeScript** (pnpm workspaces + Turborepo): `apps/*` and `packages/*`.
+- **Docs**: `docs/product/` (product vision — treat as source of truth for what RackOps *is*), `docs/ops/` (deployment cluster notes).
 
 ## Commands
 
 ```bash
-npm run dev       # Vite dev server (hot reload)
-npm run build     # tsc --noEmit (typecheck) then vite build → dist/
-npm run lint      # tsc --noEmit — this is the ONLY lint; there is no ESLint
-npm run preview   # serve the production build locally
+pnpm install               # install all JS workspaces
+pnpm lint                  # turbo run lint → tsc --noEmit in every workspace (the ONLY lint; no ESLint)
+pnpm build                 # turbo run build → website + both dashboards
+pnpm go:build / go:test    # go build ./... / go test ./...
+
+# Run the MVP stack (3 terminals):
+pnpm dev:lite              # control plane on :8080  (go run ./cmd/rackops-lite)
+pnpm dev:agent             # agent reporting this machine to :8080
+pnpm --filter @rackops/dashboard-lite dev    # dashboard on :5173, /api proxied to :8080
+
+pnpm dev:enterprise        # enterprise control plane on :8081
+pnpm --filter @rackops/dashboard-enterprise dev   # :5174, /api → :8081
+pnpm --filter @rackops/website dev                # marketing site
 ```
 
-There is **no test runner** configured. CI calls `npm run test` but tolerates its absence — do not assume tests exist.
-
-The single source of truth for "does this compile" is `tsc --noEmit` (strict TypeScript). Run `npm run lint` after changes.
+There is no JS test runner. Go tests exist (`internal/hwinfo`). Typecheck (`pnpm lint`) is the compile gate for TS.
 
 ## Architecture
 
-Entry: `index.html` → `src/main.tsx` → `src/App.tsx`. `App.tsx` renders `Navbar`, a fixed sequence of section components inside `<main>`, and `Footer`.
+### Data flow (the core of the product MVP)
 
-All real code lives under **`src/website/`**, organized by role:
-- `components/layout/` — Navbar, Footer
-- `components/sections/` — the page's vertical sections (Hero, Problem, Solution, Architecture, Features, AI, CTA). Each section is a `.tsx` + co-located `.css`. Adding a section = new folder pair + import into `App.tsx`.
-- `three/` — the WebGL background (`SceneCanvas.tsx`), a react-three-fiber scene of animated "server rack" meshes used behind the Hero.
-- `hooks/` — `useScrollReveal` (IntersectionObserver → toggles `.visible` on `.reveal` elements), `useReducedMotion`.
-- `lib/` — singleton wrappers for third-party animation libs (see below).
-- `styles/` — `tokens.css` (design tokens / CSS custom properties) and `global.css`. Section CSS relies on these tokens.
+`cmd/agent` samples hardware every N seconds via `internal/hwinfo` (gopsutil: CPU/RAM/disks/network/OS) → `POST /api/v1/report` to a control plane → `internal/server` stores nodes in memory (stale after 15s without a report) → dashboards poll `GET /api/v1/nodes` every 5s via the `useNodes` hook and render `NodeCard`s.
 
-**Import alias:** `@` → `src/` (configured in both `vite.config.ts` and `tsconfig.json`). Imports look like `@/components/sections/Hero`, `@/lib/gsap`. Keep both files in sync if you change the alias.
+**`internal/api/types.go` is the single source of truth for the wire format.** `packages/api/src/types.ts` hand-mirrors it — when you change one, change the other (both files carry a reminder comment).
 
-### Animation system (the non-obvious part)
+### Lite vs Enterprise divergence
 
-Three libraries cooperate and must be initialized through the shared singletons in `src/website/lib/`, never imported raw in components:
+Both control planes are thin `cmd/` mains over `internal/server.New(Options{Edition, DashboardDir, Extra})`. Enterprise passes `internal/enterprise.Routes` which registers **501 stubs** (`/api/v1/clusters`, `/api/v1/rbac/roles`) — that package is where enterprise features (clusters, RBAC/SSO, GPU scheduling…) will actually live. The dashboards mirror this: `dashboard-enterprise` adds a nav rail of "coming soon" entries. There is deliberately **no auth, no DB, no mesh networking yet** — don't fake them; extend the stubs.
 
-- **`lib/gsap.ts`** — imports gsap, registers the `ScrollTrigger` plugin once, and re-exports both. Always import gsap/ScrollTrigger from here so the plugin is guaranteed registered.
-- **`lib/lenis.ts`** — smooth-scroll singleton. `initLenis()` wires Lenis's scroll event into `ScrollTrigger.update` so scroll-triggered animations stay in sync. `App.tsx` calls `initLenis()` on mount and `destroyLenis()` + kills all ScrollTriggers on unmount.
-- Section components use `gsap.context(...)` inside `useEffect` and `return () => ctx.revert()` for cleanup (see `Hero.tsx`).
+Agent identity is a UUID persisted at `os.UserConfigDir()/rackops-agent/node-id`.
 
-**Reduced-motion is a first-class path, not an afterthought.** `initLenis()` returns `null` when `prefers-reduced-motion: reduce`, `SceneCanvas` lowers DPR and stops the scene rotation, and animations should degrade gracefully. Preserve this when touching animation code.
+### JS workspace layout
+
+- `packages/tsconfig` — shared tsconfig bases (`base.json`, `react.json`); every workspace extends these.
+- `packages/api` — wire types + fetch client + `useNodes` polling hook.
+- `packages/ui` — design tokens (`styles/tokens.css`, CSS custom properties used by ALL apps) + shared components (`NodeCard`, `MetricBar`, `StatusDot`). Consumed **as source** (`exports` → `./src/index.ts`, no build step); Vite compiles it inside each app.
+- Dashboards import from `@rackops/ui` / `@rackops/api`; keep shared UI there, not in the apps.
+
+### Website (`apps/website`)
+
+Single-page marketing site (React 19 + Vite + Three.js). Alias `@` → `src/website` (both `vite.config.ts` and `tsconfig.json` — keep in sync). Animation system: gsap/ScrollTrigger and Lenis must be imported via the singletons in `src/website/lib/` (never raw), sections use `gsap.context` + `ctx.revert()` cleanup, and **reduced-motion is a first-class path** (`initLenis()` returns null, `SceneCanvas` lowers DPR). In r3f scenes, `<line>` JSX collides with the SVG type — build `THREE.Line` in `useMemo` and render `<primitive>`.
 
 ## Build & deployment
 
-Production is a two-stage Docker build (`Dockerfile`): `node:22-alpine` runs `npm run build`, then the `dist/` output is copied into `nginx:1.27-alpine`. **Any file the build needs must be explicitly `COPY`'d in the builder stage** — currently `index.html vite.config.ts tsconfig.json tsconfig.node.json` and `src/`. If you add a root-level config the build depends on, add it to the Dockerfile too.
+Only the **website** deploys today: `apps/website/Dockerfile`, **built from the repo root** (`docker build -f apps/website/Dockerfile .`) because the pnpm workspace needs root manifests. Manifest-COPY-then-install keeps layer caching; if you add a workspace package the website depends on, add its `package.json` COPY to the Dockerfile. Runtime is nginx:1.27-alpine with SPA fallback and `/health` (used by HEALTHCHECK).
 
-`nginx.conf` provides: SPA fallback (`try_files ... /index.html`), 1-year immutable caching for hashed assets, security headers, and a `/health` endpoint returning `{"status":"ok","service":"rackops"}` — used by the Docker `HEALTHCHECK` and CI.
+CI (`.github/workflows/ci.yml`, push to main/qa/development): three parallel jobs — `web` (turbo lint+build), `go` (vet/build/test), `docker-website` (image build = deploy gate). **Dokploy deploys `main` automatically via its GitHub webhook**; its dashboard is configured with Docker File `apps/website/Dockerfile` and Docker Context Path `.`.
 
-CI/CD (`.github/workflows/ci.yml`): runs on push to `main`, `qa`, `development`. Steps: verify runtimes → lint → test → **`docker build`** (the real gate) → deploy. Deployment to production happens **only on `main`**, and is handled automatically by Dokploy's own GitHub webhook — the workflow does not push or call a deploy endpoint itself.
-
-## Deployment infrastructure context
-
-Not needed for code changes, but explains the ops docs in the repo root. The site deploys via **Dokploy onto a 3-node Docker Swarm** (`.context.md`, `CLUSTER_ARCHITECTURE_NOTES.md`, `NETWORKING_DEEP_DIVE.md`):
-- 3 manager nodes are required for Swarm quorum / HA of the control plane.
-- Images go through a registry (`127.0.0.1:5000`) because only the primary manager builds; other nodes pull the finished image.
-- Ingress: Cloudflare Tunnel → Traefik → Swarm service. TLS terminates at Cloudflare; internal endpoints are plain `http://`. Nodes communicate over a Netbird overlay network.
+Deploy infra (context for `docs/ops/`): Dokploy on a 3-node Docker Swarm, images via local registry `127.0.0.1:5000`, ingress Cloudflare Tunnel → Traefik, nodes on a Netbird overlay.

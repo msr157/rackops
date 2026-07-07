@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useMemo, useRef } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { Float } from '@react-three/drei';
 import * as THREE from 'three';
@@ -44,20 +44,20 @@ function FleetNode({ position, color }: { position: [number, number, number]; co
 }
 
 function FleetConnections() {
-  const geom = new THREE.BufferGeometry().setFromPoints([
-    new THREE.Vector3(...FLEET_NODES[0].position),
-    new THREE.Vector3(...FLEET_NODES[1].position),
-    new THREE.Vector3(...FLEET_NODES[1].position),
-    new THREE.Vector3(...FLEET_NODES[2].position),
-    new THREE.Vector3(...FLEET_NODES[0].position),
-    new THREE.Vector3(...FLEET_NODES[2].position),
-  ]);
+  const lineObj = useMemo(() => {
+    const geom = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(...FLEET_NODES[0].position),
+      new THREE.Vector3(...FLEET_NODES[1].position),
+      new THREE.Vector3(...FLEET_NODES[1].position),
+      new THREE.Vector3(...FLEET_NODES[2].position),
+      new THREE.Vector3(...FLEET_NODES[0].position),
+      new THREE.Vector3(...FLEET_NODES[2].position),
+    ]);
+    const mat = new THREE.LineBasicMaterial({ color: '#14b8a6', transparent: true, opacity: 0.5 });
+    return new THREE.Line(geom, mat);
+  }, []);
 
-  return (
-    <line geometry={geom}>
-      <lineBasicMaterial color="#14b8a6" transparent opacity={0.5} />
-    </line>
-  );
+  return <primitive object={lineObj} />;
 }
 
 function FleetSceneInner() {

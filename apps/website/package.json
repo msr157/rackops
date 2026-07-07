@@ -1,5 +1,5 @@
 {
-  "name": "rackops",
+  "name": "@rackops/website",
   "private": true,
   "version": "2.0.0",
   "type": "module",
@@ -10,6 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@rackops/ui": "workspace:*",
     "@react-three/drei": "^10.0.6",
     "@react-three/fiber": "^9.1.2",
     "gsap": "^3.13.0",
@@ -19,6 +20,7 @@
     "three": "^0.175.0"
   },
   "devDependencies": {
+    "@rackops/tsconfig": "workspace:*",
     "@types/react": "^19.0.10",
     "@types/react-dom": "^19.0.4",
     "@types/three": "^0.175.0",

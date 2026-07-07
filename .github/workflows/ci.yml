@@ -1,15 +1,17 @@
-name: CI — Lint · Test · Build · Deploy
+name: CI — Web · Go · Docker
 
 # ─────────────────────────────────────────────────────────────────────
-# GitHub Actions CI/CD Pipeline — rackops
+# GitHub Actions CI/CD Pipeline — rackops monorepo
+#
+# Jobs (parallel):
+#   web            → pnpm install + turbo lint/build (website + dashboards + packages)
+#   go             → vet, build, and test the agent & control planes
+#   docker-website → validate the production website image (the deploy gate)
 #
 # Branch strategy:
-#   main        → CI + Dokploy webhook deploy
+#   main        → CI + Dokploy deploys automatically via its GitHub webhook
 #   qa          → CI only
 #   development → CI only
-#
-# Deployment: Dokploy webhook only. No SSH, no host scripts, no sockets.
-# Secret required in this repository: DOKPLOY_WEBHOOK_URL
 # ─────────────────────────────────────────────────────────────────────
 
 on:
@@ -20,67 +22,67 @@ on:
       - development
 
 jobs:
-  ci-pipeline:
-    name: Production Validation Pipeline
+  web:
+    name: Web — Lint & Build (pnpm + Turborepo)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-
+    timeout-minutes: 15
     steps:
-      # ── 1. Checkout ───────────────────────────────────────────────
-      - name: Checkout Source Code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
-      # ── 2. Verify runtimes ────────────────────────────────────────
-      - name: Verify Environment Runtimes
-        run: |
-          echo "📦 Inspecting runner toolchains..."
-          node --version  || echo "node not available"
-          npm  --version  || echo "npm not available"
-          docker --version
-          curl --version | head -1
-          echo "✅ Environment check complete."
+      - uses: pnpm/action-setup@v4 # version read from packageManager field
 
-      # ── 3. Lint ───────────────────────────────────────────────────
-      - name: Code Quality Audit (Lint)
-        run: |
-          echo "🔍 Running lint..."
-          npm run lint || echo "ℹ️  No lint script defined — skipping."
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
 
-      # ── 4. Tests ──────────────────────────────────────────────────
-      - name: Execute Test Suite
-        run: |
-          echo "🧪 Running tests..."
-          npm run test || echo "ℹ️  No test script defined — skipping."
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
-      # ── 5. Docker Build ───────────────────────────────────────────
-      # Validates the Dockerfile compiles cleanly.
-      # Runtime: nginx:alpine, port 80, /health endpoint.
-      # A successful build is sufficient CI validation.
-      # Dokploy owns the production deployment and runtime validation.
-      - name: Validate Dockerfile Build
-        run: |
-          echo "🐳 Building Docker image..."
-          docker build --no-cache -f Dockerfile -t ci-validate:${{ github.sha }} .
-          echo "✅ Docker build succeeded."
+      - name: Typecheck & build all workspaces
+        run: pnpm turbo run lint build
 
-      # ── 6. Deploy — main branch only ─────────────────────────────
-      # Dokploy now automatically listens to GitHub webhooks.
-      # No manual trigger is required in this pipeline.
+  go:
+    name: Go — Vet, Build & Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build
+        run: go build ./...
+
+      - name: Test
+        run: go test ./...
+
+  docker-website:
+    name: Docker — Website Image (deploy gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Build production image
+        run: docker build -f apps/website/Dockerfile -t ci-validate:${{ github.sha }} .
+
       - name: Deployment handled by Dokploy
         if: github.ref == 'refs/heads/main'
         run: echo "✅ Dokploy will deploy automatically via GitHub Webhooks."
 
-      # ── Skip notice for non-production branches ───────────────────
-      - name: Deployment Skipped
+      - name: Deployment skipped
         if: github.ref != 'refs/heads/main'
         run: echo "ℹ️  Not on main — CI passed, deployment skipped."
-
-      # ── 7. Cleanup ────────────────────────────────────────────────
-      - name: Cleanup
-        if: always()
-        run: |
-          echo "🧹 Pruning dangling Docker images..."
-          docker image prune -f || true
-          echo "🧹 Done."
