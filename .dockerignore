@@ -20,10 +20,10 @@ docs/
 *.env.*
 .env.example
 
-# Node
-node_modules/
-dist/
-.turbo/
+# Node (any depth — pnpm workspaces have nested node_modules)
+**/node_modules
+**/dist
+**/.turbo
 npm-debug.log*
 yarn-error.log*
 
