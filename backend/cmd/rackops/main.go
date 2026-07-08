@@ -34,6 +34,8 @@ func main() {
 		runAgent(os.Args[2:])
 	case "probe":
 		runProbe()
+	case "nodes", "services", "deploy", "alerts", "ask":
+		runCLI(os.Args[1], os.Args[2:])
 	case "version":
 		fmt.Println("rackops", version)
 	default:
@@ -50,6 +52,13 @@ Usage:
   rackops agent  [flags]     Run the node agent
   rackops probe              Print discovered hardware + live metrics (debug)
   rackops version            Print version
+
+CLI (uses RACKOPS_SERVER / RACKOPS_TOKEN env or --server/--token flags):
+  rackops nodes              List fleet nodes
+  rackops services           List services
+  rackops deploy --name x --image y [--port n] [--node auto]
+  rackops alerts             Show open alerts
+  rackops ask "question"     Ask the AI Co-Pilot
 
 Server flags:
   --listen :8080             Address to listen on
@@ -101,6 +110,7 @@ func runServer(args []string) {
 		Hub:       server.NewHub(),
 		Mesh:      meshHub,
 		JoinToken: token,
+		JWTSecret: server.LoadOrCreateJWTSecret(*dataDir),
 		DashFS:    server.DashboardFS(),
 	}
 

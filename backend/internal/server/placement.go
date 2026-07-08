@@ -189,7 +189,7 @@ func (s *Store) MarkOfflineNodes(deadline time.Duration) []*types.Node {
 				n.Status = types.NodeOffline
 				a := &types.Alert{
 					ID: NewID(), NodeID: n.ID, Level: types.AlertCritical, Kind: "node_down",
-					Message: fmt.Sprintf("Node %s stopped reporting (last seen %s ago)", n.Name, time.Since(n.LastSeen).Round(time.Second)),
+					Message:   fmt.Sprintf("Node %s stopped reporting (last seen %s ago)", n.Name, time.Since(n.LastSeen).Round(time.Second)),
 					CreatedAt: time.Now(),
 				}
 				s.Alerts[a.ID] = a

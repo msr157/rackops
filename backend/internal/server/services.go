@@ -28,7 +28,7 @@ type DeployPayload struct {
 	PinnedPath  string         `json:"pinnedPath,omitempty"`
 	MemLimitMB  int64          `json:"memLimitMb,omitempty"`
 	GPU         bool           `json:"gpu,omitempty"`
-	HostNet     bool           `json:"hostNet,omitempty"` // run with --network host (ingress edge)
+	HostNet     bool           `json:"hostNet,omitempty"`     // run with --network host (ingress edge)
 	ContainerID string         `json:"containerId,omitempty"` // for stop/start/restart/remove
 }
 

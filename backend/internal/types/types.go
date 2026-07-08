@@ -28,8 +28,8 @@ type Node struct {
 	Name      string     `json:"name"`
 	Role      NodeRole   `json:"role"`
 	Status    NodeStatus `json:"status"`
-	IP        string     `json:"ip"`      // LAN/public IP
-	MeshIP    string     `json:"meshIp"`  // WireGuard mesh IP (10.77.x.x)
+	IP        string     `json:"ip"`     // LAN/public IP
+	MeshIP    string     `json:"meshIp"` // WireGuard mesh IP (10.77.x.x)
 	PublicIP  string     `json:"publicIp,omitempty"`
 	OS        string     `json:"os"`
 	Arch      string     `json:"arch"`
@@ -56,11 +56,11 @@ type Hardware struct {
 
 // GPU is a discovered graphics/compute accelerator.
 type GPU struct {
-	Index     int    `json:"index"`
-	Vendor    string `json:"vendor"` // nvidia | amd | intel
-	Model     string `json:"model"`
-	VRAMTotal int64  `json:"vramTotalMb"`
-	VRAMUsed  int64  `json:"vramUsedMb"`
+	Index     int     `json:"index"`
+	Vendor    string  `json:"vendor"` // nvidia | amd | intel
+	Model     string  `json:"model"`
+	VRAMTotal int64   `json:"vramTotalMb"`
+	VRAMUsed  int64   `json:"vramUsedMb"`
 	UtilPct   float64 `json:"utilPct"`
 	TempC     float64 `json:"tempC"`
 	PowerW    float64 `json:"powerW"`
@@ -91,18 +91,18 @@ type NIC struct {
 
 // Metrics is the live utilization snapshot pushed by an agent.
 type Metrics struct {
-	Timestamp   time.Time `json:"timestamp"`
-	CPUPct      float64   `json:"cpuPct"`
-	Load1       float64   `json:"load1"`
-	Load5       float64   `json:"load5"`
-	Load15      float64   `json:"load15"`
-	MemUsedMB   int64     `json:"memUsedMb"`
-	MemPct      float64   `json:"memPct"`
-	SwapUsedMB  int64     `json:"swapUsedMb"`
-	TempC       float64   `json:"tempC"` // hottest package sensor
-	UptimeSec   int64     `json:"uptimeSec"`
-	Containers  int       `json:"containers"` // running containers
-	ProcessCnt  int       `json:"processCount"`
+	Timestamp  time.Time `json:"timestamp"`
+	CPUPct     float64   `json:"cpuPct"`
+	Load1      float64   `json:"load1"`
+	Load5      float64   `json:"load5"`
+	Load15     float64   `json:"load15"`
+	MemUsedMB  int64     `json:"memUsedMb"`
+	MemPct     float64   `json:"memPct"`
+	SwapUsedMB int64     `json:"swapUsedMb"`
+	TempC      float64   `json:"tempC"` // hottest package sensor
+	UptimeSec  int64     `json:"uptimeSec"`
+	Containers int       `json:"containers"` // running containers
+	ProcessCnt int       `json:"processCount"`
 }
 
 // ---- Projects / Environments / Services ----
@@ -188,16 +188,16 @@ type Service struct {
 	RelayPort int `json:"relayPort,omitempty"`
 
 	// Runtime
-	Port      int         `json:"port"`    // internal container port
-	Ports     []int       `json:"ports,omitempty"` // extra published ports
-	Command   string      `json:"command,omitempty"` // container command override
-	Volumes   []string    `json:"volumes,omitempty"` // container paths persisted under the data dir
-	Domain    string      `json:"domain"`  // chosen domain (empty = generated)
-	Ingress   IngressType `json:"ingress"`
-	Env       []EnvVar    `json:"env"`
-	CPUPct    float64     `json:"cpuPct"`
-	MemUsedMB int64       `json:"memUsedMb"`
-	MemLimitMB int64      `json:"memLimitMb,omitempty"`
+	Port       int         `json:"port"`              // internal container port
+	Ports      []int       `json:"ports,omitempty"`   // extra published ports
+	Command    string      `json:"command,omitempty"` // container command override
+	Volumes    []string    `json:"volumes,omitempty"` // container paths persisted under the data dir
+	Domain     string      `json:"domain"`            // chosen domain (empty = generated)
+	Ingress    IngressType `json:"ingress"`
+	Env        []EnvVar    `json:"env"`
+	CPUPct     float64     `json:"cpuPct"`
+	MemUsedMB  int64       `json:"memUsedMb"`
+	MemLimitMB int64       `json:"memLimitMb,omitempty"`
 
 	ContainerID string    `json:"containerId,omitempty"`
 	CreatedBy   string    `json:"createdBy"`
@@ -224,12 +224,12 @@ type Deployment struct {
 
 // PlacementRequest asks the scheduler where a workload should run.
 type PlacementRequest struct {
-	CPUMilli    int   `json:"cpuMilli"`    // requested mCPU (0 = unknown)
-	MemMB       int64 `json:"memMb"`       // requested memory
-	StorageGB   int64 `json:"storageGb"`   // persistent storage needed
-	NeedsGPU    bool  `json:"needsGpu"`
-	MinVRAMMB   int64 `json:"minVramMb,omitempty"`
-	PreferNVMe  bool  `json:"preferNvme"`
+	CPUMilli   int   `json:"cpuMilli"`  // requested mCPU (0 = unknown)
+	MemMB      int64 `json:"memMb"`     // requested memory
+	StorageGB  int64 `json:"storageGb"` // persistent storage needed
+	NeedsGPU   bool  `json:"needsGpu"`
+	MinVRAMMB  int64 `json:"minVramMb,omitempty"`
+	PreferNVMe bool  `json:"preferNvme"`
 }
 
 // PlacementScore is one node's suitability verdict.
@@ -278,7 +278,7 @@ type Event struct {
 // Domain is a user-owned domain name usable in the per-deployment dropdown.
 type Domain struct {
 	ID        string    `json:"id"`
-	Name      string    `json:"name"`      // e.g. app.example.com or *.example.com
+	Name      string    `json:"name"` // e.g. app.example.com or *.example.com
 	CreatedBy string    `json:"createdBy"`
 	CreatedAt time.Time `json:"createdAt"`
 }
@@ -328,15 +328,15 @@ type APIToken struct {
 
 // AgentReport is what an agent pushes to the control plane each interval.
 type AgentReport struct {
-	NodeID     string            `json:"nodeId"`
-	Name       string            `json:"name"`
-	Hardware   Hardware          `json:"hardware"`
-	Metrics    Metrics           `json:"metrics"`
-	Host       HostInfo          `json:"host"`
-	Containers []ContainerStatus `json:"containers"`
-	AgentVer   string            `json:"agentVersion"`
-	Mesh       *MeshInfo         `json:"mesh,omitempty"`
-	TaskResults []TaskResult     `json:"taskResults,omitempty"`
+	NodeID      string            `json:"nodeId"`
+	Name        string            `json:"name"`
+	Hardware    Hardware          `json:"hardware"`
+	Metrics     Metrics           `json:"metrics"`
+	Host        HostInfo          `json:"host"`
+	Containers  []ContainerStatus `json:"containers"`
+	AgentVer    string            `json:"agentVersion"`
+	Mesh        *MeshInfo         `json:"mesh,omitempty"`
+	TaskResults []TaskResult      `json:"taskResults,omitempty"`
 }
 
 // HostInfo is static host identity info.
@@ -421,7 +421,7 @@ type TaskResult struct {
 
 // AgentResponse is the control plane's reply to an AgentReport push.
 type AgentResponse struct {
-	Tasks    []AgentTask `json:"tasks"`
-	Mesh     *MeshInfo   `json:"mesh,omitempty"`
-	LeaderAddr string    `json:"leaderAddr,omitempty"` // set when this server is not the Raft leader
+	Tasks      []AgentTask `json:"tasks"`
+	Mesh       *MeshInfo   `json:"mesh,omitempty"`
+	LeaderAddr string      `json:"leaderAddr,omitempty"` // set when this server is not the Raft leader
 }

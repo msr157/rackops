@@ -17,9 +17,9 @@ func (a *API) handleMeshStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	type peerInfo struct {
-		NodeID  string `json:"nodeId"`
-		MeshIP  string `json:"meshIp"`
-		Reachable bool `json:"reachable,omitempty"`
+		NodeID    string `json:"nodeId"`
+		MeshIP    string `json:"meshIp"`
+		Reachable bool   `json:"reachable,omitempty"`
 	}
 	var peers []peerInfo
 	a.Store.View(func() {

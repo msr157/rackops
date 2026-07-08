@@ -26,9 +26,11 @@ type Store struct {
 	Services    map[string]*types.Service     `json:"services"`
 	Deployments map[string]*types.Deployment  `json:"deployments"`
 	Users       map[string]*types.User        `json:"users"`
+	Tokens      map[string]*types.APIToken    `json:"tokens"`
 	Alerts      map[string]*types.Alert       `json:"alerts"`
 	Domains     map[string]*types.Domain      `json:"domains"`
 	Ingress     types.IngressConfig           `json:"ingress"`
+	Settings    Settings                      `json:"settings"`
 	Events      []*types.Event                `json:"events"`
 
 	// taskQueue maps nodeID -> pending agent tasks (not persisted; re-derived).
@@ -36,6 +38,25 @@ type Store struct {
 
 	dataDir string
 	dirty   bool
+}
+
+// Settings holds cluster-wide integrations config.
+type Settings struct {
+	// Notifications
+	DiscordWebhook string `json:"discordWebhook,omitempty"`
+	SlackWebhook   string `json:"slackWebhook,omitempty"`
+	TelegramToken  string `json:"telegramToken,omitempty"`
+	TelegramChatID string `json:"telegramChatId,omitempty"`
+	GenericWebhook string `json:"genericWebhook,omitempty"`
+	NotifyDeploys  bool   `json:"notifyDeploys"`
+	NotifyAlerts   bool   `json:"notifyAlerts"`
+	// AI providers (first configured wins unless Provider pins one)
+	AIProvider   string `json:"aiProvider,omitempty"` // auto | anthropic | gemini | openai | ollama
+	AnthropicKey string `json:"anthropicKey,omitempty"`
+	GeminiKey    string `json:"geminiKey,omitempty"`
+	OpenAIKey    string `json:"openaiKey,omitempty"`
+	OpenAIBase   string `json:"openaiBase,omitempty"` // for Ollama/compatible: http://host:11434/v1
+	OpenAIModel  string `json:"openaiModel,omitempty"`
 }
 
 // NewStore loads state from dataDir or initializes a fresh store.
@@ -47,6 +68,7 @@ func NewStore(dataDir string) (*Store, error) {
 		Services:    map[string]*types.Service{},
 		Deployments: map[string]*types.Deployment{},
 		Users:       map[string]*types.User{},
+		Tokens:      map[string]*types.APIToken{},
 		Alerts:      map[string]*types.Alert{},
 		Domains:     map[string]*types.Domain{},
 		taskQueue:   map[string][]types.AgentTask{},

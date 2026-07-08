@@ -56,11 +56,31 @@ export interface MeshStatus {
   enabled: boolean; hubIp?: string; hubKey?: string; udpPort?: number;
   peers?: { nodeId: string; meshIp: string }[];
 }
+export interface User { id: string; email: string; fullName: string; role: string; createdAt: string }
+export interface APIToken { id: string; name: string; userId: string; createdAt: string }
+export interface Settings {
+  discordWebhook?: string; slackWebhook?: string; telegramToken?: string; telegramChatId?: string;
+  genericWebhook?: string; notifyDeploys: boolean; notifyAlerts: boolean;
+  aiProvider?: string; anthropicKey?: string; geminiKey?: string; openaiKey?: string;
+  openaiBase?: string; openaiModel?: string;
+}
 
 const base = '';
 
+// Session token management.
+export function getToken(): string { return localStorage.getItem('rackops_session') ?? ''; }
+export function setToken(t: string) { localStorage.setItem('rackops_session', t); }
+export function clearToken() { localStorage.removeItem('rackops_session'); }
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const r = await fetch(base + path, init);
+  const headers: Record<string, string> = { ...(init?.headers as Record<string, string>) };
+  const tok = getToken();
+  if (tok) headers['Authorization'] = `Bearer ${tok}`;
+  const r = await fetch(base + path, { ...init, headers });
+  if (r.status === 401 && !path.startsWith('/api/auth/')) {
+    clearToken();
+    window.dispatchEvent(new Event('rackops-logout'));
+  }
   if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
   if (r.status === 204) return undefined as T;
   return r.json();
@@ -97,12 +117,25 @@ export const api = {
   setServiceDomain: (id: string, domain: string, ingress: string) =>
     req<Service>(`/api/services/${id}/domain`, { method: 'POST', body: JSON.stringify({ domain, ingress }) }),
   mesh: () => req<MeshStatus>('/api/mesh'),
+  authStatus: () => req<{ needsSetup: boolean }>('/api/auth/status'),
+  signup: (email: string, fullName: string, password: string) =>
+    req<{ token: string; user: User }>('/api/auth/signup', { method: 'POST', body: JSON.stringify({ email, fullName, password }) }),
+  login: (email: string, password: string) =>
+    req<{ token: string; user: User }>('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
+  users: () => req<User[]>('/api/users'),
+  settings: () => req<Settings>('/api/settings'),
+  setSettings: (s: Settings) => req<void>('/api/settings', { method: 'POST', body: JSON.stringify(s) }),
+  tokens: () => req<APIToken[]>('/api/tokens'),
+  createApiToken: (name: string) => req<{ id: string; name: string; token: string }>('/api/tokens', { method: 'POST', body: JSON.stringify({ name }) }),
+  deleteApiToken: (id: string) => req<void>(`/api/tokens/${id}`, { method: 'DELETE' }),
+  assistant: (message: string) => req<{ answer: string; provider: string }>('/api/assistant', { method: 'POST', body: JSON.stringify({ message }) }),
   joinCommand: () => req<{ command: string; token: string }>('/api/join-command'),
 };
 
 // subscribe opens the SSE stream and dispatches typed events.
 export function subscribe(handlers: Record<string, (data: unknown) => void>): () => void {
-  const es = new EventSource('/api/stream');
+  const tok = getToken();
+  const es = new EventSource('/api/stream' + (tok ? `?token=${encodeURIComponent(tok)}` : ''));
   for (const [event, fn] of Object.entries(handlers)) {
     es.addEventListener(event, (e) => fn(JSON.parse((e as MessageEvent).data)));
   }

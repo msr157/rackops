@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import {
-  LayoutGrid, Server, Boxes, HardDrive, Bell, Plus, Cpu, Activity, Network,
+  LayoutGrid, Server, Boxes, HardDrive, Bell, Plus, Cpu, Activity, Network, Bot, Settings, LogOut,
 } from 'lucide-react';
-import { api, subscribe } from './api';
+import { api, subscribe, getToken, clearToken } from './api';
 import type { Node, Overview, EventItem, Alert, Service, Project, Environment } from './api';
 import { OverviewPage } from './pages/Overview';
 import { NodesPage } from './pages/Nodes';
@@ -10,12 +10,16 @@ import { ServicesPage } from './pages/Services';
 import { StoragePage } from './pages/Storage';
 import { AlertsPage } from './pages/Alerts';
 import { NetworkPage } from './pages/Network';
+import { CopilotPage } from './pages/Copilot';
 import { DeployModal } from './pages/DeployModal';
 import { OnboardModal } from './pages/OnboardModal';
+import { SettingsModal } from './pages/SettingsModal';
+import { AuthScreen } from './pages/Auth';
 
-type Tab = 'overview' | 'nodes' | 'services' | 'network' | 'storage' | 'alerts';
+type Tab = 'overview' | 'nodes' | 'services' | 'network' | 'storage' | 'alerts' | 'copilot';
 
 export default function App() {
+  const [authed, setAuthed] = useState<boolean | null>(null);
   const [tab, setTab] = useState<Tab>('overview');
   const [nodes, setNodes] = useState<Node[]>([]);
   const [overview, setOverview] = useState<Overview | null>(null);
@@ -26,6 +30,17 @@ export default function App() {
   const [envs, setEnvs] = useState<Environment[]>([]);
   const [showDeploy, setShowDeploy] = useState(false);
   const [showOnboard, setShowOnboard] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+
+  // Auth gate: needsSetup or an existing session decides the screen.
+  useEffect(() => {
+    const onLogout = () => setAuthed(false);
+    window.addEventListener('rackops-logout', onLogout);
+    api.authStatus()
+      .then((s) => setAuthed(s.needsSetup ? false : !!getToken()))
+      .catch(() => setAuthed(!!getToken()));
+    return () => window.removeEventListener('rackops-logout', onLogout);
+  }, []);
 
   const refresh = () => {
     api.overview().then(setOverview).catch(() => {});
@@ -36,6 +51,7 @@ export default function App() {
   };
 
   useEffect(() => {
+    if (!authed) return;
     refresh();
     api.projects().then(async (ps) => {
       setProjects(ps ?? []);
@@ -78,9 +94,12 @@ export default function App() {
     // Slow poll as fallback for overview KPIs.
     const t = setInterval(() => api.overview().then(setOverview).catch(() => {}), 5000);
     return () => { off(); clearInterval(t); };
-  }, []);
+  }, [authed]);
 
   const openAlerts = alerts.filter((a) => !a.resolved);
+
+  if (authed === null) return null;
+  if (!authed) return <AuthScreen onAuthed={() => setAuthed(true)} />;
 
   const navItems: { key: Tab; label: string; icon: React.ReactNode; count?: number }[] = [
     { key: 'overview', label: 'Cluster Overview', icon: <LayoutGrid size={16} /> },
@@ -89,6 +108,7 @@ export default function App() {
     { key: 'network', label: 'Network & Ingress', icon: <Network size={16} /> },
     { key: 'storage', label: 'Storage', icon: <HardDrive size={16} /> },
     { key: 'alerts', label: 'Alerts', icon: <Bell size={16} />, count: openAlerts.length },
+    { key: 'copilot', label: 'AI Co-Pilot', icon: <Bot size={16} /> },
   ];
 
   return (
@@ -119,9 +139,18 @@ export default function App() {
             <span className="online-dot" />
             {overview?.nodesOnline ?? 0}/{overview?.nodesTotal ?? 0} nodes online
           </div>
-          <button className="btn" style={{ width: '100%', justifyContent: 'center' }} onClick={() => setShowOnboard(true)}>
+          <button className="btn" style={{ width: '100%', justifyContent: 'center', marginBottom: 8 }} onClick={() => setShowOnboard(true)}>
             <Server size={14} /> Add Node
           </button>
+          <div className="row">
+            <button className="btn sm" style={{ flex: 1, justifyContent: 'center' }} onClick={() => setShowSettings(true)} title="Settings">
+              <Settings size={13} />
+            </button>
+            <button className="btn sm" style={{ flex: 1, justifyContent: 'center' }} title="Log out"
+              onClick={() => { clearToken(); setAuthed(false); }}>
+              <LogOut size={13} />
+            </button>
+          </div>
         </div>
       </aside>
 
@@ -137,6 +166,7 @@ export default function App() {
         {tab === 'network' && <NetworkPage nodes={nodes} services={services} onChanged={refresh} />}
         {tab === 'storage' && <StoragePage nodes={nodes} />}
         {tab === 'alerts' && <AlertsPage alerts={alerts} nodes={nodes} />}
+        {tab === 'copilot' && <CopilotPage overview={overview} />}
       </main>
 
       {showDeploy && (
@@ -147,6 +177,7 @@ export default function App() {
         />
       )}
       {showOnboard && <OnboardModal onClose={() => setShowOnboard(false)} />}
+      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
     </>
   );
 }

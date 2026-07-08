@@ -253,8 +253,8 @@ func (a *API) handleTraefikConfig(w http.ResponseWriter, r *http.Request) {
 			}
 			key := "rackops-" + svc.ID
 			router := map[string]any{
-				"rule":    fmt.Sprintf("Host(`%s`)", svc.Domain),
-				"service": key,
+				"rule":        fmt.Sprintf("Host(`%s`)", svc.Domain),
+				"service":     key,
 				"entryPoints": []string{"web"},
 			}
 			if ingress.ACMEEmail != "" {

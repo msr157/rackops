@@ -9,7 +9,7 @@ type Template struct {
 	Category    string   `json:"category"` // infra | homelab | ai | web | tools | games | database
 	Description string   `json:"description"`
 	Image       string   `json:"image"`
-	Port        int      `json:"port"`      // primary UI/service port
+	Port        int      `json:"port"`            // primary UI/service port
 	Ports       []int    `json:"ports,omitempty"` // extra ports to publish
 	Env         []EnvDef `json:"env,omitempty"`
 	Volumes     []string `json:"volumes,omitempty"` // container paths needing persistence
@@ -45,7 +45,7 @@ func Get(id string) *Template {
 var templates = []Template{
 	// ---- Infra / DevOps ----
 	{ID: "minio", Name: "MinIO", Category: "infra", Description: "S3-compatible object storage", Image: "minio/minio:latest", Port: 9001, Ports: []int{9000}, MemMB: 512,
-		Env: []EnvDef{{Key: "MINIO_ROOT_USER", Label: "Admin user", Default: "rackops", Required: true}, {Key: "MINIO_ROOT_PASSWORD", Label: "Admin password", Secret: true, Required: true, Generate: true}},
+		Env:     []EnvDef{{Key: "MINIO_ROOT_USER", Label: "Admin user", Default: "rackops", Required: true}, {Key: "MINIO_ROOT_PASSWORD", Label: "Admin password", Secret: true, Required: true, Generate: true}},
 		Volumes: []string{"/data"}, Command: "server /data --console-address :9001", Notes: "console on 9001, S3 API on 9000"},
 	{ID: "gitea", Name: "Gitea", Category: "infra", Description: "Self-hosted Git service", Image: "gitea/gitea:latest", Port: 3000, Ports: []int{222}, MemMB: 512, Volumes: []string{"/data"}},
 	{ID: "jenkins", Name: "Jenkins", Category: "infra", Description: "CI/CD automation server", Image: "jenkins/jenkins:lts", Port: 8080, MemMB: 1024, Volumes: []string{"/var/jenkins_home"}},

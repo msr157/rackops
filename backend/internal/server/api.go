@@ -21,6 +21,8 @@ type API struct {
 	DashFS fs.FS
 	// JoinToken authorizes agents to register.
 	JoinToken string
+	// JWTSecret signs session tokens.
+	JWTSecret []byte
 }
 
 // Router builds the full HTTP mux.
@@ -73,11 +75,23 @@ func (a *API) Router() http.Handler {
 	// ---- Live stream ----
 	mux.Handle("GET /api/stream", a.Hub)
 
+	// ---- Auth & platform ----
+	mux.HandleFunc("GET /api/auth/status", a.handleAuthStatus)
+	mux.HandleFunc("POST /api/auth/signup", a.handleSignup)
+	mux.HandleFunc("POST /api/auth/login", a.handleLogin)
+	mux.HandleFunc("GET /api/users", a.handleListUsers)
+	mux.HandleFunc("POST /api/tokens", a.handleCreateToken)
+	mux.HandleFunc("GET /api/tokens", a.handleListTokens)
+	mux.HandleFunc("DELETE /api/tokens/{id}", a.handleDeleteToken)
+	mux.HandleFunc("GET /api/settings", a.handleGetSettings)
+	mux.HandleFunc("POST /api/settings", a.handleSetSettings)
+	mux.HandleFunc("POST /api/assistant", a.handleAssistant)
+
 	// ---- Dashboard ----
 	if a.DashFS != nil {
 		mux.Handle("/", spaHandler(a.DashFS))
 	}
-	return mux
+	return a.authMiddleware(mux)
 }
 
 // ---- Agent ingest ----
@@ -154,6 +168,7 @@ func (a *API) handleIngest(w http.ResponseWriter, r *http.Request) {
 	for _, alert := range a.Store.EvaluateAlerts(node) {
 		a.Store.AddEvent("alert", alert.Message, node.ID, "")
 		a.Hub.Broadcast("alert", alert)
+		a.NotifyAlert(alert)
 	}
 
 	a.Hub.Broadcast("node_metrics", node)
@@ -224,6 +239,7 @@ func (a *API) applyTaskResult(nodeID string, res types.TaskResult) {
 		}
 		a.Store.AddEvent("deploy", fmt.Sprintf("Service %s %s on node %s", svc.Name, verb, nodeID), nodeID, svc.ID)
 		a.Hub.Broadcast("service_update", svc)
+		a.NotifyDeploy(svc, res.OK)
 	}
 }
 
