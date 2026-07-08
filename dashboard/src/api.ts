@@ -26,11 +26,24 @@ export interface Node {
 export interface Project { id: string; name: string; description: string; createdAt: string }
 export interface Environment { id: string; projectId: string; name: string }
 export interface EnvVar { key: string; value: string; secret: boolean }
+export interface Mount {
+  type: 'bind' | 'volume'; source: string; target: string; readOnly: boolean; drivePath?: string;
+}
 export interface Service {
   id: string; projectId: string; envId: string; name: string; kind: string; status: string;
-  gitRepo?: string; gitBranch?: string; image?: string; nodeId: string; autoPlace: boolean;
-  port: number; domain: string; ingress: string; env: EnvVar[] | null;
-  cpuPct: number; memUsedMb: number; containerId?: string; createdAt: string;
+  gitRepo?: string; gitBranch?: string; image?: string; composeYml?: string; templateId?: string;
+  nodeId: string; autoPlace: boolean;
+  port: number; ports?: number[]; command?: string; domain: string; ingress: string;
+  env: EnvVar[] | null; mounts?: Mount[]; volumes?: string[];
+  cpuPct: number; memUsedMb: number; memLimitMb?: number; cpuLimit?: number;
+  restartPolicy?: string; gpu?: boolean;
+  containerId?: string; createdAt: string; updatedAt?: string;
+}
+export interface DirEntry { name: string; isDir: boolean; size?: number }
+export interface ServiceUpdate {
+  image?: string; gitBranch?: string; command?: string; port?: number; ports?: number[];
+  env?: EnvVar[]; mounts?: Mount[]; memLimitMb?: number; cpuLimit?: number;
+  restartPolicy?: string; gpu?: boolean; nodeId?: string; redeploy: boolean;
 }
 export interface Overview {
   nodesOnline: number; nodesTotal: number; servicesUp: number; servicesTotal: number;
@@ -107,6 +120,11 @@ export const api = {
     return req<Service[]>(`/api/services?${q}`);
   },
   createService: (body: object) => req<Service>('/api/services', { method: 'POST', body: JSON.stringify(body) }),
+  service: (id: string) => req<Service>(`/api/services/${id}`),
+  updateService: (id: string, upd: ServiceUpdate) => req<Service>(`/api/services/${id}`, { method: 'PATCH', body: JSON.stringify(upd) }),
+  clearServiceLogs: (id: string) => req<{ clearedAt: string }>(`/api/services/${id}/clear-logs`, { method: 'POST' }),
+  nodeFS: (nodeId: string, path: string) =>
+    req<{ path: string; entries: DirEntry[] }>(`/api/nodes/${nodeId}/fs?path=${encodeURIComponent(path)}`),
   serviceAction: (id: string, action: string) => req<Service>(`/api/services/${id}/${action}`, { method: 'POST' }),
   deleteService: (id: string) => req<void>(`/api/services/${id}`, { method: 'DELETE' }),
   placement: (body: object) => req<PlacementScore[]>('/api/placement', { method: 'POST', body: JSON.stringify(body) }),

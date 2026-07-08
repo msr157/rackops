@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -149,9 +150,13 @@ func (r *Runtime) Deploy(p DeployPayload) (containerID, logOut string, err error
 	// Replace any prior container for this service.
 	_ = exec.Command(r.Bin, "rm", "-f", name).Run()
 
+	restart := p.RestartPol
+	if restart == "" {
+		restart = "unless-stopped"
+	}
 	args := []string{"run", "-d", "--name", name,
 		"--label", "rackops.service=" + p.ServiceID,
-		"--restart", "unless-stopped"}
+		"--restart", restart}
 	if p.HostNet {
 		args = append(args, "--network", "host")
 	} else if p.Port > 0 {
@@ -172,11 +177,22 @@ func (r *Runtime) Deploy(p DeployPayload) (containerID, logOut string, err error
 		volName := "rackops-" + p.ServiceID + "-" + sanitize(strings.ReplaceAll(strings.Trim(cpath, "/"), "/", "-"))
 		args = append(args, "-v", volName+":"+cpath)
 	}
+	// User-managed mounts: bind mounts and drive-placed volumes.
+	for _, m := range p.Mounts {
+		spec, err := mountSpec(p, m)
+		if err != nil {
+			return "", logs.String(), err
+		}
+		args = append(args, "-v", spec)
+	}
 	if p.PinnedPath != "" {
 		args = append(args, "-v", strings.TrimSuffix(p.PinnedPath, "/")+"/rackops/"+sanitize(p.Name)+":/data")
 	}
 	if p.MemLimitMB > 0 {
 		args = append(args, "--memory", fmt.Sprintf("%dm", p.MemLimitMB))
+	}
+	if p.CPULimit > 0 {
+		args = append(args, "--cpus", fmt.Sprintf("%.2f", p.CPULimit))
 	}
 	if p.GPU {
 		args = append(args, "--gpus", "all")
@@ -237,6 +253,54 @@ func (r *Runtime) Simple(args ...string) (string, error) {
 func (r *Runtime) Logs(container string, tail int) (string, error) {
 	out, err := exec.Command(r.Bin, "logs", "--tail", strconv.Itoa(tail), container).CombinedOutput()
 	return string(out), err
+}
+
+// LogsSince fetches logs after an RFC3339 timestamp (empty = all recent).
+func (r *Runtime) LogsSince(container string, tail int, since string) (string, error) {
+	args := []string{"logs", "--tail", strconv.Itoa(tail)}
+	if since != "" {
+		args = append(args, "--since", since)
+	}
+	args = append(args, container)
+	out, err := exec.Command(r.Bin, args...).CombinedOutput()
+	return string(out), err
+}
+
+// mountSpec renders one -v argument for a user mount. Volume mounts with a
+// chosen drive become bind mounts of a rackops-managed directory on that
+// drive (created on first use), so the data physically lives where the user
+// picked.
+func mountSpec(p DeployPayload, m types.Mount) (string, error) {
+	if m.Target == "" || !strings.HasPrefix(m.Target, "/") {
+		return "", fmt.Errorf("mount target must be an absolute container path (got %q)", m.Target)
+	}
+	suffix := ""
+	if m.ReadOnly {
+		suffix = ":ro"
+	}
+	switch m.Type {
+	case types.MountBind:
+		if !strings.HasPrefix(m.Source, "/") {
+			return "", fmt.Errorf("bind mount source must be an absolute host path (got %q)", m.Source)
+		}
+		return m.Source + ":" + m.Target + suffix, nil
+	case types.MountVolume:
+		volName := sanitize(m.Source)
+		if volName == "" {
+			volName = sanitize(strings.ReplaceAll(strings.Trim(m.Target, "/"), "/", "-"))
+		}
+		if m.DrivePath != "" {
+			// Place the volume directory on the chosen drive.
+			dir := strings.TrimSuffix(m.DrivePath, "/") + "/rackops-volumes/" + p.ServiceID + "/" + volName
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return "", fmt.Errorf("create volume dir %s: %w", dir, err)
+			}
+			return dir + ":" + m.Target + suffix, nil
+		}
+		return "rackops-" + p.ServiceID + "-" + volName + ":" + m.Target + suffix, nil
+	default:
+		return "", fmt.Errorf("unknown mount type %q", m.Type)
+	}
 }
 
 // isHex reports whether s consists solely of hex digits.

@@ -24,12 +24,17 @@ type DeployPayload struct {
 	Ports       []int          `json:"ports,omitempty"`
 	Command     string         `json:"command,omitempty"`
 	Env         []types.EnvVar `json:"env"`
-	Volumes     []string       `json:"volumes,omitempty"` // hostPath:containerPath
+	Volumes     []string       `json:"volumes,omitempty"` // legacy template container paths
+	Mounts      []types.Mount  `json:"mounts,omitempty"`
 	PinnedPath  string         `json:"pinnedPath,omitempty"`
 	MemLimitMB  int64          `json:"memLimitMb,omitempty"`
+	CPULimit    float64        `json:"cpuLimit,omitempty"`
+	RestartPol  string         `json:"restartPolicy,omitempty"`
 	GPU         bool           `json:"gpu,omitempty"`
 	HostNet     bool           `json:"hostNet,omitempty"`     // run with --network host (ingress edge)
 	ContainerID string         `json:"containerId,omitempty"` // for stop/start/restart/remove
+	Since       string         `json:"since,omitempty"`       // logs: RFC3339 lower bound
+	Path        string         `json:"path,omitempty"`        // listdir: directory to list
 }
 
 // handleCreateService creates a service and queues its first deployment.
@@ -68,7 +73,15 @@ func (a *API) handleCreateService(w http.ResponseWriter, r *http.Request) {
 		}
 		req.Ports = tpl.Ports
 		req.Command = tpl.Command
-		req.Volumes = tpl.Volumes
+		// Template volumes become editable managed mounts (visible on the
+		// service's Storage tab, re-placeable onto a chosen drive).
+		for _, cpath := range tpl.Volumes {
+			req.Mounts = append(req.Mounts, types.Mount{
+				Type:   types.MountVolume,
+				Source: strings.ReplaceAll(strings.Trim(cpath, "/"), "/", "-"),
+				Target: cpath,
+			})
+		}
 		if req.MemLimitMB == 0 && tpl.MemMB > 0 {
 			// Placement hint only; no hard container limit unless user set one.
 			if req.Placement == nil {
@@ -171,8 +184,9 @@ func (a *API) queueDeploy(svc *types.Service, trigger string) *types.Deployment 
 		ServiceID: svc.ID, Name: svc.Name, Image: svc.Image,
 		GitRepo: svc.GitRepo, GitBranch: svc.GitBranch, GitToken: svc.GitToken,
 		ComposeYML: svc.ComposeYML, Port: svc.Port, Ports: svc.Ports,
-		Command: svc.Command, Env: svc.Env, Volumes: svc.Volumes,
+		Command: svc.Command, Env: svc.Env, Volumes: svc.Volumes, Mounts: svc.Mounts,
 		PinnedPath: svc.PinnedPath, MemLimitMB: svc.MemLimitMB,
+		CPULimit: svc.CPULimit, RestartPol: svc.RestartPol, GPU: svc.GPU,
 	})
 	a.Store.EnqueueTask(svc.NodeID, types.AgentTask{
 		ID: dep.ID, Kind: types.TaskDeploy, ServiceID: svc.ID,

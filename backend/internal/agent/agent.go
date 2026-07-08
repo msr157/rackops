@@ -220,8 +220,14 @@ func (a *Agent) execute(task types.AgentTask) types.TaskResult {
 		}
 		delete(a.servicePorts, p.ServiceID)
 	case types.TaskLogs:
-		out, err := a.runtime.Logs(containerName(p), 200)
+		out, err := a.runtime.LogsSince(containerName(p), 500, p.Since)
 		res.Log, res.OK = out, err == nil
+	case types.TaskListDir:
+		out, err := listDir(p.Path)
+		res.Log, res.OK = out, err == nil
+		if err != nil {
+			res.Log = "ERROR: " + err.Error()
+		}
 	default:
 		res.Log = "unknown task kind: " + string(task.Kind)
 	}
@@ -243,11 +249,16 @@ type DeployPayload struct {
 	Command     string         `json:"command,omitempty"`
 	Env         []types.EnvVar `json:"env"`
 	Volumes     []string       `json:"volumes,omitempty"`
+	Mounts      []types.Mount  `json:"mounts,omitempty"`
 	PinnedPath  string         `json:"pinnedPath,omitempty"`
 	MemLimitMB  int64          `json:"memLimitMb,omitempty"`
+	CPULimit    float64        `json:"cpuLimit,omitempty"`
+	RestartPol  string         `json:"restartPolicy,omitempty"`
 	GPU         bool           `json:"gpu,omitempty"`
 	HostNet     bool           `json:"hostNet,omitempty"`
 	ContainerID string         `json:"containerId,omitempty"`
+	Since       string         `json:"since,omitempty"`
+	Path        string         `json:"path,omitempty"`
 }
 
 func containerName(p DeployPayload) string {

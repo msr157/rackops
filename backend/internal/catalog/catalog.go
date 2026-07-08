@@ -54,6 +54,8 @@ var templates = []Template{
 	{ID: "uptime-kuma", Name: "Uptime Kuma", Category: "infra", Description: "Uptime monitoring with status pages", Image: "louislam/uptime-kuma:1", Port: 3001, MemMB: 256, Volumes: []string{"/app/data"}},
 	{ID: "registry", Name: "Docker Registry", Category: "infra", Description: "Private container image registry", Image: "registry:2", Port: 5000, MemMB: 256, Volumes: []string{"/var/lib/registry"}},
 	{ID: "rabbitmq", Name: "RabbitMQ", Category: "infra", Description: "Message broker with management UI", Image: "rabbitmq:3-management", Port: 15672, Ports: []int{5672}, MemMB: 512, Volumes: []string{"/var/lib/rabbitmq"}},
+	{ID: "seaweedfs", Name: "SeaweedFS", Category: "infra", Description: "Distributed storage: pool drives across multiple nodes into one S3-compatible space (files spread automatically)", Image: "chrislusf/seaweedfs:latest", Port: 8333, Ports: []int{9333, 8080}, MemMB: 512, Volumes: []string{"/data"},
+		Command: "server -s3 -dir=/data", Notes: "deploy one per node and join them: master on node 1, `server -mserver=<node1-mesh-ip>:9333` on others — combined free space becomes one storage pool"},
 
 	// ---- Homelab ----
 	{ID: "jellyfin", Name: "Jellyfin", Category: "homelab", Description: "Media server for movies, TV & music", Image: "jellyfin/jellyfin:latest", Port: 8096, MemMB: 1024, Volumes: []string{"/config", "/media"}},

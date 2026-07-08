@@ -153,6 +153,25 @@ const (
 	StatusFailed   ServiceStatus = "failed"
 )
 
+// MountType distinguishes storage mount kinds.
+type MountType string
+
+const (
+	MountBind   MountType = "bind"   // host folder -> container path
+	MountVolume MountType = "volume" // rackops-managed dir on a chosen drive
+)
+
+// Mount attaches node storage to a container path.
+type Mount struct {
+	Type     MountType `json:"type"`
+	Source   string    `json:"source"`   // bind: host path · volume: volume name
+	Target   string    `json:"target"`   // container path
+	ReadOnly bool      `json:"readOnly"`
+	// DrivePath (volume only): mount point of the drive the volume lives on
+	// (e.g. /mnt/bigdisk). Empty = default docker volume storage.
+	DrivePath string `json:"drivePath,omitempty"`
+}
+
 // IngressType controls how a service is exposed.
 type IngressType string
 
@@ -191,13 +210,19 @@ type Service struct {
 	Port       int         `json:"port"`              // internal container port
 	Ports      []int       `json:"ports,omitempty"`   // extra published ports
 	Command    string      `json:"command,omitempty"` // container command override
-	Volumes    []string    `json:"volumes,omitempty"` // container paths persisted under the data dir
+	Volumes    []string    `json:"volumes,omitempty"` // legacy template paths (auto-converted to Mounts)
+	Mounts     []Mount     `json:"mounts,omitempty"`  // storage attachments
 	Domain     string      `json:"domain"`            // chosen domain (empty = generated)
 	Ingress    IngressType `json:"ingress"`
 	Env        []EnvVar    `json:"env"`
 	CPUPct     float64     `json:"cpuPct"`
 	MemUsedMB  int64       `json:"memUsedMb"`
 	MemLimitMB int64       `json:"memLimitMb,omitempty"`
+	CPULimit   float64     `json:"cpuLimit,omitempty"`      // cores, 0 = unlimited
+	RestartPol string      `json:"restartPolicy,omitempty"` // unless-stopped | always | on-failure | no
+	GPU        bool        `json:"gpu,omitempty"`
+	// LogsClearedAt: UI-level log clearing — fetches use --since this time.
+	LogsClearedAt time.Time `json:"logsClearedAt,omitempty"`
 
 	ContainerID string    `json:"containerId,omitempty"`
 	CreatedBy   string    `json:"createdBy"`
@@ -414,6 +439,7 @@ const (
 	TaskRestart TaskKind = "restart"
 	TaskRemove  TaskKind = "remove"
 	TaskLogs    TaskKind = "logs"
+	TaskListDir TaskKind = "listdir"
 	TaskBuild   TaskKind = "build"
 	TaskBackup  TaskKind = "backup"
 )

@@ -11,6 +11,7 @@ import { StoragePage } from './pages/Storage';
 import { AlertsPage } from './pages/Alerts';
 import { NetworkPage } from './pages/Network';
 import { CopilotPage } from './pages/Copilot';
+import { ServiceDetail } from './pages/ServiceDetail';
 import { DeployModal } from './pages/DeployModal';
 import { OnboardModal } from './pages/OnboardModal';
 import { SettingsModal } from './pages/SettingsModal';
@@ -31,6 +32,7 @@ export default function App() {
   const [showDeploy, setShowDeploy] = useState(false);
   const [showOnboard, setShowOnboard] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [detailService, setDetailService] = useState('');
 
   // Auth gate: needsSetup or an existing session decides the screen.
   useEffect(() => {
@@ -157,12 +159,18 @@ export default function App() {
       <main className="main">
         {tab === 'overview' && <OverviewPage overview={overview} nodes={nodes} events={events} services={services} />}
         {tab === 'nodes' && <NodesPage nodes={nodes} services={services} />}
-        {tab === 'services' && (
+        {tab === 'services' && (detailService ? (
+          <ServiceDetail
+            serviceId={detailService} nodes={nodes}
+            onBack={() => setDetailService('')} onChanged={refresh}
+          />
+        ) : (
           <ServicesPage
             services={services} nodes={nodes} projects={projects} envs={envs}
             onDeploy={() => setShowDeploy(true)} onChanged={refresh}
+            onOpen={(id) => setDetailService(id)}
           />
-        )}
+        ))}
         {tab === 'network' && <NetworkPage nodes={nodes} services={services} onChanged={refresh} />}
         {tab === 'storage' && <StoragePage nodes={nodes} />}
         {tab === 'alerts' && <AlertsPage alerts={alerts} nodes={nodes} />}

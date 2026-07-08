@@ -4,9 +4,9 @@ import { api } from '../api';
 import type { Node, Service, Project, Environment } from '../api';
 import { StatusBadge } from '../App';
 
-export function ServicesPage({ services, nodes, projects, envs, onDeploy, onChanged }: {
+export function ServicesPage({ services, nodes, projects, envs, onDeploy, onChanged, onOpen }: {
   services: Service[]; nodes: Node[]; projects: Project[]; envs: Environment[];
-  onDeploy: () => void; onChanged: () => void;
+  onDeploy: () => void; onChanged: () => void; onOpen: (id: string) => void;
 }) {
   const [projFilter, setProjFilter] = useState('');
   const [envFilter, setEnvFilter] = useState('');
@@ -60,15 +60,15 @@ export function ServicesPage({ services, nodes, projects, envs, onDeploy, onChan
 
       <div className="node-card">
         {filtered.map((s) => (
-          <div className="card" key={s.id}>
+          <div className="card" key={s.id} style={{ cursor: 'pointer' }} onClick={() => onOpen(s.id)}>
             <div className="row spread">
               <div className="row">
-                <strong>{s.name}</strong>
+                <strong style={{ textDecoration: 'underline dotted', textUnderlineOffset: 4 }}>{s.name}</strong>
                 <StatusBadge status={s.status} />
                 {envName(s.envId) && <span className="tag">{envName(s.envId)}</span>}
                 {s.autoPlace && <span className="badge cyan"><Cpu size={11} /> auto-placed</span>}
               </div>
-              <div className="row">
+              <div className="row" onClick={(e) => e.stopPropagation()}>
                 <button className="btn sm" title="Logs" onClick={() => showLogs(s)}>
                   <ScrollText size={12} />
                 </button>

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"net/http"
 	"sort"
 	"sync"
@@ -32,9 +33,14 @@ func (a *API) handleServiceLogs(w http.ResponseWriter, r *http.Request) {
 	pendingLogs.Store(taskID, ch)
 	defer pendingLogs.Delete(taskID)
 
+	since := ""
+	if !svc.LogsClearedAt.IsZero() {
+		since = svc.LogsClearedAt.Format(time.RFC3339)
+	}
+	payload, _ := json.Marshal(DeployPayload{ServiceID: svc.ID, Name: svc.Name, Since: since})
 	a.Store.EnqueueTask(svc.NodeID, types.AgentTask{
 		ID: taskID, Kind: types.TaskLogs, ServiceID: svc.ID,
-		Payload: `{"serviceId":"` + svc.ID + `","name":"` + svc.Name + `"}`, CreatedAt: time.Now(),
+		Payload: string(payload), CreatedAt: time.Now(),
 	})
 
 	select {

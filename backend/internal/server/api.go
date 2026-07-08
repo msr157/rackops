@@ -52,8 +52,12 @@ func (a *API) Router() http.Handler {
 	mux.HandleFunc("POST /api/projects/{id}/envs", a.handleCreateEnv)
 	mux.HandleFunc("GET /api/services", a.handleListServices)
 	mux.HandleFunc("POST /api/services", a.handleCreateService)
+	mux.HandleFunc("GET /api/services/{id}", a.handleGetService)
+	mux.HandleFunc("PATCH /api/services/{id}", a.handleUpdateService)
+	mux.HandleFunc("POST /api/services/{id}/clear-logs", a.handleClearLogs)
 	mux.HandleFunc("POST /api/services/{id}/{action}", a.handleServiceAction)
 	mux.HandleFunc("DELETE /api/services/{id}", a.handleDeleteService)
+	mux.HandleFunc("GET /api/nodes/{id}/fs", a.handleNodeFS)
 
 	// ---- Placement ----
 	mux.HandleFunc("POST /api/placement", a.handlePlacement)
