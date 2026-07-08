@@ -152,6 +152,7 @@ export const api = {
   createApiToken: (name: string) => req<{ id: string; name: string; token: string }>('/api/tokens', { method: 'POST', body: JSON.stringify({ name }) }),
   deleteApiToken: (id: string) => req<void>(`/api/tokens/${id}`, { method: 'DELETE' }),
   assistant: (message: string) => req<{ answer: string; provider: string }>('/api/assistant', { method: 'POST', body: JSON.stringify({ message }) }),
+  testAssistant: () => req<{ ok: boolean; provider: string; error?: string }>('/api/assistant/test', { method: 'POST' }),
   joinCommand: () => req<{ command: string; token: string }>('/api/join-command'),
 };
 

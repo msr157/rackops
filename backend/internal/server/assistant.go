@@ -68,6 +68,43 @@ func (a *API) handleAssistant(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]string{"answer": answer, "provider": provider})
 }
 
+// handleAssistantTest sends a trivial prompt through the configured provider
+// so users can validate keys from Settings without a chat round-trip.
+func (a *API) handleAssistantTest(w http.ResponseWriter, r *http.Request) {
+	var s Settings
+	a.Store.View(func() { s = a.Store.Settings })
+	provider := s.AIProvider
+	if provider == "" || provider == "auto" {
+		switch {
+		case s.AnthropicKey != "":
+			provider = "anthropic"
+		case s.GeminiKey != "":
+			provider = "gemini"
+		case s.OpenAIKey != "" || s.OpenAIBase != "":
+			provider = "openai"
+		default:
+			provider = "builtin"
+		}
+	}
+	var err error
+	switch provider {
+	case "anthropic":
+		_, err = askAnthropic(s.AnthropicKey, "You are a health check.", "Reply with the single word: OK")
+	case "gemini":
+		_, err = askGemini(s.GeminiKey, "You are a health check.", "Reply with the single word: OK")
+	case "openai":
+		_, err = askOpenAI(s.OpenAIKey, s.OpenAIBase, s.OpenAIModel, "You are a health check.", "Reply with the single word: OK")
+	default:
+		writeJSON(w, map[string]any{"ok": true, "provider": "builtin", "note": "rule engine active — no key needed"})
+		return
+	}
+	if err != nil {
+		writeJSON(w, map[string]any{"ok": false, "provider": provider, "error": err.Error()})
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true, "provider": provider})
+}
+
 // fleetContext renders a compact JSON snapshot for grounding.
 func (a *API) fleetContext() string {
 	type nodeCtx struct {

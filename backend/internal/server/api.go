@@ -95,6 +95,7 @@ func (a *API) Router() http.Handler {
 	mux.HandleFunc("GET /api/settings", a.handleGetSettings)
 	mux.HandleFunc("POST /api/settings", a.handleSetSettings)
 	mux.HandleFunc("POST /api/assistant", a.handleAssistant)
+	mux.HandleFunc("POST /api/assistant/test", a.handleAssistantTest)
 
 	// ---- Cluster (HA) ----
 	mux.HandleFunc("GET /api/cluster", a.handleClusterStatus)

@@ -10,6 +10,15 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [newTokenName, setNewTokenName] = useState('');
   const [freshToken, setFreshToken] = useState('');
   const [saved, setSaved] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; provider: string; error?: string } | null>(null);
+
+  const testProvider = async () => {
+    setTesting(true); setTestResult(null);
+    try { setTestResult(await api.testAssistant()); }
+    catch (e) { setTestResult({ ok: false, provider: '?', error: String(e) }); }
+    setTesting(false);
+  };
 
   useEffect(() => {
     api.settings().then(setS).catch(() => {});
@@ -46,42 +55,70 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           <button className={`btn sm ${tab === 'tokens' ? 'primary' : ''}`} onClick={() => setTab('tokens')}><Key size={12} /> API Tokens</button>
         </div>
 
-        {tab === 'ai' && (
-          <>
-            <div className="field">
-              <label>Provider preference</label>
-              <select className="input" value={s.aiProvider ?? 'auto'} onChange={(e) => set({ aiProvider: e.target.value })}>
-                <option value="auto">Auto — first configured key wins</option>
-                <option value="anthropic">Anthropic (Claude)</option>
-                <option value="gemini">Google Gemini</option>
-                <option value="openai">OpenAI / compatible (incl. Ollama)</option>
-                <option value="builtin">Built-in rule engine only</option>
-              </select>
-            </div>
-            <div className="field">
-              <label>Anthropic API key</label>
-              <input className="input" type="password" placeholder="sk-ant-…" value={s.anthropicKey ?? ''} onChange={(e) => set({ anthropicKey: e.target.value })} />
-            </div>
-            <div className="field">
-              <label>Gemini API key</label>
-              <input className="input" type="password" placeholder="AIza…" value={s.geminiKey ?? ''} onChange={(e) => set({ geminiKey: e.target.value })} />
-            </div>
-            <div className="grid-2">
+        {tab === 'ai' && (() => {
+          const prov = s.aiProvider ?? 'auto';
+          const show = (p: string) => prov === 'auto' || prov === p;
+          return (
+            <>
               <div className="field">
-                <label>OpenAI-compatible key</label>
-                <input className="input" type="password" placeholder="sk-… (blank for Ollama)" value={s.openaiKey ?? ''} onChange={(e) => set({ openaiKey: e.target.value })} />
+                <label>Provider</label>
+                <select className="input" value={prov} onChange={(e) => set({ aiProvider: e.target.value })}>
+                  <option value="auto">Auto — first configured key wins</option>
+                  <option value="anthropic">Anthropic (Claude)</option>
+                  <option value="gemini">Google Gemini</option>
+                  <option value="openai">OpenAI / compatible (incl. Ollama)</option>
+                  <option value="builtin">Built-in rule engine only</option>
+                </select>
               </div>
-              <div className="field">
-                <label>Base URL (Ollama: http://host:11434/v1)</label>
-                <input className="input" placeholder="https://api.openai.com/v1" value={s.openaiBase ?? ''} onChange={(e) => set({ openaiBase: e.target.value })} />
+              {show('anthropic') && (
+                <div className="field">
+                  <label>Anthropic API key</label>
+                  <input className="input" type="password" placeholder="sk-ant-…" value={s.anthropicKey ?? ''} onChange={(e) => set({ anthropicKey: e.target.value })} />
+                </div>
+              )}
+              {show('gemini') && (
+                <div className="field">
+                  <label>Gemini API key</label>
+                  <input className="input" type="password" placeholder="AIza…" value={s.geminiKey ?? ''} onChange={(e) => set({ geminiKey: e.target.value })} />
+                  <span className="faint">Create at aistudio.google.com — a "consumer suspended" error means Google suspended that key's project; make a key in a fresh project.</span>
+                </div>
+              )}
+              {show('openai') && (
+                <>
+                  <div className="grid-2">
+                    <div className="field">
+                      <label>OpenAI-compatible key</label>
+                      <input className="input" type="password" placeholder="sk-… (blank for Ollama)" value={s.openaiKey ?? ''} onChange={(e) => set({ openaiKey: e.target.value })} />
+                    </div>
+                    <div className="field">
+                      <label>Base URL (Ollama: http://host:11434/v1)</label>
+                      <input className="input" placeholder="https://api.openai.com/v1" value={s.openaiBase ?? ''} onChange={(e) => set({ openaiBase: e.target.value })} />
+                    </div>
+                  </div>
+                  <div className="field">
+                    <label>Model</label>
+                    <input className="input" placeholder="gpt-4o-mini / llama3.1" value={s.openaiModel ?? ''} onChange={(e) => set({ openaiModel: e.target.value })} />
+                  </div>
+                </>
+              )}
+              {prov === 'builtin' && (
+                <div className="dim" style={{ marginBottom: 14 }}>
+                  No key needed — the rule engine answers placement, thermal, storage and failure questions from live telemetry.
+                </div>
+              )}
+              <div className="row" style={{ marginBottom: 12 }}>
+                <button className="btn sm" disabled={testing} onClick={testProvider}>
+                  {testing ? 'Testing…' : '⚡ Test provider (save first)'}
+                </button>
+                {testResult && (
+                  <span className={`badge ${testResult.ok ? 'green' : 'red'}`} style={{ maxWidth: 380, overflow: 'hidden' }}>
+                    {testResult.ok ? `${testResult.provider} OK` : `${testResult.provider}: ${testResult.error?.slice(0, 160)}`}
+                  </span>
+                )}
               </div>
-            </div>
-            <div className="field">
-              <label>Model (OpenAI-compatible only)</label>
-              <input className="input" placeholder="gpt-4o-mini / llama3.1" value={s.openaiModel ?? ''} onChange={(e) => set({ openaiModel: e.target.value })} />
-            </div>
-          </>
-        )}
+            </>
+          );
+        })()}
 
         {tab === 'notify' && (
           <>
