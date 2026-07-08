@@ -445,6 +445,8 @@ func writeJSON(w http.ResponseWriter, v any) {
 }
 
 // spaHandler serves the embedded dashboard with SPA fallback to index.html.
+// index.html is served no-cache so browsers always pick up new asset hashes
+// after an upgrade; hashed assets themselves cache forever.
 func spaHandler(fsys fs.FS) http.Handler {
 	fileServer := http.FileServer(http.FS(fsys))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -454,6 +456,12 @@ func spaHandler(fsys fs.FS) http.Handler {
 		}
 		if _, err := fs.Stat(fsys, path); err != nil {
 			r.URL.Path = "/" // SPA fallback
+			path = "index.html"
+		}
+		if path == "index.html" {
+			w.Header().Set("Cache-Control", "no-cache, must-revalidate")
+		} else if strings.HasPrefix(path, "assets/") {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		}
 		fileServer.ServeHTTP(w, r)
 	})
