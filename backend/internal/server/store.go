@@ -27,6 +27,8 @@ type Store struct {
 	Deployments map[string]*types.Deployment  `json:"deployments"`
 	Users       map[string]*types.User        `json:"users"`
 	Alerts      map[string]*types.Alert       `json:"alerts"`
+	Domains     map[string]*types.Domain      `json:"domains"`
+	Ingress     types.IngressConfig           `json:"ingress"`
 	Events      []*types.Event                `json:"events"`
 
 	// taskQueue maps nodeID -> pending agent tasks (not persisted; re-derived).
@@ -46,6 +48,7 @@ func NewStore(dataDir string) (*Store, error) {
 		Deployments: map[string]*types.Deployment{},
 		Users:       map[string]*types.User{},
 		Alerts:      map[string]*types.Alert{},
+		Domains:     map[string]*types.Domain{},
 		taskQueue:   map[string][]types.AgentTask{},
 		dataDir:     dataDir,
 	}

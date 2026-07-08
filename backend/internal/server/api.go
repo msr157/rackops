@@ -15,6 +15,8 @@ import (
 type API struct {
 	Store *Store
 	Hub   *Hub
+	// Mesh is the WireGuard hub (nil = mesh disabled).
+	Mesh *MeshHub
 	// DashFS is the embedded dashboard filesystem (nil = API only).
 	DashFS fs.FS
 	// JoinToken authorizes agents to register.
@@ -54,12 +56,26 @@ func (a *API) Router() http.Handler {
 	mux.HandleFunc("GET /api/services/{id}/logs", a.handleServiceLogs)
 	mux.HandleFunc("GET /api/services/{id}/deployments", a.handleServiceDeployments)
 
+	// ---- Mesh & relay ----
+	mux.HandleFunc("GET /api/mesh", a.handleMeshStatus)
+	mux.HandleFunc("GET /api/mesh/dial", a.handleMeshDial)
+	mux.HandleFunc("/relay/{id}/{rest...}", a.handleRelay)
+
+	// ---- Domains & ingress ----
+	mux.HandleFunc("GET /api/domains", a.handleListDomains)
+	mux.HandleFunc("POST /api/domains", a.handleCreateDomain)
+	mux.HandleFunc("DELETE /api/domains/{id}", a.handleDeleteDomain)
+	mux.HandleFunc("GET /api/ingress", a.handleGetIngress)
+	mux.HandleFunc("POST /api/ingress", a.handleSetIngress)
+	mux.HandleFunc("GET /api/traefik/config", a.handleTraefikConfig)
+	mux.HandleFunc("POST /api/services/{id}/domain", a.handleSetServiceDomain)
+
 	// ---- Live stream ----
 	mux.Handle("GET /api/stream", a.Hub)
 
 	// ---- Dashboard ----
 	if a.DashFS != nil {
-		mux.Handle("GET /", spaHandler(a.DashFS))
+		mux.Handle("/", spaHandler(a.DashFS))
 	}
 	return mux
 }
@@ -143,6 +159,25 @@ func (a *API) handleIngest(w http.ResponseWriter, r *http.Request) {
 	a.Hub.Broadcast("node_metrics", node)
 
 	resp := types.AgentResponse{Tasks: a.Store.DrainTasks(rep.NodeID)}
+	if a.Mesh != nil {
+		if m := a.Mesh.HandleExchange(rep.NodeID, rep.Mesh); m != nil {
+			// Tell the agent which service ports to expose on the mesh.
+			a.Store.View(func() {
+				for _, svc := range a.Store.Services {
+					if svc.NodeID == rep.NodeID && svc.Port > 0 {
+						m.ExposePorts = append(m.ExposePorts, svc.Port)
+					}
+				}
+			})
+			// If this node is the ingress edge, send relay specs for every
+			// domain-routed service living on OTHER nodes.
+			m.Relays = a.relaySpecsFor(rep.NodeID)
+			resp.Mesh = m
+			if node.MeshIP != m.MeshIP {
+				a.Store.Mutate(func() { node.MeshIP = m.MeshIP })
+			}
+		}
+	}
 	writeJSON(w, resp)
 }
 

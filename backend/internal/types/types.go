@@ -183,6 +183,9 @@ type Service struct {
 	NodeID     string `json:"nodeId"`               // where it runs
 	AutoPlace  bool   `json:"autoPlace"`            // scheduler picked the node
 	PinnedPath string `json:"pinnedPath,omitempty"` // mount point of pinned drive
+	// RelayPort is the local port on the ingress node that tunnels to this
+	// service over the mesh (assigned when the service is on a remote node).
+	RelayPort int `json:"relayPort,omitempty"`
 
 	// Runtime
 	Port      int         `json:"port"`    // internal container port
@@ -270,6 +273,25 @@ type Event struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
+// ---- Domains & Ingress ----
+
+// Domain is a user-owned domain name usable in the per-deployment dropdown.
+type Domain struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`      // e.g. app.example.com or *.example.com
+	CreatedBy string    `json:"createdBy"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+// IngressConfig is the cluster's edge configuration.
+type IngressConfig struct {
+	Enabled   bool   `json:"enabled"`
+	NodeID    string `json:"nodeId"`    // node running Traefik (must have public IP or LAN reachability)
+	HTTPPort  int    `json:"httpPort"`  // default 80
+	HTTPSPort int    `json:"httpsPort"` // default 443
+	ACMEEmail string `json:"acmeEmail"` // enables Let's Encrypt when set
+}
+
 // ---- Users & Auth ----
 
 // UserRole is the platform-level RBAC role.
@@ -313,6 +335,7 @@ type AgentReport struct {
 	Host       HostInfo          `json:"host"`
 	Containers []ContainerStatus `json:"containers"`
 	AgentVer   string            `json:"agentVersion"`
+	Mesh       *MeshInfo         `json:"mesh,omitempty"`
 	TaskResults []TaskResult     `json:"taskResults,omitempty"`
 }
 
@@ -324,6 +347,34 @@ type HostInfo struct {
 	Kernel   string `json:"kernel"`
 	IP       string `json:"ip"`
 	PublicIP string `json:"publicIp,omitempty"`
+}
+
+// MeshInfo carries mesh key exchange data in agent reports/responses.
+type MeshInfo struct {
+	PublicKey string     `json:"publicKey,omitempty"` // agent's WG public key
+	MeshIP    string     `json:"meshIp,omitempty"`    // assigned by server
+	HubKey    string     `json:"hubKey,omitempty"`    // server's WG public key
+	HubAddr   string     `json:"hubAddr,omitempty"`   // host:udpport of the hub
+	Peers     []MeshPeer `json:"peers,omitempty"`     // full peer list
+	// ExposePorts (server->agent) lists local service ports to proxy onto
+	// the mesh so ingress/relay nodes can reach them.
+	ExposePorts []int `json:"exposePorts,omitempty"`
+	// Relays (server->agent, ingress node only): local listeners to open
+	// that forward over the mesh to services on other nodes.
+	Relays []RelaySpec `json:"relays,omitempty"`
+}
+
+// RelaySpec asks an agent to forward 127.0.0.1:LocalPort -> TargetAddr (mesh).
+type RelaySpec struct {
+	LocalPort  int    `json:"localPort"`
+	TargetAddr string `json:"targetAddr"` // meshIP:port
+}
+
+// MeshPeer is one node's mesh identity, shared with all members.
+type MeshPeer struct {
+	NodeID    string `json:"nodeId"`
+	PublicKey string `json:"publicKey"`
+	MeshIP    string `json:"meshIp"`
 }
 
 // ContainerStatus is the state of one container as seen by the agent.
@@ -371,5 +422,6 @@ type TaskResult struct {
 // AgentResponse is the control plane's reply to an AgentReport push.
 type AgentResponse struct {
 	Tasks    []AgentTask `json:"tasks"`
+	Mesh     *MeshInfo   `json:"mesh,omitempty"`
 	LeaderAddr string    `json:"leaderAddr,omitempty"` // set when this server is not the Raft leader
 }

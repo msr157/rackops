@@ -50,6 +50,12 @@ export interface Deployment {
   id: string; serviceId: string; version: number; status: string; trigger: string;
   log: string; startedAt: string; durationMs: number;
 }
+export interface Domain { id: string; name: string; createdAt: string }
+export interface IngressConfig { enabled: boolean; nodeId: string; httpPort: number; httpsPort: number; acmeEmail: string }
+export interface MeshStatus {
+  enabled: boolean; hubIp?: string; hubKey?: string; udpPort?: number;
+  peers?: { nodeId: string; meshIp: string }[];
+}
 
 const base = '';
 
@@ -83,6 +89,14 @@ export const api = {
   templates: () => req<Template[]>('/api/templates'),
   serviceLogs: (id: string) => req<{ logs: string }>(`/api/services/${id}/logs`),
   serviceDeployments: (id: string) => req<Deployment[]>(`/api/services/${id}/deployments`),
+  domains: () => req<Domain[]>('/api/domains'),
+  createDomain: (name: string) => req<Domain>('/api/domains', { method: 'POST', body: JSON.stringify({ name }) }),
+  deleteDomain: (id: string) => req<void>(`/api/domains/${id}`, { method: 'DELETE' }),
+  ingress: () => req<IngressConfig>('/api/ingress'),
+  setIngress: (cfg: IngressConfig) => req<IngressConfig>('/api/ingress', { method: 'POST', body: JSON.stringify(cfg) }),
+  setServiceDomain: (id: string, domain: string, ingress: string) =>
+    req<Service>(`/api/services/${id}/domain`, { method: 'POST', body: JSON.stringify({ domain, ingress }) }),
+  mesh: () => req<MeshStatus>('/api/mesh'),
   joinCommand: () => req<{ command: string; token: string }>('/api/join-command'),
 };
 

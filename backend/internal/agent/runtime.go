@@ -152,7 +152,9 @@ func (r *Runtime) Deploy(p DeployPayload) (containerID, logOut string, err error
 	args := []string{"run", "-d", "--name", name,
 		"--label", "rackops.service=" + p.ServiceID,
 		"--restart", "unless-stopped"}
-	if p.Port > 0 {
+	if p.HostNet {
+		args = append(args, "--network", "host")
+	} else if p.Port > 0 {
 		// Publish the service's internal port on the same host port.
 		args = append(args, "-p", fmt.Sprintf("%d:%d", p.Port, p.Port))
 	} else {

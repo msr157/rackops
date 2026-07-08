@@ -38,6 +38,10 @@ type Agent struct {
 	runtime   *Runtime
 	client    *http.Client
 	results   []types.TaskResult
+	mesh      meshState
+	// servicePorts tracks ports of services deployed on this node (from
+	// deploy payloads) so they can be proxied onto the mesh.
+	servicePorts map[string]int // serviceID -> port
 }
 
 // New creates an agent, loading or generating a persistent node identity.
@@ -75,13 +79,18 @@ func New(cfg Config) (*Agent, error) {
 		log.Printf("agent: using container runtime: %s", rt.Bin)
 	}
 
-	return &Agent{
-		cfg:       cfg,
-		nodeID:    string(id),
-		collector: telemetry.NewCollector(),
-		runtime:   rt,
-		client:    &http.Client{Timeout: 30 * time.Second},
-	}, nil
+	ag := &Agent{
+		cfg:          cfg,
+		nodeID:       string(id),
+		collector:    telemetry.NewCollector(),
+		runtime:      rt,
+		client:       &http.Client{Timeout: 30 * time.Second},
+		servicePorts: map[string]int{},
+	}
+	if err := ag.initMeshKeys(); err != nil {
+		log.Printf("agent: mesh keys: %v (mesh disabled)", err)
+	}
+	return ag, nil
 }
 
 // Run starts the report/execute loop; blocks forever.
@@ -106,6 +115,9 @@ func (a *Agent) Run() {
 			AgentVer:    a.cfg.Version,
 			TaskResults: a.results,
 		}
+		if a.mesh.keys.Public != "" {
+			report.Mesh = &types.MeshInfo{PublicKey: a.mesh.keys.Public, MeshIP: a.mesh.meshIP}
+		}
 		if a.runtime != nil {
 			report.Containers = a.runtime.List()
 		}
@@ -117,6 +129,17 @@ func (a *Agent) Run() {
 			continue
 		}
 		a.results = nil // delivered
+
+		// Apply mesh assignment; expose the ports the server asks for plus
+		// any known locally (covers agent restarts before server catches up).
+		ports := make([]int, 0, len(a.servicePorts))
+		for _, p := range a.servicePorts {
+			ports = append(ports, p)
+		}
+		if resp.Mesh != nil {
+			ports = append(ports, resp.Mesh.ExposePorts...)
+		}
+		a.syncMesh(resp.Mesh, report.Containers, ports)
 
 		for _, task := range resp.Tasks {
 			res := a.execute(task)
@@ -175,6 +198,8 @@ func (a *Agent) execute(task types.AgentTask) types.TaskResult {
 		res.OK = err == nil
 		if err != nil {
 			res.Log += "\nERROR: " + err.Error()
+		} else if p.Port > 0 {
+			a.servicePorts[p.ServiceID] = p.Port
 		}
 	case types.TaskStop:
 		out, err := a.runtime.Simple("stop", containerName(p))
@@ -193,6 +218,7 @@ func (a *Agent) execute(task types.AgentTask) types.TaskResult {
 			out, err := a.runtime.Simple("rm", "-f", containerName(p))
 			res.Log, res.OK = out, err == nil
 		}
+		delete(a.servicePorts, p.ServiceID)
 	case types.TaskLogs:
 		out, err := a.runtime.Logs(containerName(p), 200)
 		res.Log, res.OK = out, err == nil
@@ -220,6 +246,7 @@ type DeployPayload struct {
 	PinnedPath  string         `json:"pinnedPath,omitempty"`
 	MemLimitMB  int64          `json:"memLimitMb,omitempty"`
 	GPU         bool           `json:"gpu,omitempty"`
+	HostNet     bool           `json:"hostNet,omitempty"`
 	ContainerID string         `json:"containerId,omitempty"`
 }
 

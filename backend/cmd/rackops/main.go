@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/rackops/rackops/internal/agent"
@@ -70,6 +71,8 @@ func runServer(args []string) {
 	dataDir := fs.String("data-dir", defaultDataDir(), "state directory")
 	noLocal := fs.Bool("no-local-agent", false, "disable the embedded local agent")
 	name := fs.String("name", "", "node display name")
+	meshPort := fs.Int("mesh-port", 51820, "WireGuard UDP port (0 disables mesh)")
+	advertise := fs.String("advertise", "", "address agents reach this server on (default: auto-detect)")
 	_ = fs.Parse(args)
 
 	store, err := server.NewStore(*dataDir)
@@ -80,9 +83,23 @@ func runServer(args []string) {
 	// Join token: load or create.
 	token := loadOrCreateToken(*dataDir)
 
+	// Mesh hub.
+	var meshHub *server.MeshHub
+	if *meshPort > 0 {
+		adv := *advertise
+		if adv == "" {
+			adv = telemetry.Host().IP
+		}
+		meshHub, err = server.NewMeshHub(*dataDir, adv, *meshPort)
+		if err != nil {
+			log.Printf("mesh: disabled (%v)", err)
+		}
+	}
+
 	api := &server.API{
 		Store:     store,
 		Hub:       server.NewHub(),
+		Mesh:      meshHub,
 		JoinToken: token,
 		DashFS:    server.DashboardFS(),
 	}
@@ -117,6 +134,7 @@ func runServer(args []string) {
 	}
 
 	store.AddEvent("server", "RackOps control plane started (v"+version+")", "", "")
+	server.SetListenPort(strings.TrimPrefix(normalizeListen(*listen), ":"))
 	log.Printf("rackops server v%s listening on %s", version, *listen)
 	log.Printf("join token: %s", token)
 	log.Printf("add a node:  rackops agent --server http://<this-host>%s --token %s", normalizeListen(*listen), token)

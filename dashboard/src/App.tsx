@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
-  LayoutGrid, Server, Boxes, HardDrive, Bell, Plus, Cpu, Activity,
+  LayoutGrid, Server, Boxes, HardDrive, Bell, Plus, Cpu, Activity, Network,
 } from 'lucide-react';
 import { api, subscribe } from './api';
 import type { Node, Overview, EventItem, Alert, Service, Project, Environment } from './api';
@@ -9,10 +9,11 @@ import { NodesPage } from './pages/Nodes';
 import { ServicesPage } from './pages/Services';
 import { StoragePage } from './pages/Storage';
 import { AlertsPage } from './pages/Alerts';
+import { NetworkPage } from './pages/Network';
 import { DeployModal } from './pages/DeployModal';
 import { OnboardModal } from './pages/OnboardModal';
 
-type Tab = 'overview' | 'nodes' | 'services' | 'storage' | 'alerts';
+type Tab = 'overview' | 'nodes' | 'services' | 'network' | 'storage' | 'alerts';
 
 export default function App() {
   const [tab, setTab] = useState<Tab>('overview');
@@ -85,6 +86,7 @@ export default function App() {
     { key: 'overview', label: 'Cluster Overview', icon: <LayoutGrid size={16} /> },
     { key: 'nodes', label: 'Nodes & Hardware', icon: <Cpu size={16} />, count: nodes.length },
     { key: 'services', label: 'Apps & Services', icon: <Boxes size={16} />, count: services.length },
+    { key: 'network', label: 'Network & Ingress', icon: <Network size={16} /> },
     { key: 'storage', label: 'Storage', icon: <HardDrive size={16} /> },
     { key: 'alerts', label: 'Alerts', icon: <Bell size={16} />, count: openAlerts.length },
   ];
@@ -132,6 +134,7 @@ export default function App() {
             onDeploy={() => setShowDeploy(true)} onChanged={refresh}
           />
         )}
+        {tab === 'network' && <NetworkPage nodes={nodes} services={services} onChanged={refresh} />}
         {tab === 'storage' && <StoragePage nodes={nodes} />}
         {tab === 'alerts' && <AlertsPage alerts={alerts} nodes={nodes} />}
       </main>
