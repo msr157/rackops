@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rackops/rackops/internal/catalog"
 	"github.com/rackops/rackops/internal/types"
 )
 
@@ -20,10 +21,13 @@ type DeployPayload struct {
 	GitToken    string         `json:"gitToken,omitempty"`
 	ComposeYML  string         `json:"composeYml,omitempty"`
 	Port        int            `json:"port"`
+	Ports       []int          `json:"ports,omitempty"`
+	Command     string         `json:"command,omitempty"`
 	Env         []types.EnvVar `json:"env"`
 	Volumes     []string       `json:"volumes,omitempty"` // hostPath:containerPath
 	PinnedPath  string         `json:"pinnedPath,omitempty"`
 	MemLimitMB  int64          `json:"memLimitMb,omitempty"`
+	GPU         bool           `json:"gpu,omitempty"`
 	ContainerID string         `json:"containerId,omitempty"` // for stop/start/restart/remove
 }
 
@@ -44,6 +48,60 @@ func (a *API) handleCreateService(w http.ResponseWriter, r *http.Request) {
 	if req.Kind == "" {
 		req.Kind = types.KindApp
 	}
+
+	// Template deploys: expand the template into the service definition.
+	var gpuNeeded bool
+	if req.TemplateID != "" {
+		tpl := catalog.Get(req.TemplateID)
+		if tpl == nil {
+			http.Error(w, "unknown template: "+req.TemplateID, http.StatusBadRequest)
+			return
+		}
+		req.Kind = types.KindTemplate
+		if tpl.Category == "database" {
+			req.Kind = types.KindDatabase
+		}
+		req.Image = tpl.Image
+		if req.Port == 0 {
+			req.Port = tpl.Port
+		}
+		req.Ports = tpl.Ports
+		req.Command = tpl.Command
+		req.Volumes = tpl.Volumes
+		if req.MemLimitMB == 0 && tpl.MemMB > 0 {
+			// Placement hint only; no hard container limit unless user set one.
+			if req.Placement == nil {
+				req.Placement = &types.PlacementRequest{}
+			}
+			if req.Placement.MemMB == 0 {
+				req.Placement.MemMB = tpl.MemMB
+			}
+			req.Placement.NeedsGPU = req.Placement.NeedsGPU || tpl.GPU
+		}
+		gpuNeeded = tpl.GPU
+		// Fill defaults + generate secrets for unset template env vars.
+		provided := map[string]bool{}
+		for _, e := range req.Env {
+			provided[e.Key] = true
+		}
+		for _, def := range tpl.Env {
+			if provided[def.Key] {
+				continue
+			}
+			val := def.Default
+			if def.Generate && val == "" {
+				val = NewID() + NewID()
+			}
+			if val == "" && def.Required {
+				http.Error(w, "missing required env: "+def.Key, http.StatusBadRequest)
+				return
+			}
+			if val != "" {
+				req.Env = append(req.Env, types.EnvVar{Key: def.Key, Value: val, Secret: def.Secret})
+			}
+		}
+	}
+	_ = gpuNeeded
 
 	// Auto-placement: score nodes and pick the winner.
 	if req.NodeID == "" || req.NodeID == "auto" {
@@ -111,7 +169,8 @@ func (a *API) queueDeploy(svc *types.Service, trigger string) *types.Deployment 
 	payload, _ := json.Marshal(DeployPayload{
 		ServiceID: svc.ID, Name: svc.Name, Image: svc.Image,
 		GitRepo: svc.GitRepo, GitBranch: svc.GitBranch, GitToken: svc.GitToken,
-		ComposeYML: svc.ComposeYML, Port: svc.Port, Env: svc.Env,
+		ComposeYML: svc.ComposeYML, Port: svc.Port, Ports: svc.Ports,
+		Command: svc.Command, Env: svc.Env, Volumes: svc.Volumes,
 		PinnedPath: svc.PinnedPath, MemLimitMB: svc.MemLimitMB,
 	})
 	a.Store.EnqueueTask(svc.NodeID, types.AgentTask{
@@ -164,7 +223,7 @@ func (a *API) handleDeleteService(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "service not found", http.StatusNotFound)
 		return
 	}
-	payload, _ := json.Marshal(DeployPayload{ServiceID: svc.ID, Name: svc.Name, ContainerID: svc.ContainerID})
+	payload, _ := json.Marshal(DeployPayload{ServiceID: svc.ID, Name: svc.Name, ContainerID: svc.ContainerID, ComposeYML: svc.ComposeYML})
 	a.Store.EnqueueTask(svc.NodeID, types.AgentTask{
 		ID: NewID(), Kind: types.TaskRemove, ServiceID: svc.ID, Payload: string(payload), CreatedAt: time.Now(),
 	})

@@ -49,6 +49,11 @@ func (a *API) Router() http.Handler {
 	// ---- Placement ----
 	mux.HandleFunc("POST /api/placement", a.handlePlacement)
 
+	// ---- Templates & logs ----
+	mux.HandleFunc("GET /api/templates", a.handleTemplates)
+	mux.HandleFunc("GET /api/services/{id}/logs", a.handleServiceLogs)
+	mux.HandleFunc("GET /api/services/{id}/deployments", a.handleServiceDeployments)
+
 	// ---- Live stream ----
 	mux.Handle("GET /api/stream", a.Hub)
 
@@ -143,6 +148,10 @@ func (a *API) handleIngest(w http.ResponseWriter, r *http.Request) {
 
 // applyTaskResult updates service state from an agent's task outcome.
 func (a *API) applyTaskResult(nodeID string, res types.TaskResult) {
+	// Log fetches route straight to the waiting HTTP request.
+	if deliverLogs(res.TaskID, res.Log) {
+		return
+	}
 	var svc *types.Service
 	var dep *types.Deployment
 	a.Store.Mutate(func() {

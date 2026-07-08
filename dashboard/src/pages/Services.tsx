@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Play, Square, RotateCw, Trash2, Rocket, Globe, Cpu } from 'lucide-react';
+import { Play, Square, RotateCw, Trash2, Rocket, Globe, Cpu, ScrollText, X } from 'lucide-react';
 import { api } from '../api';
 import type { Node, Service, Project, Environment } from '../api';
 import { StatusBadge } from '../App';
@@ -11,6 +11,18 @@ export function ServicesPage({ services, nodes, projects, envs, onDeploy, onChan
   const [projFilter, setProjFilter] = useState('');
   const [envFilter, setEnvFilter] = useState('');
   const [busy, setBusy] = useState('');
+  const [logsFor, setLogsFor] = useState<Service | null>(null);
+  const [logs, setLogs] = useState('');
+  const [logsLoading, setLogsLoading] = useState(false);
+
+  const showLogs = async (s: Service) => {
+    setLogsFor(s); setLogs(''); setLogsLoading(true);
+    try {
+      const r = await api.serviceLogs(s.id);
+      setLogs(r.logs || '(no output)');
+    } catch (e) { setLogs(String(e)); }
+    setLogsLoading(false);
+  };
 
   const filtered = services.filter((s) =>
     (!projFilter || s.projectId === projFilter) && (!envFilter || s.envId === envFilter));
@@ -57,6 +69,9 @@ export function ServicesPage({ services, nodes, projects, envs, onDeploy, onChan
                 {s.autoPlace && <span className="badge cyan"><Cpu size={11} /> auto-placed</span>}
               </div>
               <div className="row">
+                <button className="btn sm" title="Logs" onClick={() => showLogs(s)}>
+                  <ScrollText size={12} />
+                </button>
                 <button className="btn sm" disabled={busy !== ''} onClick={() => act(s.id, s.status === 'running' ? 'stop' : 'start')}>
                   {s.status === 'running' ? <Square size={12} /> : <Play size={12} />}
                 </button>
@@ -86,6 +101,23 @@ export function ServicesPage({ services, nodes, projects, envs, onDeploy, onChan
           </div>
         )}
       </div>
+
+      {logsFor && (
+        <div className="modal-overlay" onClick={() => setLogsFor(null)}>
+          <div className="modal" style={{ width: 800 }} onClick={(e) => e.stopPropagation()}>
+            <div className="row spread" style={{ marginBottom: 14 }}>
+              <h2 style={{ margin: 0 }}><ScrollText size={15} style={{ verticalAlign: -2 }} /> Logs — {logsFor.name}</h2>
+              <div className="row">
+                <button className="btn sm" onClick={() => showLogs(logsFor)}><RotateCw size={12} /> Refresh</button>
+                <button className="btn sm" onClick={() => setLogsFor(null)}><X size={13} /></button>
+              </div>
+            </div>
+            <div className="terminal" style={{ maxHeight: 480, whiteSpace: 'pre-wrap' }}>
+              {logsLoading ? 'fetching logs from agent…' : logs}
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

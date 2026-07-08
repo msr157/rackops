@@ -116,22 +116,34 @@ func parseMemMB(s string) int64 {
 	return 0
 }
 
-// Deploy pulls the image and runs the container for a service.
-// Git/compose deploys are handled by later milestones' build pipeline.
+// Deploy builds (git) or pulls (image) and runs the container for a service.
 func (r *Runtime) Deploy(p DeployPayload) (containerID, logOut string, err error) {
 	var logs strings.Builder
 	name := containerName(p)
 
-	if p.Image == "" {
-		return "", "", fmt.Errorf("git and compose deploys land in milestone 3 — provide an image for now")
+	// Compose stacks take a separate path.
+	if p.ComposeYML != "" {
+		return r.deployCompose(p, &logs)
 	}
 
-	// Pull.
-	logs.WriteString("$ " + r.Bin + " pull " + p.Image + "\n")
-	out, err := exec.Command(r.Bin, "pull", p.Image).CombinedOutput()
-	logs.Write(out)
-	if err != nil {
-		return "", logs.String(), fmt.Errorf("pull failed: %w", err)
+	switch {
+	case p.GitRepo != "":
+		// Build an image from the repo, then run it.
+		image, buildErr := r.buildFromGit(p, &logs)
+		if buildErr != nil {
+			return "", logs.String(), buildErr
+		}
+		p.Image = image
+	case p.Image == "":
+		return "", "", fmt.Errorf("service has neither an image nor a git repo")
+	default:
+		// Pull the image.
+		logs.WriteString("$ " + r.Bin + " pull " + p.Image + "\n")
+		out, pullErr := exec.Command(r.Bin, "pull", p.Image).CombinedOutput()
+		logs.Write(out)
+		if pullErr != nil {
+			return "", logs.String(), fmt.Errorf("pull failed: %w", pullErr)
+		}
 	}
 
 	// Replace any prior container for this service.
@@ -146,11 +158,17 @@ func (r *Runtime) Deploy(p DeployPayload) (containerID, logOut string, err error
 	} else {
 		args = append(args, "-P") // publish exposed ports to ephemeral host ports
 	}
+	for _, extra := range p.Ports {
+		args = append(args, "-p", fmt.Sprintf("%d:%d", extra, extra))
+	}
 	for _, e := range p.Env {
 		args = append(args, "-e", e.Key+"="+e.Value)
 	}
-	for _, v := range p.Volumes {
-		args = append(args, "-v", v)
+	// Named volumes: persist template-declared container paths under
+	// rackops-managed volumes so redeploys keep data.
+	for _, cpath := range p.Volumes {
+		volName := "rackops-" + p.ServiceID + "-" + sanitize(strings.ReplaceAll(strings.Trim(cpath, "/"), "/", "-"))
+		args = append(args, "-v", volName+":"+cpath)
 	}
 	if p.PinnedPath != "" {
 		args = append(args, "-v", strings.TrimSuffix(p.PinnedPath, "/")+"/rackops/"+sanitize(p.Name)+":/data")
@@ -158,11 +176,36 @@ func (r *Runtime) Deploy(p DeployPayload) (containerID, logOut string, err error
 	if p.MemLimitMB > 0 {
 		args = append(args, "--memory", fmt.Sprintf("%dm", p.MemLimitMB))
 	}
+	if p.GPU {
+		args = append(args, "--gpus", "all")
+	}
 	args = append(args, p.Image)
+	if p.Command != "" {
+		args = append(args, strings.Fields(p.Command)...)
+	}
 
 	logs.WriteString("$ " + r.Bin + " " + strings.Join(args, " ") + "\n")
-	out, err = exec.Command(r.Bin, args...).CombinedOutput()
+	out, err := exec.Command(r.Bin, args...).CombinedOutput()
 	logs.Write(out)
+	if err != nil && p.Port > 0 && strings.Contains(string(out), "address already in use") {
+		// Host port taken — retry publishing to an ephemeral host port.
+		logs.WriteString("host port busy — retrying with an ephemeral port\n")
+		_ = exec.Command(r.Bin, "rm", "-f", name).Run()
+		for i, a := range args {
+			if a == "-p" && i+1 < len(args) && args[i+1] == fmt.Sprintf("%d:%d", p.Port, p.Port) {
+				args[i+1] = fmt.Sprintf("%d", p.Port) // container port only = random host port
+			}
+		}
+		logs.WriteString("$ " + r.Bin + " " + strings.Join(args, " ") + "\n")
+		out, err = exec.Command(r.Bin, args...).CombinedOutput()
+		logs.Write(out)
+		if err == nil {
+			// Surface the actual mapping in the log.
+			if mapped, mapErr := exec.Command(r.Bin, "port", name).Output(); mapErr == nil {
+				logs.WriteString("published ports:\n" + string(mapped))
+			}
+		}
+	}
 	if err != nil {
 		return "", logs.String(), fmt.Errorf("run failed: %w", err)
 	}

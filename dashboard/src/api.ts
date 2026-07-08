@@ -40,6 +40,16 @@ export interface Overview {
 export interface Alert { id: string; nodeId?: string; level: string; kind: string; message: string; createdAt: string; resolved: boolean }
 export interface EventItem { id: string; kind: string; message: string; createdAt: string }
 export interface PlacementScore { nodeId: string; score: number; reasons: string[]; viable: boolean }
+export interface EnvDef { key: string; label: string; default: string; secret: boolean; required: boolean; generate?: boolean }
+export interface Template {
+  id: string; name: string; category: string; description: string; image: string;
+  port: number; ports?: number[]; env?: EnvDef[]; volumes?: string[]; memMb: number;
+  gpu?: boolean; notes?: string;
+}
+export interface Deployment {
+  id: string; serviceId: string; version: number; status: string; trigger: string;
+  log: string; startedAt: string; durationMs: number;
+}
 
 const base = '';
 
@@ -70,6 +80,9 @@ export const api = {
   serviceAction: (id: string, action: string) => req<Service>(`/api/services/${id}/${action}`, { method: 'POST' }),
   deleteService: (id: string) => req<void>(`/api/services/${id}`, { method: 'DELETE' }),
   placement: (body: object) => req<PlacementScore[]>('/api/placement', { method: 'POST', body: JSON.stringify(body) }),
+  templates: () => req<Template[]>('/api/templates'),
+  serviceLogs: (id: string) => req<{ logs: string }>(`/api/services/${id}/logs`),
+  serviceDeployments: (id: string) => req<Deployment[]>(`/api/services/${id}/deployments`),
   joinCommand: () => req<{ command: string; token: string }>('/api/join-command'),
 };
 

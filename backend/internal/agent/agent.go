@@ -186,7 +186,15 @@ func (a *Agent) execute(task types.AgentTask) types.TaskResult {
 		out, err := a.runtime.Simple("restart", containerName(p))
 		res.Log, res.OK = out, err == nil
 	case types.TaskRemove:
-		out, err := a.runtime.Simple("rm", "-f", containerName(p))
+		if p.ComposeYML != "" {
+			out, err := a.runtime.composeDown(p)
+			res.Log, res.OK = out, err == nil
+		} else {
+			out, err := a.runtime.Simple("rm", "-f", containerName(p))
+			res.Log, res.OK = out, err == nil
+		}
+	case types.TaskLogs:
+		out, err := a.runtime.Logs(containerName(p), 200)
 		res.Log, res.OK = out, err == nil
 	default:
 		res.Log = "unknown task kind: " + string(task.Kind)
@@ -205,10 +213,13 @@ type DeployPayload struct {
 	GitToken    string         `json:"gitToken,omitempty"`
 	ComposeYML  string         `json:"composeYml,omitempty"`
 	Port        int            `json:"port"`
+	Ports       []int          `json:"ports,omitempty"`
+	Command     string         `json:"command,omitempty"`
 	Env         []types.EnvVar `json:"env"`
 	Volumes     []string       `json:"volumes,omitempty"`
 	PinnedPath  string         `json:"pinnedPath,omitempty"`
 	MemLimitMB  int64          `json:"memLimitMb,omitempty"`
+	GPU         bool           `json:"gpu,omitempty"`
 	ContainerID string         `json:"containerId,omitempty"`
 }
 

@@ -186,6 +186,9 @@ type Service struct {
 
 	// Runtime
 	Port      int         `json:"port"`    // internal container port
+	Ports     []int       `json:"ports,omitempty"` // extra published ports
+	Command   string      `json:"command,omitempty"` // container command override
+	Volumes   []string    `json:"volumes,omitempty"` // container paths persisted under the data dir
 	Domain    string      `json:"domain"`  // chosen domain (empty = generated)
 	Ingress   IngressType `json:"ingress"`
 	Env       []EnvVar    `json:"env"`
@@ -343,6 +346,7 @@ const (
 	TaskStart   TaskKind = "start"
 	TaskRestart TaskKind = "restart"
 	TaskRemove  TaskKind = "remove"
+	TaskLogs    TaskKind = "logs"
 	TaskBuild   TaskKind = "build"
 	TaskBackup  TaskKind = "backup"
 )
