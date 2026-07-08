@@ -71,17 +71,42 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                 </select>
               </div>
               {show('anthropic') && (
-                <div className="field">
-                  <label>Anthropic API key</label>
-                  <input className="input" type="password" placeholder="sk-ant-…" value={s.anthropicKey ?? ''} onChange={(e) => set({ anthropicKey: e.target.value })} />
-                </div>
+                <>
+                  <div className="field">
+                    <label>Anthropic API key</label>
+                    <input className="input" type="password" placeholder="sk-ant-…" value={s.anthropicKey ?? ''} onChange={(e) => set({ anthropicKey: e.target.value })} />
+                  </div>
+                  <div className="field">
+                    <label>Model</label>
+                    <input className="input" list="anthropic-models" placeholder="claude-opus-4-8 (default)" value={s.anthropicModel ?? ''} onChange={(e) => set({ anthropicModel: e.target.value })} />
+                    <datalist id="anthropic-models">
+                      <option value="claude-opus-4-8">Claude Opus 4.8 — most capable</option>
+                      <option value="claude-sonnet-5">Claude Sonnet 5 — balanced</option>
+                      <option value="claude-haiku-4-5">Claude Haiku 4.5 — fastest</option>
+                      <option value="claude-fable-5">Claude Fable 5 — frontier</option>
+                    </datalist>
+                    <span className="faint">Leave blank for the recommended default (Opus 4.8).</span>
+                  </div>
+                </>
               )}
               {show('gemini') && (
-                <div className="field">
-                  <label>Gemini API key</label>
-                  <input className="input" type="password" placeholder="AIza…" value={s.geminiKey ?? ''} onChange={(e) => set({ geminiKey: e.target.value })} />
-                  <span className="faint">Create at aistudio.google.com — a "consumer suspended" error means Google suspended that key's project; make a key in a fresh project.</span>
-                </div>
+                <>
+                  <div className="field">
+                    <label>Gemini API key</label>
+                    <input className="input" type="password" placeholder="AIza…" value={s.geminiKey ?? ''} onChange={(e) => set({ geminiKey: e.target.value })} />
+                    <span className="faint">Create at aistudio.google.com — "consumer suspended" means Google suspended that key's project; make a key in a fresh project.</span>
+                  </div>
+                  <div className="field">
+                    <label>Model</label>
+                    <input className="input" list="gemini-models" placeholder="gemini-3.5-flash (default)" value={s.geminiModel ?? ''} onChange={(e) => set({ geminiModel: e.target.value })} />
+                    <datalist id="gemini-models">
+                      <option value="gemini-3.5-flash">Gemini 3.5 Flash — recommended</option>
+                      <option value="gemini-3-flash">Gemini 3 Flash</option>
+                      <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash-Lite — cheapest</option>
+                      <option value="gemini-3-pro-preview">Gemini 3 Pro</option>
+                    </datalist>
+                  </div>
+                </>
               )}
               {show('openai') && (
                 <>
@@ -97,7 +122,15 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                   </div>
                   <div className="field">
                     <label>Model</label>
-                    <input className="input" placeholder="gpt-4o-mini / llama3.1" value={s.openaiModel ?? ''} onChange={(e) => set({ openaiModel: e.target.value })} />
+                    <input className="input" list="openai-models" placeholder="gpt-5.5 (default) / llama3.1 for Ollama" value={s.openaiModel ?? ''} onChange={(e) => set({ openaiModel: e.target.value })} />
+                    <datalist id="openai-models">
+                      <option value="gpt-5.5">GPT-5.5 — flagship</option>
+                      <option value="gpt-5.4-mini">GPT-5.4 mini — cheap/fast</option>
+                      <option value="gpt-5.4-nano">GPT-5.4 nano — cheapest</option>
+                      <option value="llama3.1">llama3.1 (Ollama)</option>
+                      <option value="qwen2.5">qwen2.5 (Ollama)</option>
+                    </datalist>
+                    <span className="faint">Pick a preset or type any model id (Ollama model names work here too).</span>
                   </div>
                 </>
               )}

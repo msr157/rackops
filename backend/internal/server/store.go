@@ -59,12 +59,14 @@ type Settings struct {
 	NotifyDeploys  bool   `json:"notifyDeploys"`
 	NotifyAlerts   bool   `json:"notifyAlerts"`
 	// AI providers (first configured wins unless Provider pins one)
-	AIProvider   string `json:"aiProvider,omitempty"` // auto | anthropic | gemini | openai | ollama
-	AnthropicKey string `json:"anthropicKey,omitempty"`
-	GeminiKey    string `json:"geminiKey,omitempty"`
-	OpenAIKey    string `json:"openaiKey,omitempty"`
-	OpenAIBase   string `json:"openaiBase,omitempty"` // for Ollama/compatible: http://host:11434/v1
-	OpenAIModel  string `json:"openaiModel,omitempty"`
+	AIProvider     string `json:"aiProvider,omitempty"` // auto | anthropic | gemini | openai | ollama
+	AnthropicKey   string `json:"anthropicKey,omitempty"`
+	AnthropicModel string `json:"anthropicModel,omitempty"`
+	GeminiKey      string `json:"geminiKey,omitempty"`
+	GeminiModel    string `json:"geminiModel,omitempty"`
+	OpenAIKey      string `json:"openaiKey,omitempty"`
+	OpenAIBase     string `json:"openaiBase,omitempty"` // for Ollama/compatible: http://host:11434/v1
+	OpenAIModel    string `json:"openaiModel,omitempty"`
 }
 
 // NewStore loads state from dataDir or initializes a fresh store.

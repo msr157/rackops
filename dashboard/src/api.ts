@@ -78,7 +78,8 @@ export interface APIToken { id: string; name: string; userId: string; createdAt:
 export interface Settings {
   discordWebhook?: string; slackWebhook?: string; telegramToken?: string; telegramChatId?: string;
   genericWebhook?: string; notifyDeploys: boolean; notifyAlerts: boolean;
-  aiProvider?: string; anthropicKey?: string; geminiKey?: string; openaiKey?: string;
+  aiProvider?: string; anthropicKey?: string; anthropicModel?: string;
+  geminiKey?: string; geminiModel?: string; openaiKey?: string;
   openaiBase?: string; openaiModel?: string;
 }
 

@@ -51,9 +51,9 @@ func (a *API) handleAssistant(w http.ResponseWriter, r *http.Request) {
 	var err error
 	switch provider {
 	case "anthropic":
-		answer, err = askAnthropic(s.AnthropicKey, system, req.Message)
+		answer, err = askAnthropic(s.AnthropicKey, s.AnthropicModel, system, req.Message)
 	case "gemini":
-		answer, err = askGemini(s.GeminiKey, system, req.Message)
+		answer, err = askGemini(s.GeminiKey, s.GeminiModel, system, req.Message)
 	case "openai":
 		answer, err = askOpenAI(s.OpenAIKey, s.OpenAIBase, s.OpenAIModel, system, req.Message)
 	default:
@@ -89,9 +89,9 @@ func (a *API) handleAssistantTest(w http.ResponseWriter, r *http.Request) {
 	var err error
 	switch provider {
 	case "anthropic":
-		_, err = askAnthropic(s.AnthropicKey, "You are a health check.", "Reply with the single word: OK")
+		_, err = askAnthropic(s.AnthropicKey, s.AnthropicModel, "You are a health check.", "Reply with the single word: OK")
 	case "gemini":
-		_, err = askGemini(s.GeminiKey, "You are a health check.", "Reply with the single word: OK")
+		_, err = askGemini(s.GeminiKey, s.GeminiModel, "You are a health check.", "Reply with the single word: OK")
 	case "openai":
 		_, err = askOpenAI(s.OpenAIKey, s.OpenAIBase, s.OpenAIModel, "You are a health check.", "Reply with the single word: OK")
 	default:
@@ -260,9 +260,12 @@ func (a *API) builtinAssistant(msg string) string {
 
 // ---- Providers ----
 
-func askAnthropic(key, system, msg string) (string, error) {
+func askAnthropic(key, model, system, msg string) (string, error) {
+	if model == "" {
+		model = "claude-opus-4-8"
+	}
 	body, _ := json.Marshal(map[string]any{
-		"model": "claude-sonnet-4-6", "max_tokens": 1024, "system": system,
+		"model": model, "max_tokens": 1024, "system": system,
 		"messages": []map[string]string{{"role": "user", "content": msg}},
 	})
 	req, _ := http.NewRequest("POST", "https://api.anthropic.com/v1/messages", bytes.NewReader(body))
@@ -283,12 +286,15 @@ func askAnthropic(key, system, msg string) (string, error) {
 	return out.Content[0].Text, nil
 }
 
-func askGemini(key, system, msg string) (string, error) {
+func askGemini(key, model, system, msg string) (string, error) {
+	if model == "" {
+		model = "gemini-3.5-flash"
+	}
 	body, _ := json.Marshal(map[string]any{
 		"system_instruction": map[string]any{"parts": []map[string]string{{"text": system}}},
 		"contents":           []map[string]any{{"parts": []map[string]string{{"text": msg}}}},
 	})
-	u := "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" + key
+	u := "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent?key=" + key
 	req, _ := http.NewRequest("POST", u, bytes.NewReader(body))
 	req.Header.Set("content-type", "application/json")
 	var out struct {
@@ -314,7 +320,7 @@ func askOpenAI(key, base, model, system, msg string) (string, error) {
 		base = "https://api.openai.com/v1"
 	}
 	if model == "" {
-		model = "gpt-4o-mini"
+		model = "gpt-5.5"
 	}
 	body, _ := json.Marshal(map[string]any{
 		"model": model,
