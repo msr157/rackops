@@ -19,6 +19,7 @@ export interface Metrics {
 }
 export interface Node {
   id: string; name: string; role: string; status: string; ip: string; meshIp: string;
+  publicIp?: string;
   os: string; arch: string; kernel: string; hostname: string; joinedAt: string;
   lastSeen: string; agentVersion: string; hasPublicIp: boolean;
   hardware: Hardware; metrics: Metrics;
@@ -64,7 +65,10 @@ export interface Deployment {
   log: string; startedAt: string; durationMs: number;
 }
 export interface Domain { id: string; name: string; createdAt: string }
-export interface IngressConfig { enabled: boolean; nodeId: string; httpPort: number; httpsPort: number; acmeEmail: string }
+export interface IngressConfig {
+  enabled: boolean; nodeId: string; httpPort: number; httpsPort: number; acmeEmail: string;
+  status?: string; statusMsg?: string; lastDeploy?: string;
+}
 export interface MeshStatus {
   enabled: boolean; hubIp?: string; hubKey?: string; udpPort?: number;
   peers?: { nodeId: string; meshIp: string }[];
@@ -139,6 +143,8 @@ export const api = {
   setIngress: (cfg: IngressConfig) => req<IngressConfig>('/api/ingress', { method: 'POST', body: JSON.stringify(cfg) }),
   setServiceDomain: (id: string, domain: string, ingress: string) =>
     req<Service>(`/api/services/${id}/domain`, { method: 'POST', body: JSON.stringify({ domain, ingress }) }),
+  exposeService: (id: string) =>
+    req<{ domain: string; url: string }>(`/api/services/${id}/expose`, { method: 'POST' }),
   mesh: () => req<MeshStatus>('/api/mesh'),
   cluster: () => req<ClusterStatus>('/api/cluster'),
   authStatus: () => req<{ needsSetup: boolean }>('/api/auth/status'),

@@ -315,7 +315,17 @@ type IngressConfig struct {
 	HTTPPort  int    `json:"httpPort"`  // default 80
 	HTTPSPort int    `json:"httpsPort"` // default 443
 	ACMEEmail string `json:"acmeEmail"` // enables Let's Encrypt when set
+
+	// Runtime status (server-maintained, not user input).
+	Status     string    `json:"status,omitempty"`     // pending | running | failed
+	StatusMsg  string    `json:"statusMsg,omitempty"`  // last deploy log tail / error
+	LastDeploy time.Time `json:"lastDeploy,omitempty"` // when Traefik last (re)deployed
 }
+
+// AutoDomainSuffix is the wildcard base for instant, zero-DNS URLs.
+// <service>.<ingress-ip-with-dashes>.<suffix> resolves to the ingress IP,
+// e.g. whoami.203-0-113-9.nip.io — no domain ownership or DNS setup needed.
+const AutoDomainSuffix = "nip.io"
 
 // ---- Users & Auth ----
 
@@ -456,6 +466,7 @@ type AgentTask struct {
 // TaskResult reports the outcome of an executed AgentTask.
 type TaskResult struct {
 	TaskID      string `json:"taskId"`
+	ServiceID   string `json:"serviceId,omitempty"` // echoes the task's service (correlates non-deploy results)
 	OK          bool   `json:"ok"`
 	Log         string `json:"log"`
 	ContainerID string `json:"containerId,omitempty"`

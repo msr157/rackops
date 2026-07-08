@@ -179,7 +179,7 @@ func (a *Agent) push(rep types.AgentReport) (*types.AgentResponse, error) {
 // execute runs one task and reports the outcome.
 func (a *Agent) execute(task types.AgentTask) types.TaskResult {
 	log.Printf("agent: executing task %s (%s) for service %s", task.ID, task.Kind, task.ServiceID)
-	res := types.TaskResult{TaskID: task.ID}
+	res := types.TaskResult{TaskID: task.ID, ServiceID: task.ServiceID}
 	if a.runtime == nil {
 		res.Log = "no container runtime available on this node"
 		return res

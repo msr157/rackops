@@ -80,6 +80,7 @@ func (a *API) Router() http.Handler {
 	mux.HandleFunc("POST /api/ingress", a.handleSetIngress)
 	mux.HandleFunc("GET /api/traefik/config", a.handleTraefikConfig)
 	mux.HandleFunc("POST /api/services/{id}/domain", a.handleSetServiceDomain)
+	mux.HandleFunc("POST /api/services/{id}/expose", a.handleExposeService)
 
 	// ---- Live stream ----
 	mux.Handle("GET /api/stream", a.Hub)
@@ -154,6 +155,25 @@ func (a *API) handleIngest(w http.ResponseWriter, r *http.Request) {
 			if cs.ServiceID == "" {
 				continue
 			}
+			// The Traefik edge is a pseudo-service: track its liveness as
+			// ingress health so a crash-loop (e.g. port conflict) surfaces
+			// instead of showing "running" forever.
+			if cs.ServiceID == ingressServiceID {
+				if a.Store.Ingress.NodeID == rep.NodeID {
+					if cs.State == "running" {
+						if a.Store.Ingress.Status != "running" {
+							a.Store.Ingress.Status = "running"
+							a.Store.Ingress.StatusMsg = ""
+						}
+					} else if a.Store.Ingress.Enabled {
+						a.Store.Ingress.Status = "failed"
+						if a.Store.Ingress.StatusMsg == "" {
+							a.Store.Ingress.StatusMsg = "edge container is " + cs.State + " (check its logs — often a port conflict)"
+						}
+					}
+				}
+				continue
+			}
 			if svc := a.Store.Services[cs.ServiceID]; svc != nil {
 				svc.ContainerID = cs.ID
 				svc.CPUPct = cs.CPUPct
@@ -214,6 +234,12 @@ func (a *API) handleIngest(w http.ResponseWriter, r *http.Request) {
 func (a *API) applyTaskResult(nodeID string, res types.TaskResult) {
 	// Log fetches route straight to the waiting HTTP request.
 	if deliverLogs(res.TaskID, res.Log) {
+		return
+	}
+	// The Traefik edge is a pseudo-service with no Deployment record; its
+	// result feeds the ingress health status instead.
+	if res.ServiceID == ingressServiceID {
+		a.applyIngressResult(nodeID, res)
 		return
 	}
 	var svc *types.Service
