@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rackops/rackops/internal/raftstore"
 	"github.com/rackops/rackops/internal/types"
 )
 
@@ -23,6 +24,10 @@ type API struct {
 	JoinToken string
 	// JWTSecret signs session tokens.
 	JWTSecret []byte
+	// Cluster is the raft layer (nil = single-server).
+	Cluster *raftstore.Cluster
+	// applyGuard applies replicated state on followers only.
+	applyGuard func([]byte)
 }
 
 // Router builds the full HTTP mux.
@@ -87,11 +92,15 @@ func (a *API) Router() http.Handler {
 	mux.HandleFunc("POST /api/settings", a.handleSetSettings)
 	mux.HandleFunc("POST /api/assistant", a.handleAssistant)
 
+	// ---- Cluster (HA) ----
+	mux.HandleFunc("GET /api/cluster", a.handleClusterStatus)
+	mux.HandleFunc("POST /api/cluster/join", a.handleClusterJoin)
+
 	// ---- Dashboard ----
 	if a.DashFS != nil {
 		mux.Handle("/", spaHandler(a.DashFS))
 	}
-	return a.authMiddleware(mux)
+	return a.clusterGuard(a.authMiddleware(mux))
 }
 
 // ---- Agent ingest ----

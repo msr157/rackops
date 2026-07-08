@@ -63,8 +63,15 @@ func parseJWT(secret []byte, token string) (*jwtClaims, error) {
 	return &c, nil
 }
 
-// LoadOrCreateJWTSecret persists the signing secret in the data dir.
-func LoadOrCreateJWTSecret(dataDir string) []byte {
+// DeriveJWTSecret derives the signing secret from the cluster join token so
+// every server in an HA cluster agrees on it — sessions survive leader
+// failover — and it stays stable across restarts. Falls back to a persisted
+// random secret only if no join token is available.
+func DeriveJWTSecret(dataDir, joinToken string) []byte {
+	if joinToken != "" {
+		sum := sha256.Sum256([]byte("rackops-jwt-v1:" + joinToken))
+		return sum[:]
+	}
 	path := filepath.Join(dataDir, "jwt-secret")
 	if data, err := os.ReadFile(path); err == nil && len(data) >= 32 {
 		return data
@@ -145,7 +152,7 @@ func (a *API) handleSignup(w http.ResponseWriter, r *http.Request) {
 	a.Store.AddEvent("auth", "User created: "+u.Email+" ("+string(role)+")", "", "")
 
 	token := signJWT(a.JWTSecret, jwtClaims{Sub: u.ID, Role: string(u.Role), Exp: time.Now().Add(7 * 24 * time.Hour).Unix()})
-	writeJSON(w, map[string]any{"token": token, "user": u})
+	writeJSON(w, map[string]any{"token": token, "user": u.Sanitized()})
 }
 
 // handleLogin authenticates and issues a JWT.
@@ -172,7 +179,7 @@ func (a *API) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	token := signJWT(a.JWTSecret, jwtClaims{Sub: user.ID, Role: string(user.Role), Exp: time.Now().Add(7 * 24 * time.Hour).Unix()})
-	writeJSON(w, map[string]any{"token": token, "user": user})
+	writeJSON(w, map[string]any{"token": token, "user": user.Sanitized()})
 }
 
 // handleListUsers returns all accounts (admin+).
@@ -180,7 +187,7 @@ func (a *API) handleListUsers(w http.ResponseWriter, r *http.Request) {
 	var out []*types.User
 	a.Store.View(func() {
 		for _, u := range a.Store.Users {
-			out = append(out, u)
+			out = append(out, u.Sanitized())
 		}
 	})
 	writeJSON(w, out)
@@ -218,7 +225,7 @@ func (a *API) handleListTokens(w http.ResponseWriter, r *http.Request) {
 	var out []*types.APIToken
 	a.Store.View(func() {
 		for _, t := range a.Store.Tokens {
-			out = append(out, t)
+			out = append(out, t.Sanitized())
 		}
 	})
 	writeJSON(w, out)
@@ -249,7 +256,9 @@ func (a *API) authMiddleware(next http.Handler) http.Handler {
 		return !strings.HasPrefix(p, "/api/") ||
 			strings.HasPrefix(p, "/api/auth/") ||
 			p == "/api/agent/ingest" ||
-			p == "/api/traefik/config"
+			p == "/api/traefik/config" ||
+			p == "/api/cluster" ||
+			p == "/api/cluster/join"
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if open(r.URL.Path) {

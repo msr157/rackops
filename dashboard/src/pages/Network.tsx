@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Globe, Network as NetworkIcon, Plus, Trash2, Shield, Waypoints } from 'lucide-react';
+import { Globe, Network as NetworkIcon, Plus, Trash2, Shield, Waypoints, Boxes } from 'lucide-react';
 import { api } from '../api';
-import type { Node, Service, Domain, IngressConfig, MeshStatus } from '../api';
+import type { Node, Service, Domain, IngressConfig, MeshStatus, ClusterStatus } from '../api';
 
 export function NetworkPage({ nodes, services, onChanged }: {
   nodes: Node[]; services: Service[]; onChanged: () => void;
@@ -10,6 +10,7 @@ export function NetworkPage({ nodes, services, onChanged }: {
   const [newDomain, setNewDomain] = useState('');
   const [ingress, setIngressCfg] = useState<IngressConfig | null>(null);
   const [meshStatus, setMeshStatus] = useState<MeshStatus | null>(null);
+  const [cluster, setCluster] = useState<ClusterStatus | null>(null);
   const [acmeEmail, setAcmeEmail] = useState('');
   const [ingressNode, setIngressNode] = useState('');
   const [httpPort, setHttpPort] = useState('80');
@@ -25,6 +26,7 @@ export function NetworkPage({ nodes, services, onChanged }: {
       setAcmeEmail(i.acmeEmail ?? '');
     }).catch(() => {});
     api.mesh().then(setMeshStatus).catch(() => {});
+    api.cluster().then(setCluster).catch(() => {});
   };
   useEffect(load, []);
 
@@ -126,6 +128,24 @@ export function NetworkPage({ nodes, services, onChanged }: {
           </div>
         </div>
       </div>
+
+      {/* HA cluster */}
+      {cluster?.enabled && (
+        <>
+          <div className="section-title"><Boxes size={15} /> Control Plane Cluster (HA)</div>
+          <div className="card">
+            <div className="dim" style={{ marginBottom: 10 }}>
+              Raft-replicated control plane — state survives node failure, leader re-elected automatically.
+            </div>
+            {(cluster.peers ?? []).map((p) => (
+              <div className="row spread" key={p.id} style={{ padding: '6px 0', borderTop: '1px solid var(--border)' }}>
+                <span className="mono">{p.id} <span className="faint">{p.addr}</span></span>
+                <span className={`badge ${p.role === 'leader' ? 'green' : 'gray'}`}>{p.role}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
 
       {/* Domains */}
       <div className="section-title"><Globe size={15} /> Domains</div>

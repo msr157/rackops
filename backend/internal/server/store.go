@@ -36,8 +36,16 @@ type Store struct {
 	// taskQueue maps nodeID -> pending agent tasks (not persisted; re-derived).
 	taskQueue map[string][]types.AgentTask
 
+	// ClusterHTTP maps server nodeID -> HTTP address (replicated for redirects).
+	ClusterHTTP map[string]string `json:"clusterHttp,omitempty"`
+
 	dataDir string
 	dirty   bool
+	// OnDirty, when set, is called with the exported state after each persist
+	// (used by the Raft layer to replicate; leader only).
+	OnDirty func([]byte) `json:"-"`
+	// importing suppresses OnDirty while applying replicated state.
+	importing bool
 }
 
 // Settings holds cluster-wide integrations config.
@@ -111,14 +119,47 @@ func (s *Store) persistLoop() {
 		data, err := json.MarshalIndent(s, "", " ")
 		s.dirty = false
 		path := filepath.Join(s.dataDir, "state.json")
+		onDirty := s.OnDirty
+		importing := s.importing
 		s.mu.Unlock()
 		if err == nil {
 			tmp := path + ".tmp"
 			if err := os.WriteFile(tmp, data, 0o600); err == nil {
 				_ = os.Rename(tmp, path)
 			}
+			if onDirty != nil && !importing {
+				onDirty(data)
+			}
 		}
 	}
+}
+
+// ImportJSON replaces replicated state (nodes/services/etc) from a snapshot.
+// Runtime-only fields (task queue) are preserved.
+func (s *Store) ImportJSON(data []byte) error {
+	var in Store
+	if err := json.Unmarshal(data, &in); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.importing = true
+	s.Nodes = in.Nodes
+	s.Projects = in.Projects
+	s.Envs = in.Envs
+	s.Services = in.Services
+	s.Deployments = in.Deployments
+	s.Users = in.Users
+	s.Tokens = in.Tokens
+	s.Alerts = in.Alerts
+	s.Domains = in.Domains
+	s.Ingress = in.Ingress
+	s.Settings = in.Settings
+	s.Events = in.Events
+	s.ClusterHTTP = in.ClusterHTTP
+	s.dirty = true // persist locally
+	s.importing = false
+	return nil
 }
 
 // Mutate runs fn under the write lock and marks state dirty.

@@ -42,3 +42,23 @@ cd ../backend && go build -o rackops ./cmd/rackops
 backend/   Go module — single `rackops` binary (server / agent / probe)
 dashboard/ React + TypeScript + Vite (embedded into the binary at build time)
 ```
+
+## High Availability (Milestone 6)
+
+RackOps Lite ships an optional Raft-replicated control plane — the dashboard and API survive the loss of any single server node.
+
+```sh
+# Node 1 (bootstrap)
+rackops server --raft-addr :9522 --node-id n1 --advertise <ip1>
+
+# Nodes 2 & 3 join the cluster (share the same join token)
+rackops server --raft-addr :9522 --node-id n2 --advertise <ip2> --join http://<ip1>:8080
+rackops server --raft-addr :9522 --node-id n3 --advertise <ip3> --join http://<ip1>:8080
+```
+
+- Full control-plane state (nodes, services, users, tokens, settings) replicates via `hashicorp/raft`
+- Automatic leader election on failure; followers redirect writes to the leader
+- Sessions and API tokens survive failover (JWT secret derived from the shared join token)
+- Workloads never depend on control-plane uptime — agents keep containers and routing alive regardless
+
+Without `--raft-addr`, RackOps runs as a single node (JSON-persisted state) — ideal for a home lab.

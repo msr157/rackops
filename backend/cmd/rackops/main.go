@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"github.com/rackops/rackops/internal/agent"
+	"github.com/rackops/rackops/internal/raftstore"
 	"github.com/rackops/rackops/internal/server"
 	"github.com/rackops/rackops/internal/telemetry"
 )
@@ -82,6 +84,10 @@ func runServer(args []string) {
 	name := fs.String("name", "", "node display name")
 	meshPort := fs.Int("mesh-port", 51820, "WireGuard UDP port (0 disables mesh)")
 	advertise := fs.String("advertise", "", "address agents reach this server on (default: auto-detect)")
+	raftAddr := fs.String("raft-addr", "", "enable HA: raft bind address, e.g. :9522")
+	raftAdvertise := fs.String("raft-advertise", "", "raft address peers reach us on (default: advertise host + raft port)")
+	join := fs.String("join", "", "join an existing cluster via a leader's HTTP address")
+	nodeID := fs.String("node-id", "", "stable server node ID (default: derived from advertise addr)")
 	_ = fs.Parse(args)
 
 	store, err := server.NewStore(*dataDir)
@@ -110,7 +116,7 @@ func runServer(args []string) {
 		Hub:       server.NewHub(),
 		Mesh:      meshHub,
 		JoinToken: token,
-		JWTSecret: server.LoadOrCreateJWTSecret(*dataDir),
+		JWTSecret: server.DeriveJWTSecret(*dataDir, token),
 		DashFS:    server.DashboardFS(),
 	}
 
@@ -145,12 +151,99 @@ func runServer(args []string) {
 
 	store.AddEvent("server", "RackOps control plane started (v"+version+")", "", "")
 	server.SetListenPort(strings.TrimPrefix(normalizeListen(*listen), ":"))
+
+	// HA clustering (optional).
+	if *raftAddr != "" {
+		host := *advertise
+		if host == "" {
+			host = telemetry.Host().IP
+		}
+		radv := *raftAdvertise
+		if radv == "" {
+			radv = host + ":" + strings.TrimPrefix(normalizeListen(*raftAddr), ":")
+		}
+		id := *nodeID
+		if id == "" {
+			id = "srv-" + radv
+		}
+		cl, err := raftstore.New(raftstore.Options{
+			NodeID:    id,
+			BindAddr:  *raftAddr,
+			Advertise: radv,
+			DataDir:   *dataDir,
+			Bootstrap: *join == "",
+			OnApply:   api.ApplyReplicated, // follower-only import (leader is authoritative)
+		})
+		if err != nil {
+			log.Fatalf("raft: %v", err)
+		}
+		api.StartReplication(cl)
+
+		httpAdv := host + normalizeListen(*listen)
+		store.Mutate(func() {
+			if store.ClusterHTTP == nil {
+				store.ClusterHTTP = map[string]string{}
+			}
+			store.ClusterHTTP[id] = httpAdv
+		})
+		log.Printf("raft: node %s bind %s advertise %s", id, *raftAddr, radv)
+
+		if *join != "" {
+			go joinCluster(*join, token, id, radv, httpAdv)
+		}
+	}
+
 	log.Printf("rackops server v%s listening on %s", version, *listen)
 	log.Printf("join token: %s", token)
 	log.Printf("add a node:  rackops agent --server http://<this-host>%s --token %s", normalizeListen(*listen), token)
 	if err := http.ListenAndServe(*listen, api.Router()); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// joinCluster asks a leader to admit this server, following redirects to the
+// actual leader if the contacted node is a follower.
+func joinCluster(leaderHTTP, token, nodeID, raftAddr, httpAddr string) {
+	body, _ := json.Marshal(map[string]string{"nodeId": nodeID, "raftAddr": raftAddr, "httpAddr": httpAddr})
+	target := strings.TrimSuffix(leaderHTTP, "/")
+	for attempt := 0; attempt < 30; attempt++ {
+		time.Sleep(2 * time.Second)
+		req, _ := http.NewRequest("POST", target+"/api/cluster/join", bytes.NewReader(body))
+		req.Header.Set("X-Rackops-Token", token)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			log.Printf("cluster: join attempt failed: %v (retrying)", err)
+			continue
+		}
+		data, _ := readAll(resp)
+		resp.Body.Close()
+		switch resp.StatusCode {
+		case http.StatusOK:
+			log.Printf("cluster: joined via %s", target)
+			return
+		case http.StatusMisdirectedRequest:
+			// Follow to the real leader.
+			var e struct {
+				Leader string `json:"leader"`
+				Error  string `json:"error"`
+			}
+			_ = json.Unmarshal(data, &e)
+			if e.Leader != "" {
+				log.Printf("cluster: redirected to leader %s", e.Leader)
+				target = "http://" + strings.TrimPrefix(strings.TrimPrefix(e.Leader, "http://"), "https://")
+			}
+		default:
+			log.Printf("cluster: join rejected (%d): %s", resp.StatusCode, string(data))
+		}
+	}
+	log.Printf("cluster: giving up joining %s after retries", leaderHTTP)
+}
+
+func readAll(resp *http.Response) ([]byte, error) {
+	buf := new(bytes.Buffer)
+	_, err := buf.ReadFrom(resp.Body)
+	return buf.Bytes(), err
 }
 
 func runAgent(args []string) {

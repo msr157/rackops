@@ -56,6 +56,10 @@ export interface MeshStatus {
   enabled: boolean; hubIp?: string; hubKey?: string; udpPort?: number;
   peers?: { nodeId: string; meshIp: string }[];
 }
+export interface ClusterStatus {
+  enabled: boolean; nodeId?: string; isLeader?: boolean; leaderAddr?: string;
+  peers?: { id: string; addr: string; role: string }[];
+}
 export interface User { id: string; email: string; fullName: string; role: string; createdAt: string }
 export interface APIToken { id: string; name: string; userId: string; createdAt: string }
 export interface Settings {
@@ -117,6 +121,7 @@ export const api = {
   setServiceDomain: (id: string, domain: string, ingress: string) =>
     req<Service>(`/api/services/${id}/domain`, { method: 'POST', body: JSON.stringify({ domain, ingress }) }),
   mesh: () => req<MeshStatus>('/api/mesh'),
+  cluster: () => req<ClusterStatus>('/api/cluster'),
   authStatus: () => req<{ needsSetup: boolean }>('/api/auth/status'),
   signup: (email: string, fullName: string, password: string) =>
     req<{ token: string; user: User }>('/api/auth/signup', { method: 'POST', body: JSON.stringify({ email, fullName, password }) }),

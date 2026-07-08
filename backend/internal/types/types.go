@@ -304,24 +304,40 @@ const (
 	RoleViewer UserRole = "viewer"
 )
 
-// User is an operator account.
+// User is an operator account. PasswordHash must replicate across the cluster
+// (raft state), so it is serialized; API responses strip it via Sanitized().
 type User struct {
 	ID           string    `json:"id"`
 	Email        string    `json:"email"`
 	FullName     string    `json:"fullName"`
-	PasswordHash string    `json:"-"`
+	PasswordHash string    `json:"passwordHash,omitempty"`
 	Role         UserRole  `json:"role"`
 	CreatedAt    time.Time `json:"createdAt"`
 }
 
-// APIToken is a bearer token for the REST API / CLI.
+// Sanitized returns a copy safe to send to API clients (no password hash).
+func (u *User) Sanitized() *User {
+	c := *u
+	c.PasswordHash = ""
+	return &c
+}
+
+// APIToken is a bearer token for the REST API / CLI. TokenHash replicates
+// (raft state) so tokens validate cluster-wide; Sanitized() strips it for API.
 type APIToken struct {
 	ID        string    `json:"id"`
 	UserID    string    `json:"userId"`
 	Name      string    `json:"name"`
-	TokenHash string    `json:"-"`
+	TokenHash string    `json:"tokenHash,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 	LastUsed  time.Time `json:"lastUsed,omitempty"`
+}
+
+// Sanitized returns a copy safe for API clients (no token hash).
+func (t *APIToken) Sanitized() *APIToken {
+	c := *t
+	c.TokenHash = ""
+	return &c
 }
 
 // ---- Agent protocol ----
