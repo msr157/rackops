@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go mod *)",
+      "Bash(mkdir -p cmd/rackops-server cmd/rackops-agent internal/telemetry internal/server internal/agent internal/types internal/catalog)"
+    ]
+  }
+}
