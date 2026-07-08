@@ -125,8 +125,14 @@ func (a *API) handleSignup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !first {
-		// Only authenticated admins/owners may add users.
+		// Only authenticated admins/owners may add users. Auth routes are
+		// open in the middleware, so parse the bearer token here directly.
 		claims := claimsFrom(r)
+		if claims == nil {
+			if tok := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "); tok != "" {
+				claims, _ = parseJWT(a.JWTSecret, tok)
+			}
+		}
 		if claims == nil || (claims.Role != string(types.RoleOwner) && claims.Role != string(types.RoleAdmin)) {
 			http.Error(w, "only admins can create users", http.StatusForbidden)
 			return
