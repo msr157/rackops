@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Globe, Network as NetworkIcon, Plus, Trash2, Shield, Waypoints, Boxes, Zap, ExternalLink, AlertTriangle, CheckCircle2, Loader, Copy, RefreshCw, ChevronDown, ChevronRight, Lock, Rocket, X } from 'lucide-react';
+import { Globe, Network as NetworkIcon, Plus, Trash2, Shield, Waypoints, Boxes, Zap, ExternalLink, AlertTriangle, CheckCircle2, Loader, Copy, RefreshCw, ChevronDown, ChevronRight, Lock, Rocket, X, Cloud } from 'lucide-react';
 import { api } from '../api';
 import type { Node, Service, Domain, IngressConfig, MeshStatus, ClusterStatus, NetworkDiagnosis } from '../api';
 
@@ -59,6 +59,7 @@ export function NetworkPage({ nodes, services, onChanged }: {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [subEdit, setSubEdit] = useState<{ svcId: string; sub: string; base: string } | null>(null);
+  const [tunnelStarting, setTunnelStarting] = useState<Record<string, boolean>>({});
 
   const load = () => {
     api.domains().then((d) => setDomains(d ?? [])).catch(() => {});
@@ -136,6 +137,34 @@ export function NetworkPage({ nodes, services, onChanged }: {
       onChanged();
       load();
     } catch (e) { setErr(String(e)); }
+  };
+
+  const startTunnel = async (svc: Service) => {
+    setErr('');
+    setTunnelStarting((t) => ({ ...t, [svc.id]: true }));
+    try {
+      await api.startQuickTunnel(svc.id);
+      // The URL arrives async (first run pulls the cloudflared image);
+      // poll the service list until it lands or we give up.
+      const until = Date.now() + 75_000;
+      const tick = async () => {
+        onChanged();
+        const fresh = await api.service(svc.id).catch(() => null);
+        if (fresh?.quickTunnelUrl || Date.now() > until) {
+          setTunnelStarting((t) => ({ ...t, [svc.id]: false }));
+          onChanged();
+        } else setTimeout(tick, 3000);
+      };
+      setTimeout(tick, 3000);
+    } catch (e) {
+      setErr(String(e));
+      setTunnelStarting((t) => ({ ...t, [svc.id]: false }));
+    }
+  };
+
+  const stopTunnel = async (svc: Service) => {
+    setErr('');
+    try { await api.stopQuickTunnel(svc.id); onChanged(); } catch (e) { setErr(String(e)); }
   };
 
   const nodeName = (id: string) => nodes.find((n) => n.id === id)?.name ?? id;
@@ -394,6 +423,15 @@ export function NetworkPage({ nodes, services, onChanged }: {
                   {backing && backing.status !== 'verified' && s.domain &&
                     <span className="badge yellow" style={{ marginLeft: 8 }}><AlertTriangle size={10} /> DNS not verified</span>}
                 </span>
+                {s.quickTunnelUrl && (
+                  <div style={{ marginTop: 4 }} className="row">
+                    <a className="mono" href={s.quickTunnelUrl} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>
+                      {s.quickTunnelUrl} <ExternalLink size={11} />
+                    </a>
+                    <span className="badge yellow"><Cloud size={10} /> quick tunnel — testing, URL changes on restart</span>
+                    <button className="btn sm danger" title="Stop tunnel" onClick={() => stopTunnel(s)}><X size={11} /></button>
+                  </div>
+                )}
                 {s.domain && (
                   <div style={{ marginTop: 4 }} className="row">
                     {live
@@ -419,6 +457,13 @@ export function NetworkPage({ nodes, services, onChanged }: {
                 )}
               </div>
               <div className="row" style={{ flexShrink: 0 }}>
+                {!s.quickTunnelUrl && (
+                  <button className="btn sm" disabled={!!tunnelStarting[s.id]}
+                    title="Free public URL via Cloudflare quick tunnel — no account, no DNS, testing only"
+                    onClick={() => startTunnel(s)}>
+                    <Cloud size={12} /> {tunnelStarting[s.id] ? 'Starting…' : 'CF tunnel'}
+                  </button>
+                )}
                 <button className="btn sm" disabled={!ingress?.enabled} title="Assign an instant nip.io URL — no DNS setup"
                   onClick={() => expose(s)}><Zap size={12} /> Instant URL</button>
                 <select className="input" style={{ width: 230 }}
@@ -495,6 +540,13 @@ export function NetworkPage({ nodes, services, onChanged }: {
               </div>
               4. On the VPS dashboard: enable the <b>edge on the VPS node</b> (ports 80/443).<br />
               5. Your apps stay on this machine — traffic flows VPS → encrypted mesh → here, automatically.
+            </div>
+
+            <div className="section-title">Option C — quick tunnel <span className="faint">(zero setup, testing only)</span></div>
+            <div className="card dim" style={{ lineHeight: 1.8 }}>
+              Hit <b><Cloud size={11} /> CF tunnel</b> on any app in the routing table — you get a free public
+              <span className="mono"> trycloudflare.com</span> URL in seconds, even behind CGNAT or a mobile hotspot.
+              No account, no DNS. <span className="faint">⚠ URL changes on every restart and rides Cloudflare's free tier — great for demos/testing, not production.</span>
             </div>
           </div>
         </div>

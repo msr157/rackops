@@ -35,6 +35,7 @@ export interface Service {
   gitRepo?: string; gitBranch?: string; image?: string; composeYml?: string; templateId?: string;
   nodeId: string; autoPlace: boolean;
   port: number; ports?: number[]; command?: string; domain: string; ingress: string;
+  quickTunnelUrl?: string;
   env: EnvVar[] | null; mounts?: Mount[]; volumes?: string[];
   cpuPct: number; memUsedMb: number; memLimitMb?: number; cpuLimit?: number;
   restartPolicy?: string; gpu?: boolean;
@@ -158,6 +159,9 @@ export const api = {
     req<Service>(`/api/services/${id}/domain`, { method: 'POST', body: JSON.stringify({ domain, ingress }) }),
   exposeService: (id: string) =>
     req<{ domain: string; url: string }>(`/api/services/${id}/expose`, { method: 'POST' }),
+  startQuickTunnel: (id: string) =>
+    req<{ status: string }>(`/api/services/${id}/quick-tunnel`, { method: 'POST' }),
+  stopQuickTunnel: (id: string) => req<void>(`/api/services/${id}/quick-tunnel`, { method: 'DELETE' }),
   mesh: () => req<MeshStatus>('/api/mesh'),
   cluster: () => req<ClusterStatus>('/api/cluster'),
   authStatus: () => req<{ needsSetup: boolean }>('/api/auth/status'),

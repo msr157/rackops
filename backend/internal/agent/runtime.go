@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/rackops/rackops/internal/types"
 )
@@ -301,6 +303,53 @@ func mountSpec(p DeployPayload, m types.Mount) (string, error) {
 	default:
 		return "", fmt.Errorf("unknown mount type %q", m.Type)
 	}
+}
+
+// StartQuickTunnel launches a cloudflared quick-tunnel container for a
+// service port and returns the assigned trycloudflare.com URL. Host
+// networking lets cloudflared reach the service at 127.0.0.1:<port>.
+// Quick tunnels need no Cloudflare account; the URL changes on restart.
+func (r *Runtime) StartQuickTunnel(serviceID string, port int) (string, error) {
+	if port <= 0 {
+		return "", fmt.Errorf("service has no port to tunnel")
+	}
+	name := quickTunnelName(serviceID)
+	_ = exec.Command(r.Bin, "rm", "-f", name).Run()
+
+	out, err := exec.Command(r.Bin, "run", "-d", "--name", name,
+		"--label", "rackops.tunnel="+serviceID,
+		"--network", "host",
+		"--restart", "unless-stopped",
+		"cloudflare/cloudflared:latest",
+		"tunnel", "--no-autoupdate", "--url", fmt.Sprintf("http://127.0.0.1:%d", port),
+	).CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("cloudflared start failed: %s", strings.TrimSpace(string(out)))
+	}
+
+	// cloudflared prints the assigned URL within a few seconds; first run may
+	// also pull the image, so poll generously.
+	re := regexp.MustCompile(`https://[a-z0-9-]+\.trycloudflare\.com`)
+	deadline := time.Now().Add(60 * time.Second)
+	for time.Now().Before(deadline) {
+		logs, _ := exec.Command(r.Bin, "logs", name).CombinedOutput()
+		if m := re.Find(logs); m != nil {
+			return string(m), nil
+		}
+		// Bail early if the container already died (bad image/arch, no net).
+		state, _ := exec.Command(r.Bin, "inspect", "-f", "{{.State.Running}}", name).Output()
+		if strings.TrimSpace(string(state)) == "false" {
+			tail := logs
+			if len(tail) > 300 {
+				tail = tail[len(tail)-300:]
+			}
+			_ = exec.Command(r.Bin, "rm", "-f", name).Run()
+			return "", fmt.Errorf("cloudflared exited: %s", strings.TrimSpace(string(tail)))
+		}
+		time.Sleep(2 * time.Second)
+	}
+	_ = exec.Command(r.Bin, "rm", "-f", name).Run()
+	return "", fmt.Errorf("timed out waiting for the trycloudflare URL (network blocking outbound?)")
 }
 
 // isHex reports whether s consists solely of hex digits.

@@ -217,6 +217,9 @@ type Service struct {
 	Mounts     []Mount     `json:"mounts,omitempty"`  // storage attachments
 	Domain     string      `json:"domain"`            // chosen domain (empty = generated)
 	Ingress    IngressType `json:"ingress"`
+	// QuickTunnelURL is a temporary trycloudflare.com URL (testing only —
+	// changes on every tunnel restart; not for production traffic).
+	QuickTunnelURL string `json:"quickTunnelUrl,omitempty"`
 	Env        []EnvVar    `json:"env"`
 	CPUPct     float64     `json:"cpuPct"`
 	MemUsedMB  int64       `json:"memUsedMb"`
@@ -486,6 +489,10 @@ const (
 	TaskListDir TaskKind = "listdir"
 	TaskBuild   TaskKind = "build"
 	TaskBackup  TaskKind = "backup"
+	// Cloudflare quick tunnel (testing): run/stop a cloudflared container
+	// that exposes the service at a random trycloudflare.com URL.
+	TaskTunnelStart TaskKind = "tunnel-start"
+	TaskTunnelStop  TaskKind = "tunnel-stop"
 )
 
 // AgentTask is a unit of work queued for an agent.

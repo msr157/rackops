@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ArrowLeft, Box, Cpu, Globe, HardDrive, History, KeyRound, Play, Plus,
+  ArrowLeft, Box, Cloud, Cpu, ExternalLink, Globe, HardDrive, History, KeyRound, Play, Plus,
   RotateCw, Save, ScrollText, Square, Trash2, TriangleAlert, X, Folder, FolderOpen, Rocket,
 } from 'lucide-react';
 import { api } from '../api';
@@ -56,6 +56,7 @@ export function ServiceDetail({ serviceId, nodes, onBack, onChanged }: {
   const [domains, setDomains] = useState<Domain[]>([]);
   const [scores, setScores] = useState<PlacementScore[]>([]);
   const [browse, setBrowse] = useState<{ mountIdx: number; path: string; entries: DirEntry[] } | null>(null);
+  const [tunnelBusy, setTunnelBusy] = useState(false);
 
   const load = useCallback(() => {
     api.service(serviceId).then((s) => {
@@ -328,6 +329,32 @@ export function ServiceDetail({ serviceId, nodes, onBack, onChanged }: {
                 <span className="faint">applies immediately via Traefik (verify DNS on the Network page)</span>
               </div>
               {svc.domain && <div className="mono dim" style={{ marginTop: 6 }}>current: {svc.domain}</div>}
+
+              <div className="section-title">Quick Tunnel <span className="faint">(Cloudflare, testing only)</span></div>
+              {svc.quickTunnelUrl ? (
+                <div className="row">
+                  <a className="mono" href={svc.quickTunnelUrl} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>
+                    {svc.quickTunnelUrl} <ExternalLink size={11} />
+                  </a>
+                  <span className="badge yellow"><Cloud size={10} /> URL changes on restart</span>
+                  <button className="btn sm danger" disabled={tunnelBusy}
+                    onClick={async () => { setTunnelBusy(true); try { await api.stopQuickTunnel(svc.id); load(); } catch (e) { setErr(String(e)); } setTunnelBusy(false); }}>
+                    Stop tunnel
+                  </button>
+                </div>
+              ) : (
+                <div className="row">
+                  <button className="btn sm" disabled={tunnelBusy || !svc.port}
+                    onClick={async () => {
+                      setTunnelBusy(true); setErr('');
+                      try { await api.startQuickTunnel(svc.id); } catch (e) { setErr(String(e)); }
+                      setTimeout(() => setTunnelBusy(false), 20000); // URL lands via the 4s status refresh
+                    }}>
+                    <Cloud size={12} /> {tunnelBusy ? 'Starting… (first run pulls cloudflared)' : 'Get free public URL'}
+                  </button>
+                  <span className="faint">no account, no DNS, works behind CGNAT/hotspots — for demos & testing</span>
+                </div>
+              )}
             </div>
           )}
 

@@ -239,6 +239,8 @@ func (a *Agent) execute(task types.AgentTask) types.TaskResult {
 			out, err := a.runtime.Simple("rm", "-f", containerName(p))
 			res.Log, res.OK = out, err == nil
 		}
+		// Any quick tunnel attached to the service goes with it.
+		_, _ = a.runtime.Simple("rm", "-f", quickTunnelName(p.ServiceID))
 		delete(a.servicePorts, p.ServiceID)
 	case types.TaskLogs:
 		out, err := a.runtime.LogsSince(containerName(p), 500, p.Since)
@@ -249,10 +251,27 @@ func (a *Agent) execute(task types.AgentTask) types.TaskResult {
 		if err != nil {
 			res.Log = "ERROR: " + err.Error()
 		}
+	case types.TaskTunnelStart:
+		url, err := a.runtime.StartQuickTunnel(p.ServiceID, p.Port)
+		if err != nil {
+			res.Log = "ERROR: " + err.Error()
+		} else {
+			res.Log, res.OK = url, true
+		}
+	case types.TaskTunnelStop:
+		_, _ = a.runtime.Simple("rm", "-f", quickTunnelName(p.ServiceID))
+		res.OK = true
 	default:
 		res.Log = "unknown task kind: " + string(task.Kind)
 	}
 	return res
+}
+
+// quickTunnelName is the cloudflared container name for a service's tunnel.
+// Labeled rackops.tunnel (NOT rackops.service) so it stays out of the
+// container→service status sync.
+func quickTunnelName(serviceID string) string {
+	return "rackops-qt-" + serviceID
 }
 
 // DeployPayload mirrors server.DeployPayload (kept in sync; agent is

@@ -84,6 +84,8 @@ func (a *API) Router() http.Handler {
 	mux.HandleFunc("GET /api/traefik/config", a.handleTraefikConfig)
 	mux.HandleFunc("POST /api/services/{id}/domain", a.handleSetServiceDomain)
 	mux.HandleFunc("POST /api/services/{id}/expose", a.handleExposeService)
+	mux.HandleFunc("POST /api/services/{id}/quick-tunnel", a.handleStartQuickTunnel)
+	mux.HandleFunc("DELETE /api/services/{id}/quick-tunnel", a.handleStopQuickTunnel)
 
 	// ---- Live stream ----
 	mux.Handle("GET /api/stream", a.Hub)
@@ -237,6 +239,10 @@ func (a *API) handleIngest(w http.ResponseWriter, r *http.Request) {
 func (a *API) applyTaskResult(nodeID string, res types.TaskResult) {
 	// Log fetches route straight to the waiting HTTP request.
 	if deliverLogs(res.TaskID, res.Log) {
+		return
+	}
+	// Quick-tunnel starts resolve to a service URL, not a deployment.
+	if a.applyTunnelResult(nodeID, res) {
 		return
 	}
 	// The Traefik edge is a pseudo-service with no Deployment record; its
