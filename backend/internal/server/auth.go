@@ -263,6 +263,7 @@ func (a *API) authMiddleware(next http.Handler) http.Handler {
 			strings.HasPrefix(p, "/api/auth/") ||
 			p == "/api/agent/ingest" ||
 			p == "/api/traefik/config" ||
+			p == "/api/edge-probe" ||
 			p == "/api/cluster" ||
 			p == "/api/cluster/join"
 	}

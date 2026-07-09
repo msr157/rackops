@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rackops/rackops/internal/telemetry"
@@ -42,6 +43,10 @@ type Agent struct {
 	// servicePorts tracks ports of services deployed on this node (from
 	// deploy payloads) so they can be proxied onto the mesh.
 	servicePorts map[string]int // serviceID -> port
+	// publicIP is the internet-visible address (reflector-detected, refreshed
+	// hourly). Guarded by publicIPMu; "" until first detection completes.
+	publicIP   string
+	publicIPMu sync.Mutex
 }
 
 // New creates an agent, loading or generating a persistent node identity.
@@ -99,6 +104,18 @@ func (a *Agent) Run() {
 	hw := a.collector.Hardware()
 	lastHW := time.Now()
 
+	// Detect the internet-visible IP in the background (never blocks reports)
+	// and refresh hourly — home connections change IPs.
+	go func() {
+		for {
+			ip := telemetry.PublicIP()
+			a.publicIPMu.Lock()
+			a.publicIP = ip
+			a.publicIPMu.Unlock()
+			time.Sleep(time.Hour)
+		}
+	}()
+
 	for {
 		// Refresh full hardware inventory once a minute (drives/GPU usage change).
 		if time.Since(lastHW) > time.Minute {
@@ -106,12 +123,16 @@ func (a *Agent) Run() {
 			lastHW = time.Now()
 		}
 
+		host := telemetry.Host()
+		a.publicIPMu.Lock()
+		host.PublicIP = a.publicIP
+		a.publicIPMu.Unlock()
 		report := types.AgentReport{
 			NodeID:      a.nodeID,
 			Name:        a.cfg.Name,
 			Hardware:    hw,
 			Metrics:     a.collector.Metrics(),
-			Host:        telemetry.Host(),
+			Host:        host,
 			AgentVer:    a.cfg.Version,
 			TaskResults: a.results,
 		}

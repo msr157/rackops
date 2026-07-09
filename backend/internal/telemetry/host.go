@@ -1,10 +1,13 @@
 package telemetry
 
 import (
+	"io"
 	"net"
+	"net/http"
 	"os"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/rackops/rackops/internal/types"
 )
@@ -45,4 +48,31 @@ func outboundIP() string {
 	}
 	defer conn.Close()
 	return conn.LocalAddr().(*net.UDPAddr).IP.String()
+}
+
+// PublicIP discovers this host's internet-visible IPv4 by asking well-known
+// reflector services (tried in order, short timeout). Returns "" when offline
+// or unreachable. Callers should cache — this makes an outbound HTTP request.
+func PublicIP() string {
+	client := &http.Client{Timeout: 4 * time.Second}
+	for _, url := range []string{
+		"https://api.ipify.org",
+		"https://checkip.amazonaws.com",
+		"https://icanhazip.com",
+	} {
+		resp, err := client.Get(url)
+		if err != nil {
+			continue
+		}
+		data, err := io.ReadAll(io.LimitReader(resp.Body, 64))
+		resp.Body.Close()
+		if err != nil {
+			continue
+		}
+		s := strings.TrimSpace(string(data))
+		if ip := net.ParseIP(s); ip != nil && ip.To4() != nil {
+			return s
+		}
+	}
+	return ""
 }

@@ -304,17 +304,30 @@ export function ServiceDetail({ serviceId, nodes, onBack, onChanged }: {
               </div>
               <div className="section-title">Public Domain</div>
               <div className="row">
-                <select className="input" style={{ width: 300 }} value={svc.domain || ''}
+                <select className="input" style={{ width: 300 }}
+                  value={domains.find((d) => d.wildcard && (svc.domain || '').endsWith('.' + d.name.slice(2)))?.name ?? (svc.domain || '')}
                   onChange={async (e) => {
-                    const mode = !e.target.value ? 'none' : 'static';
-                    await api.setServiceDomain(svc.id, e.target.value, mode);
+                    let host = e.target.value;
+                    if (host.startsWith('*.')) {
+                      // Wildcard picked: this service gets <name>.<base>.
+                      const label = svc.name.toLowerCase().replace(/[ ._]/g, '-').replace(/[^a-z0-9-]/g, '') || 'app';
+                      host = `${label}.${host.slice(2)}`;
+                    }
+                    await api.setServiceDomain(svc.id, host, !host ? 'none' : 'static');
                     load(); onChanged();
                   }}>
                   <option value="">— no public route —</option>
-                  {domains.map((d) => <option key={d.id} value={d.name}>{d.name}</option>)}
+                  {svc.domain && !domains.some((d) => d.name === svc.domain || (d.wildcard && svc.domain.endsWith('.' + d.name.slice(2)))) &&
+                    <option value={svc.domain}>{svc.domain} (instant)</option>}
+                  {domains.map((d) => (
+                    <option key={d.id} value={d.name}>
+                      {d.name}{d.status !== 'verified' ? ' ⚠ unverified' : ''}
+                    </option>
+                  ))}
                 </select>
-                <span className="faint">applies immediately via Traefik (manage domains on the Network page)</span>
+                <span className="faint">applies immediately via Traefik (verify DNS on the Network page)</span>
               </div>
+              {svc.domain && <div className="mono dim" style={{ marginTop: 6 }}>current: {svc.domain}</div>}
             </div>
           )}
 

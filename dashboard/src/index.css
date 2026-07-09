@@ -172,3 +172,5 @@ body {
   font-family: var(--mono); font-size: 12px; padding: 12px; word-break: break-all;
 }
 .tag { font-size: 10.5px; font-family: var(--mono); color: var(--text-faint); background: var(--bg-2); padding: 2px 7px; border-radius: 5px; }
+.spin { animation: rk-spin 1s linear infinite; }
+@keyframes rk-spin { to { transform: rotate(360deg); } }

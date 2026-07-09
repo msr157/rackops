@@ -1,7 +1,10 @@
 // Package types defines the shared data models for RackOps.
 package types
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // ---- Node & Hardware ----
 
@@ -300,12 +303,43 @@ type Event struct {
 
 // ---- Domains & Ingress ----
 
+// DomainStatus is a domain's DNS verification state.
+type DomainStatus string
+
+const (
+	DomainPending       DomainStatus = "pending"       // not resolving yet (record missing or propagating)
+	DomainVerified      DomainStatus = "verified"      // resolves to the ingress node's IP
+	DomainMisconfigured DomainStatus = "misconfigured" // resolves somewhere else
+)
+
 // Domain is a user-owned domain name usable in the per-deployment dropdown.
+// The server continuously verifies its DNS against the ingress node's IP and
+// probes the edge so misconfiguration surfaces instead of failing silently.
 type Domain struct {
 	ID        string    `json:"id"`
-	Name      string    `json:"name"` // e.g. app.example.com or *.example.com
+	Name      string    `json:"name"`     // e.g. app.example.com or *.example.com
+	Wildcard  bool      `json:"wildcard"` // name starts with "*." — covers one subdomain level
 	CreatedBy string    `json:"createdBy"`
 	CreatedAt time.Time `json:"createdAt"`
+
+	// Verification results (server-maintained; replicated like all state).
+	Status      DomainStatus `json:"status"`
+	Message     string       `json:"message,omitempty"`     // human explanation of the current state
+	ExpectedIP  string       `json:"expectedIp,omitempty"`  // ingress node IP the record must point at
+	ResolvedIPs []string     `json:"resolvedIps,omitempty"` // what the name currently resolves to
+	EdgeOK      bool         `json:"edgeOk"`                // HTTP probe confirmed OUR edge answers on that IP
+	CertOK      bool         `json:"certOk"`                // TLS probe found a valid non-default cert
+	CertIssuer  string       `json:"certIssuer,omitempty"`
+	CertExpiry  time.Time    `json:"certExpiry,omitempty"`
+	LastChecked time.Time    `json:"lastChecked,omitempty"`
+}
+
+// WildcardBase returns the suffix a wildcard domain covers ("" if not wildcard).
+func (d *Domain) WildcardBase() string {
+	if !d.Wildcard {
+		return ""
+	}
+	return strings.TrimPrefix(d.Name, "*.")
 }
 
 // IngressConfig is the cluster's edge configuration.

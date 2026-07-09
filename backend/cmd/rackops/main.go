@@ -130,6 +130,7 @@ func runServer(args []string) {
 		}
 	}()
 
+
 	// Embedded local agent — the server manages its own machine.
 	if !*noLocal {
 		go func() {
@@ -192,6 +193,10 @@ func runServer(args []string) {
 			go joinCluster(*join, token, id, radv, httpAdv)
 		}
 	}
+
+	// Domain DNS/edge/cert verification loop (leader-only under HA; started
+	// after cluster wiring so it sees the raft handle).
+	go api.RunDomainVerifier()
 
 	log.Printf("rackops server v%s listening on %s", version, *listen)
 	log.Printf("join token: %s", token)

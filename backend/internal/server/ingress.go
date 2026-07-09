@@ -57,6 +57,11 @@ func (a *API) handleCreateDomain(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "a valid domain name is required", http.StatusBadRequest)
 		return
 	}
+	wildcard := strings.HasPrefix(name, "*.")
+	if wildcard && !strings.Contains(strings.TrimPrefix(name, "*."), ".") {
+		http.Error(w, "wildcard needs a base domain, e.g. *.example.com", http.StatusBadRequest)
+		return
+	}
 	// Reject duplicates.
 	var dup bool
 	a.Store.View(func() {
@@ -70,9 +75,14 @@ func (a *API) handleCreateDomain(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "domain already added", http.StatusConflict)
 		return
 	}
-	d := &types.Domain{ID: NewID(), Name: name, CreatedBy: a.userEmail(r), CreatedAt: time.Now()}
+	d := &types.Domain{
+		ID: NewID(), Name: name, Wildcard: wildcard,
+		Status: types.DomainPending, CreatedBy: a.userEmail(r), CreatedAt: time.Now(),
+	}
 	a.Store.Mutate(func() { a.Store.Domains[d.ID] = d })
 	a.Store.AddEvent("domain", "Domain added: "+name, "", "")
+	// First verification runs immediately (async — DNS lookups can be slow).
+	go a.verifyDomain(d.ID)
 	writeJSON(w, d)
 }
 
@@ -430,10 +440,21 @@ func firstNonEmpty(vals ...string) string {
 // ---- Traefik dynamic config (HTTP provider) ----
 
 // handleTraefikConfig renders the dynamic configuration for the edge:
-// one router+service per RackOps service that has a domain assigned.
+// one router+service per RackOps service that has a domain assigned, plus an
+// internal probe route (edge.rackops.internal → control plane) that lets the
+// server verify "our Traefik answers on this IP:port" from the outside.
 func (a *API) handleTraefikConfig(w http.ResponseWriter, r *http.Request) {
 	routers := map[string]any{}
 	services := map[string]any{}
+	middlewares := map[string]any{
+		// Stamps every response so probes can tell our edge apart from any
+		// other web server that happens to hold the port.
+		"rackops-edge": map[string]any{
+			"headers": map[string]any{
+				"customResponseHeaders": map[string]string{"X-Rackops-Edge": "1"},
+			},
+		},
+	}
 
 	var ingress types.IngressConfig
 	a.Store.View(func() {
@@ -461,6 +482,7 @@ func (a *API) handleTraefikConfig(w http.ResponseWriter, r *http.Request) {
 				"rule":        fmt.Sprintf("Host(`%s`)", svc.Domain),
 				"service":     key,
 				"entryPoints": []string{"web"},
+				"middlewares": []string{"rackops-edge"},
 			}
 			if ingress.ACMEEmail != "" {
 				router["entryPoints"] = []string{"web", "websecure"}
@@ -475,7 +497,32 @@ func (a *API) handleTraefikConfig(w http.ResponseWriter, r *http.Request) {
 		}
 	})
 
+	// Internal probe route: Host edge.rackops.internal → control plane.
+	// With ACME on, the web entrypoint redirects to HTTPS, so the probe must
+	// also answer on websecure — with the default cert, never an ACME attempt
+	// (the name is synthetic and uncertifiable).
+	probeRouter := map[string]any{
+		"rule":        fmt.Sprintf("Host(`%s`)", edgeProbeHost),
+		"service":     "rackops-edge-probe",
+		"entryPoints": []string{"web"},
+		"middlewares": []string{"rackops-edge"},
+	}
+	if ingress.ACMEEmail != "" {
+		probeRouter["entryPoints"] = []string{"web", "websecure"}
+		probeRouter["tls"] = map[string]any{}
+	}
+	routers["rackops-edge-probe"] = probeRouter
+	services["rackops-edge-probe"] = map[string]any{
+		"loadBalancer": map[string]any{
+			"servers": []map[string]string{{"url": "http://" + a.advertiseAddr()}},
+		},
+	}
+
 	writeJSON(w, map[string]any{
-		"http": map[string]any{"routers": routers, "services": services},
+		"http": map[string]any{
+			"routers":     routers,
+			"services":    services,
+			"middlewares": middlewares,
+		},
 	})
 }

@@ -64,7 +64,18 @@ export interface Deployment {
   id: string; serviceId: string; version: number; status: string; trigger: string;
   log: string; startedAt: string; durationMs: number;
 }
-export interface Domain { id: string; name: string; createdAt: string }
+export interface Domain {
+  id: string; name: string; wildcard: boolean; createdAt: string;
+  status: 'pending' | 'verified' | 'misconfigured';
+  message?: string; expectedIp?: string; resolvedIps?: string[];
+  edgeOk: boolean; certOk: boolean; certIssuer?: string; certExpiry?: string;
+  lastChecked?: string;
+}
+export interface NetworkDiagnosis {
+  edgeEnabled: boolean; edgeStatus?: string; edgeNodeId?: string;
+  hasDirectIp: boolean; lanOnly: boolean; meshEnabled: boolean; joinCommand: string;
+  nodes: { id: string; name: string; lanIp: string; publicIp?: string; reachability: 'direct' | 'nat' | 'unknown' }[] | null;
+}
 export interface IngressConfig {
   enabled: boolean; nodeId: string; httpPort: number; httpsPort: number; acmeEmail: string;
   status?: string; statusMsg?: string; lastDeploy?: string;
@@ -139,6 +150,8 @@ export const api = {
   domains: () => req<Domain[]>('/api/domains'),
   createDomain: (name: string) => req<Domain>('/api/domains', { method: 'POST', body: JSON.stringify({ name }) }),
   deleteDomain: (id: string) => req<void>(`/api/domains/${id}`, { method: 'DELETE' }),
+  verifyDomain: (id: string) => req<Domain>(`/api/domains/${id}/verify`, { method: 'POST' }),
+  networkDiagnosis: () => req<NetworkDiagnosis>('/api/network/diagnosis'),
   ingress: () => req<IngressConfig>('/api/ingress'),
   setIngress: (cfg: IngressConfig) => req<IngressConfig>('/api/ingress', { method: 'POST', body: JSON.stringify(cfg) }),
   setServiceDomain: (id: string, domain: string, ingress: string) =>
