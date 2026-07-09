@@ -474,6 +474,9 @@ type ContainerStatus struct {
 	CPUPct    float64 `json:"cpuPct"`
 	MemUsedMB int64   `json:"memUsedMb"`
 	ServiceID string  `json:"serviceId,omitempty"` // rackops label
+	// Tunnel marks a quick-tunnel (cloudflared) helper container; it belongs
+	// to the service but must not drive the service's own status.
+	Tunnel bool `json:"tunnel,omitempty"`
 }
 
 // TaskKind is the type of work the control plane asks an agent to do.

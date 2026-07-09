@@ -37,16 +37,24 @@ func DetectRuntime() (*Runtime, error) {
 	return nil, fmt.Errorf("neither docker nor podman available")
 }
 
-// List returns rackops-labeled containers with live stats.
+// List returns rackops-labeled containers (services and quick-tunnel
+// helpers) with live stats. Reporting both lets the control plane detect
+// missing containers and heal them.
 func (r *Runtime) List() []types.ContainerStatus {
+	stats := r.stats()
+	list := r.listLabeled("rackops.service", false, stats)
+	return append(list, r.listLabeled("rackops.tunnel", true, stats)...)
+}
+
+// listLabeled collects containers carrying one rackops label.
+func (r *Runtime) listLabeled(label string, tunnel bool, stats map[string]containerStat) []types.ContainerStatus {
 	out, err := exec.Command(r.Bin, "ps", "-a",
-		"--filter", "label=rackops.service",
+		"--filter", "label="+label,
 		"--format", "{{.ID}}|{{.Names}}|{{.Image}}|{{.State}}|{{.Labels}}").Output()
 	if err != nil {
 		return nil
 	}
 	var list []types.ContainerStatus
-	stats := r.stats()
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		if line == "" {
 			continue
@@ -55,10 +63,9 @@ func (r *Runtime) List() []types.ContainerStatus {
 		if len(f) < 5 {
 			continue
 		}
-		cs := types.ContainerStatus{ID: f[0], Name: f[1], Image: f[2], State: strings.ToLower(f[3])}
-		// Extract rackops.service label value.
+		cs := types.ContainerStatus{ID: f[0], Name: f[1], Image: f[2], State: strings.ToLower(f[3]), Tunnel: tunnel}
 		for _, lbl := range strings.Split(f[4], ",") {
-			if kv := strings.SplitN(lbl, "=", 2); len(kv) == 2 && kv[0] == "rackops.service" {
+			if kv := strings.SplitN(lbl, "=", 2); len(kv) == 2 && kv[0] == label {
 				cs.ServiceID = kv[1]
 			}
 		}
@@ -242,6 +249,24 @@ func (r *Runtime) Deploy(p DeployPayload) (containerID, logOut string, err error
 		cid = cid[:12]
 	}
 	logs.WriteString("container started: " + cid + "\n")
+	// Capture the first seconds of runtime output — an instant crash (bad
+	// command, port bind, missing env) shows up right here in the deploy log
+	// instead of requiring a separate trip to the Logs tab.
+	time.Sleep(2 * time.Second)
+	if first, err := exec.Command(r.Bin, "logs", "--tail", "40", name).CombinedOutput(); err == nil && len(strings.TrimSpace(string(first))) > 0 {
+		logs.WriteString("--- first container output ---\n")
+		logs.Write(first)
+		if !strings.HasSuffix(string(first), "\n") {
+			logs.WriteString("\n")
+		}
+	}
+	if state, err := exec.Command(r.Bin, "inspect", "-f", "{{.State.Status}}", name).Output(); err == nil {
+		st := strings.TrimSpace(string(state))
+		logs.WriteString("container state after start: " + st + "\n")
+		if st != "running" {
+			return cid, logs.String(), fmt.Errorf("container exited immediately (state %s) — see output above", st)
+		}
+	}
 	return cid, logs.String(), nil
 }
 

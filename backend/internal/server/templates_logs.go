@@ -37,7 +37,12 @@ func (a *API) handleServiceLogs(w http.ResponseWriter, r *http.Request) {
 	if !svc.LogsClearedAt.IsZero() {
 		since = svc.LogsClearedAt.Format(time.RFC3339)
 	}
-	payload, _ := json.Marshal(DeployPayload{ServiceID: svc.ID, Name: svc.Name, Since: since})
+	// ComposeYML routes stack services to `compose logs`; ContainerID is the
+	// fallback when the named container is gone but an old one still exists.
+	payload, _ := json.Marshal(DeployPayload{
+		ServiceID: svc.ID, Name: svc.Name, Since: since,
+		ComposeYML: svc.ComposeYML, ContainerID: svc.ContainerID,
+	})
 	a.Store.EnqueueTask(svc.NodeID, types.AgentTask{
 		ID: taskID, Kind: types.TaskLogs, ServiceID: svc.ID,
 		Payload: string(payload), CreatedAt: time.Now(),

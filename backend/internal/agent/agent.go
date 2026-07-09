@@ -243,8 +243,7 @@ func (a *Agent) execute(task types.AgentTask) types.TaskResult {
 		_, _ = a.runtime.Simple("rm", "-f", quickTunnelName(p.ServiceID))
 		delete(a.servicePorts, p.ServiceID)
 	case types.TaskLogs:
-		out, err := a.runtime.LogsSince(containerName(p), 500, p.Since)
-		res.Log, res.OK = out, err == nil
+		res.Log, res.OK = a.fetchLogs(p)
 	case types.TaskListDir:
 		out, err := listDir(p.Path)
 		res.Log, res.OK = out, err == nil
@@ -272,6 +271,31 @@ func (a *Agent) execute(task types.AgentTask) types.TaskResult {
 // container→service status sync.
 func quickTunnelName(serviceID string) string {
 	return "rackops-qt-" + serviceID
+}
+
+// fetchLogs returns a service's runtime logs, handling every container shape:
+// compose stacks (project logs), plain containers by name, a recorded
+// container ID as fallback, and a clear message when nothing exists at all.
+func (a *Agent) fetchLogs(p DeployPayload) (string, bool) {
+	if p.ComposeYML != "" {
+		out, err := a.runtime.composeLogs(p, 500, p.Since)
+		if err != nil {
+			return out + "\n(compose logs failed: " + err.Error() + ")", false
+		}
+		return out, true
+	}
+	out, err := a.runtime.LogsSince(containerName(p), 500, p.Since)
+	if err == nil {
+		return out, true
+	}
+	if p.ContainerID != "" {
+		if byID, idErr := a.runtime.LogsSince(p.ContainerID, 500, p.Since); idErr == nil {
+			return byID, true
+		}
+	}
+	return "The container for this service does not exist on this node — it was removed or has not deployed yet.\n" +
+		"Check the Deployments tab for build/run output. If the service shows failed, hit Redeploy (or wait for auto-heal).\n\n" +
+		"(" + strings.TrimSpace(out) + ")", false
 }
 
 // DeployPayload mirrors server.DeployPayload (kept in sync; agent is

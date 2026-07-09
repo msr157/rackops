@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rackops/rackops/internal/raftstore"
@@ -157,8 +158,8 @@ func (a *API) handleIngest(w http.ResponseWriter, r *http.Request) {
 
 		// Sync container states onto services.
 		for _, cs := range rep.Containers {
-			if cs.ServiceID == "" {
-				continue
+			if cs.ServiceID == "" || cs.Tunnel {
+				continue // tunnel helpers must not drive service status
 			}
 			// The Traefik edge is a pseudo-service: track its liveness as
 			// ingress health so a crash-loop (e.g. port conflict) surfaces
@@ -198,6 +199,11 @@ func (a *API) handleIngest(w http.ResponseWriter, r *http.Request) {
 		a.applyTaskResult(rep.NodeID, res)
 	}
 
+	// Reconcile: the agent's report is ground truth. A service marked running
+	// whose container is GONE (not merely stopped — absent) gets flagged
+	// failed and auto-healed; a tunnel whose container vanished is restarted.
+	a.reconcileNode(rep.NodeID, rep.Containers)
+
 	if isNew {
 		a.Store.AddEvent("node_joined", fmt.Sprintf("Node %s joined the fleet (%s)", node.Name, node.Hardware.CPUModel), node.ID, "")
 		a.Hub.Broadcast("node_joined", node)
@@ -233,6 +239,153 @@ func (a *API) handleIngest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, resp)
+}
+
+// healState rate-limits auto-healing per service/tunnel/edge: at most one
+// attempt per 2 minutes and 5 consecutive attempts total, so a genuinely
+// broken workload becomes a visible failure instead of a silent retry loop.
+// The counter resets whenever the container is seen alive again.
+type healRecord struct {
+	attempts int
+	last     time.Time
+}
+
+var healState sync.Map // key -> healRecord
+
+func healAllowed(key string) bool {
+	now := time.Now()
+	if v, ok := healState.Load(key); ok {
+		rec := v.(healRecord)
+		if rec.attempts >= 5 || now.Sub(rec.last) < 2*time.Minute {
+			return false
+		}
+		rec.attempts++
+		rec.last = now
+		healState.Store(key, rec)
+		return true
+	}
+	healState.Store(key, healRecord{attempts: 1, last: now})
+	return true
+}
+
+func healExhausted(key string) bool {
+	if v, ok := healState.Load(key); ok {
+		return v.(healRecord).attempts >= 5
+	}
+	return false
+}
+
+func healReset(key string) { healState.Delete(key) }
+
+// reconcileNode compares desired state to the agent's reported containers.
+// Absent-but-should-run services are marked failed and redeployed (with a
+// cooldown); vanished quick tunnels are restarted; a missing Traefik edge is
+// redeployed. This is what keeps workloads up across reboots, manual
+// `docker rm`, and crashed daemons — and keeps the UI honest meanwhile.
+func (a *API) reconcileNode(nodeID string, reported []types.ContainerStatus) {
+	present := map[string]bool{}
+	tunnels := map[string]bool{}
+	for _, cs := range reported {
+		if cs.ServiceID == "" {
+			continue
+		}
+		if cs.Tunnel {
+			tunnels[cs.ServiceID] = true
+		} else {
+			present[cs.ServiceID] = true
+		}
+	}
+
+	var flipped []*types.Service    // was running, container just vanished
+	var missing []*types.Service    // already failed, still absent (quiet retry)
+	var tunnelLost []*types.Service // URL assigned but cloudflared gone
+	edgeMissing := false
+	a.Store.Mutate(func() {
+		for _, svc := range a.Store.Services {
+			if svc.NodeID != nodeID {
+				continue
+			}
+			// Compose stacks aren't label-tracked (compose owns their
+			// lifecycle); skip them to avoid false positives.
+			if svc.ComposeYML != "" {
+				continue
+			}
+			if present[svc.ID] {
+				healReset(svc.ID) // container alive again → fresh heal budget
+				continue
+			}
+			// Absent container: running services get flagged immediately;
+			// failed ones keep retrying quietly (bounded by the heal budget).
+			switch svc.Status {
+			case types.StatusRunning:
+				svc.Status = types.StatusFailed
+				svc.UpdatedAt = time.Now()
+				flipped = append(flipped, svc)
+			case types.StatusFailed:
+				missing = append(missing, svc)
+			}
+		}
+		for _, svc := range a.Store.Services {
+			if svc.NodeID == nodeID && svc.QuickTunnelURL != "" && !tunnels[svc.ID] {
+				tunnelLost = append(tunnelLost, svc)
+			}
+		}
+		if a.Store.Ingress.Enabled && a.Store.Ingress.NodeID == nodeID && !present[ingressServiceID] {
+			if a.Store.Ingress.Status == "running" {
+				a.Store.Ingress.Status = "failed"
+				a.Store.Ingress.StatusMsg = "edge container disappeared — redeploying"
+			}
+			edgeMissing = true
+		} else if present[ingressServiceID] {
+			healReset("edge")
+		}
+	})
+
+	// Just-vanished services: always announce the failure, heal if budget allows.
+	for _, svc := range flipped {
+		if healAllowed(svc.ID) {
+			a.Store.Mutate(func() { svc.Status = types.StatusBuilding })
+			a.queueDeploy(svc, "auto-heal")
+			a.Store.AddEvent("service", fmt.Sprintf("%s: container missing — auto-healing (redeploy queued)", svc.Name), nodeID, svc.ID)
+		} else if healExhausted(svc.ID) {
+			a.Store.AddEvent("service", fmt.Sprintf("%s: container missing; auto-heal budget exhausted — fix the cause and hit Redeploy", svc.Name), nodeID, svc.ID)
+		} else {
+			a.Store.AddEvent("service", fmt.Sprintf("%s: container missing (auto-heal retries shortly)", svc.Name), nodeID, svc.ID)
+		}
+		a.Hub.Broadcast("service_update", svc)
+	}
+	// Still-absent failed services: retry quietly on the heal budget's cadence.
+	for _, svc := range missing {
+		if !healAllowed(svc.ID) {
+			continue
+		}
+		a.Store.Mutate(func() { svc.Status = types.StatusBuilding })
+		a.queueDeploy(svc, "auto-heal")
+		a.Store.AddEvent("service", fmt.Sprintf("%s: retrying auto-heal (redeploy queued)", svc.Name), nodeID, svc.ID)
+		a.Hub.Broadcast("service_update", svc)
+	}
+
+	for _, svc := range tunnelLost {
+		if !healAllowed("qt-" + svc.ID) {
+			continue
+		}
+		payload, _ := json.Marshal(DeployPayload{ServiceID: svc.ID, Name: svc.Name, Port: svc.Port})
+		taskID := NewID()
+		pendingTunnels.Store(taskID, svc.ID)
+		a.Store.EnqueueTask(nodeID, types.AgentTask{
+			ID: taskID, Kind: types.TaskTunnelStart, ServiceID: svc.ID,
+			Payload: string(payload), CreatedAt: time.Now(),
+		})
+		a.Store.AddEvent("tunnel", svc.Name+": quick tunnel disappeared — restarting (URL will change)", nodeID, svc.ID)
+	}
+
+	if edgeMissing && healAllowed("edge") {
+		var cfg types.IngressConfig
+		a.Store.View(func() { cfg = a.Store.Ingress })
+		a.deployTraefik(cfg)
+		a.Store.AddEvent("ingress", "Edge (Traefik) container missing — auto-healing", nodeID, "")
+		a.Hub.Broadcast("ingress_update", cfg)
+	}
 }
 
 // applyTaskResult updates service state from an agent's task outcome.

@@ -59,3 +59,18 @@ func (r *Runtime) composeDown(p DeployPayload) (string, error) {
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
+
+// composeLogs fetches aggregated logs for a stack's containers.
+func (r *Runtime) composeLogs(p DeployPayload, tail int, since string) (string, error) {
+	home, _ := os.UserHomeDir()
+	dir := filepath.Join(home, ".rackops", "stacks", sanitize(p.Name)+"-"+p.ServiceID)
+	project := "rackops-" + sanitize(p.Name)
+	args := []string{"compose", "-p", project, "logs", "--tail", fmt.Sprintf("%d", tail)}
+	if since != "" {
+		args = append(args, "--since", since)
+	}
+	cmd := exec.Command(r.Bin, args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
