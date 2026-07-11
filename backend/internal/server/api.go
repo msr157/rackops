@@ -200,6 +200,10 @@ func (a *API) handleIngest(w http.ResponseWriter, r *http.Request) {
 		a.applyTaskResult(rep.NodeID, res)
 	}
 
+	// Adopt containers that were already running on the node (created outside
+	// RackOps) so pre-existing workloads show up and become manageable.
+	a.adoptExternal(rep.NodeID, rep.Containers)
+
 	// Reconcile: the agent's report is ground truth. A service marked running
 	// whose container is GONE (not merely stopped — absent) gets flagged
 	// failed and auto-healed; a tunnel whose container vanished is restarted.
@@ -311,6 +315,11 @@ func (a *API) reconcileNode(nodeID string, reported []types.ContainerStatus) {
 			if svc.ComposeYML != "" {
 				continue
 			}
+			// Adopted services have no deploy recipe and aren't rackops-labelled;
+			// their liveness is tracked by adoptExternal, never auto-healed here.
+			if svc.Adopted {
+				continue
+			}
 			if present[svc.ID] {
 				healReset(svc.ID) // container alive again → fresh heal budget
 				continue
@@ -386,6 +395,105 @@ func (a *API) reconcileNode(nodeID string, reported []types.ContainerStatus) {
 		a.deployTraefik(cfg)
 		a.Store.AddEvent("ingress", "Edge (Traefik) container missing — auto-healing", nodeID, "")
 		a.Hub.Broadcast("ingress_update", cfg)
+	}
+}
+
+// adoptSuppress holds container names recently removed via the UI, keyed
+// "nodeID/name". Deleting an adopted service removes its service record and
+// queues a container removal, but the container lingers for a report cycle or
+// two until the agent tears it down — without this, adoptExternal would
+// re-adopt it in that gap, leaving a ghost service pointing at a dead
+// container. Entries expire after a short grace period.
+var adoptSuppress sync.Map // "nodeID/name" -> time.Time
+
+const adoptSuppressTTL = 2 * time.Minute
+
+func suppressAdopt(nodeID, name string) {
+	if name == "" {
+		return
+	}
+	adoptSuppress.Store(nodeID+"/"+name, time.Now())
+}
+
+func adoptSuppressed(nodeID, name string) bool {
+	v, ok := adoptSuppress.Load(nodeID + "/" + name)
+	if !ok {
+		return false
+	}
+	if time.Since(v.(time.Time)) > adoptSuppressTTL {
+		adoptSuppress.Delete(nodeID + "/" + name)
+		return false
+	}
+	return true
+}
+
+// adoptExternal turns containers already running on a node (created outside
+// RackOps) into managed "adopted" services, and keeps their status/stats in
+// sync on every report. Matching is by (node, container name) — a container's
+// name is stable across restarts, its ID is not. Adopted services are never
+// rebuilt or auto-healed (RackOps has no recipe for them); the user can
+// start/stop/restart/remove them and read their logs.
+func (a *API) adoptExternal(nodeID string, reported []types.ContainerStatus) {
+	var created, updated []*types.Service
+	a.Store.Mutate(func() {
+		// Index this node's existing adopted services by their container name.
+		existing := map[string]*types.Service{}
+		for _, svc := range a.Store.Services {
+			if svc.NodeID == nodeID && svc.Adopted && svc.ExternalName != "" {
+				existing[svc.ExternalName] = svc
+			}
+		}
+		for _, cs := range reported {
+			if !cs.External || cs.Name == "" {
+				continue
+			}
+			// Skip containers a UI delete just removed — avoids re-adopting a
+			// container mid-teardown into a ghost service.
+			if adoptSuppressed(nodeID, cs.Name) {
+				continue
+			}
+			status := types.StatusStopped
+			if cs.State == "running" {
+				status = types.StatusRunning
+			}
+			if svc := existing[cs.Name]; svc != nil {
+				changed := svc.Status != status || svc.ContainerID != cs.ID
+				svc.Status = status
+				svc.ContainerID = cs.ID
+				svc.CPUPct = cs.CPUPct
+				svc.MemUsedMB = cs.MemUsedMB
+				if cs.Image != "" {
+					svc.Image = cs.Image
+				}
+				if cs.HostPort > 0 && svc.Port == 0 {
+					svc.Port = cs.HostPort
+				}
+				if changed {
+					svc.UpdatedAt = time.Now()
+					updated = append(updated, svc)
+				}
+				continue
+			}
+			projID, envID := a.Store.defaultPlacement()
+			svc := &types.Service{
+				ID: NewID(), ProjectID: projID, EnvID: envID,
+				Name: cs.Name, Kind: types.KindApp, Status: status,
+				Image: cs.Image, NodeID: nodeID,
+				Adopted: true, ExternalName: cs.Name,
+				Port: cs.HostPort, Ingress: types.IngressNone,
+				ContainerID: cs.ID, CPUPct: cs.CPUPct, MemUsedMB: cs.MemUsedMB,
+				CreatedAt: time.Now(), UpdatedAt: time.Now(),
+			}
+			a.Store.Services[svc.ID] = svc
+			created = append(created, svc)
+		}
+	})
+	for _, svc := range created {
+		a.Store.AddEvent("service", fmt.Sprintf("Adopted %q — a container already running on %s, now manageable here", svc.ExternalName, a.nodeName(nodeID)), nodeID, svc.ID)
+		a.Hub.Broadcast("service_update", svc)
+	}
+	for _, svc := range updated {
+		a.Hub.Broadcast("service_update", svc)
 	}
 }
 

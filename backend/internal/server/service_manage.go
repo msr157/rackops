@@ -44,6 +44,13 @@ func (a *API) handleUpdateService(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "service not found", http.StatusNotFound)
 		return
 	}
+	// Adopted apps have no deploy recipe — redeploying would spawn a duplicate,
+	// rackops-named container alongside the real one. Config edits can only be
+	// saved (they never take effect); block the redeploy path outright.
+	if svc.Adopted && upd.Redeploy {
+		http.Error(w, "this app was adopted (started outside RackOps) and can't be rebuilt — use Restart to bounce it", http.StatusBadRequest)
+		return
+	}
 
 	// Validate mounts before committing anything.
 	if upd.Mounts != nil {
@@ -112,7 +119,7 @@ func (a *API) handleUpdateService(w http.ResponseWriter, r *http.Request) {
 	if upd.Redeploy {
 		if migrate {
 			// Tear down on the old node, then deploy on the new one.
-			payload, _ := json.Marshal(DeployPayload{ServiceID: svc.ID, Name: svc.Name, ContainerID: svc.ContainerID, ComposeYML: svc.ComposeYML})
+			payload, _ := json.Marshal(DeployPayload{ServiceID: svc.ID, Name: svc.Name, ExternalName: svc.ExternalName, ContainerID: svc.ContainerID, ComposeYML: svc.ComposeYML})
 			a.Store.EnqueueTask(oldNode, types.AgentTask{
 				ID: NewID(), Kind: types.TaskRemove, ServiceID: svc.ID,
 				Payload: string(payload), CreatedAt: time.Now(),

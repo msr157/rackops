@@ -224,20 +224,20 @@ func (a *Agent) execute(task types.AgentTask) types.TaskResult {
 			a.servicePorts[p.ServiceID] = hostPort
 		}
 	case types.TaskStop:
-		out, err := a.runtime.Simple("stop", containerName(p))
+		out, err := a.runtime.Simple("stop", targetContainer(p))
 		res.Log, res.OK = out, err == nil
 	case types.TaskStart:
-		out, err := a.runtime.Simple("start", containerName(p))
+		out, err := a.runtime.Simple("start", targetContainer(p))
 		res.Log, res.OK = out, err == nil
 	case types.TaskRestart:
-		out, err := a.runtime.Simple("restart", containerName(p))
+		out, err := a.runtime.Simple("restart", targetContainer(p))
 		res.Log, res.OK = out, err == nil
 	case types.TaskRemove:
 		if p.ComposeYML != "" {
 			out, err := a.runtime.composeDown(p)
 			res.Log, res.OK = out, err == nil
 		} else {
-			out, err := a.runtime.Simple("rm", "-f", containerName(p))
+			out, err := a.runtime.Simple("rm", "-f", targetContainer(p))
 			res.Log, res.OK = out, err == nil
 		}
 		// Any quick tunnel attached to the service goes with it.
@@ -285,7 +285,7 @@ func (a *Agent) fetchLogs(p DeployPayload) (string, bool) {
 		}
 		return out, true
 	}
-	out, err := a.runtime.LogsSince(containerName(p), 500, p.Since)
+	out, err := a.runtime.LogsSince(targetContainer(p), 500, p.Since)
 	if err == nil {
 		return out, true
 	}
@@ -322,6 +322,7 @@ type DeployPayload struct {
 	RestartPol    string         `json:"restartPolicy,omitempty"`
 	GPU           bool           `json:"gpu,omitempty"`
 	HostNet       bool           `json:"hostNet,omitempty"`
+	ExternalName  string         `json:"externalName,omitempty"` // adopted container's real name
 	ContainerID   string         `json:"containerId,omitempty"`
 	Since         string         `json:"since,omitempty"`
 	Path          string         `json:"path,omitempty"`
@@ -329,6 +330,16 @@ type DeployPayload struct {
 
 func containerName(p DeployPayload) string {
 	return "rackops-" + sanitize(p.Name) + "-" + p.ServiceID
+}
+
+// targetContainer is the container name lifecycle ops (stop/start/restart/
+// remove/logs) act on. Adopted services carry their real container name in
+// ExternalName; everything RackOps deployed uses the rackops- naming scheme.
+func targetContainer(p DeployPayload) string {
+	if p.ExternalName != "" {
+		return p.ExternalName
+	}
+	return containerName(p)
 }
 
 func sanitize(s string) string {

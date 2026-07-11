@@ -41,7 +41,7 @@ func (a *API) handleServiceLogs(w http.ResponseWriter, r *http.Request) {
 	// fallback when the named container is gone but an old one still exists.
 	payload, _ := json.Marshal(DeployPayload{
 		ServiceID: svc.ID, Name: svc.Name, Since: since,
-		ComposeYML: svc.ComposeYML, ContainerID: svc.ContainerID,
+		ComposeYML: svc.ComposeYML, ExternalName: svc.ExternalName, ContainerID: svc.ContainerID,
 	})
 	a.Store.EnqueueTask(svc.NodeID, types.AgentTask{
 		ID: taskID, Kind: types.TaskLogs, ServiceID: svc.ID,

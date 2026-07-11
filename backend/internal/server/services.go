@@ -78,8 +78,9 @@ type DeployPayload struct {
 	CPULimit      float64        `json:"cpuLimit,omitempty"`
 	RestartPol    string         `json:"restartPolicy,omitempty"`
 	GPU           bool           `json:"gpu,omitempty"`
-	HostNet       bool           `json:"hostNet,omitempty"`     // run with --network host (ingress edge)
-	ContainerID   string         `json:"containerId,omitempty"` // for stop/start/restart/remove
+	HostNet       bool           `json:"hostNet,omitempty"`      // run with --network host (ingress edge)
+	ExternalName  string         `json:"externalName,omitempty"` // adopted container's real name (lifecycle ops target it)
+	ContainerID   string         `json:"containerId,omitempty"`  // for stop/start/restart/remove
 	Since         string         `json:"since,omitempty"`       // logs: RFC3339 lower bound
 	Path          string         `json:"path,omitempty"`        // listdir: directory to list
 }
@@ -285,13 +286,19 @@ func (a *API) handleServiceAction(w http.ResponseWriter, r *http.Request) {
 
 	switch action {
 	case "redeploy":
+		// Adopted apps have no deploy recipe — RackOps never built them, so it
+		// can only manage their lifecycle. Restart is the equivalent action.
+		if svc.Adopted {
+			http.Error(w, "this app was adopted (started outside RackOps) — it can't be rebuilt; use Restart instead", http.StatusBadRequest)
+			return
+		}
 		a.Store.Mutate(func() { svc.Status = types.StatusBuilding })
 		a.queueDeploy(svc, "manual")
 	case "start", "stop", "restart":
 		kind := map[string]types.TaskKind{
 			"start": types.TaskStart, "stop": types.TaskStop, "restart": types.TaskRestart,
 		}[action]
-		payload, _ := json.Marshal(DeployPayload{ServiceID: svc.ID, Name: svc.Name, ContainerID: svc.ContainerID})
+		payload, _ := json.Marshal(DeployPayload{ServiceID: svc.ID, Name: svc.Name, ExternalName: svc.ExternalName, ContainerID: svc.ContainerID})
 		a.Store.EnqueueTask(svc.NodeID, types.AgentTask{
 			ID: NewID(), Kind: kind, ServiceID: svc.ID, Payload: string(payload), CreatedAt: time.Now(),
 		})
@@ -316,7 +323,11 @@ func (a *API) handleDeleteService(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "service not found", http.StatusNotFound)
 		return
 	}
-	payload, _ := json.Marshal(DeployPayload{ServiceID: svc.ID, Name: svc.Name, ContainerID: svc.ContainerID, ComposeYML: svc.ComposeYML})
+	// Adopted apps: block re-adoption while the container is torn down.
+	if svc.Adopted {
+		suppressAdopt(svc.NodeID, svc.ExternalName)
+	}
+	payload, _ := json.Marshal(DeployPayload{ServiceID: svc.ID, Name: svc.Name, ExternalName: svc.ExternalName, ContainerID: svc.ContainerID, ComposeYML: svc.ComposeYML})
 	a.Store.EnqueueTask(svc.NodeID, types.AgentTask{
 		ID: NewID(), Kind: types.TaskRemove, ServiceID: svc.ID, Payload: string(payload), CreatedAt: time.Now(),
 	})

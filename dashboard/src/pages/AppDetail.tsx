@@ -151,6 +151,7 @@ export function AppDetail() {
           <button className="btn sm ghost" onClick={() => navigate('/apps')} aria-label="Back to apps"><ArrowLeft size={14} /></button>
           <div className="page-title" style={{ margin: 0 }}>{svc.name}</div>
           <StatusBadge status={svc.status} />
+          {svc.adopted && <span className="tag" title="This container was already running on the machine — RackOps adopted it so you can manage it here.">adopted</span>}
           {svc.templateId && <span className="tag">{svc.templateId}</span>}
         </div>
         <div className="row">
@@ -158,7 +159,7 @@ export function AppDetail() {
             {svc.status === 'running' ? <><Square size={12} /> Stop</> : <><Play size={12} /> Start</>}
           </button>
           <button className="btn sm" disabled={busy} onClick={() => act('restart')}><RotateCw size={12} /> Restart</button>
-          <button className="btn sm" disabled={busy} onClick={() => act('redeploy')}><Rocket size={12} /> Redeploy</button>
+          {!svc.adopted && <button className="btn sm" disabled={busy} onClick={() => act('redeploy')}><Rocket size={12} /> Redeploy</button>}
         </div>
       </div>
       <div className="row wrap" style={{ marginBottom: 16, gap: 8 }}>
@@ -168,11 +169,15 @@ export function AppDetail() {
 
       {dirty && (
         <div className="card row spread" style={{ borderColor: 'var(--warn)', marginBottom: 14, padding: '10px 16px' }}>
-          <span className="dim">Unsaved changes — the app keeps running until you apply them.</span>
+          <span className="dim">
+            {svc.adopted
+              ? 'Adopted apps can’t be rebuilt from here — config edits won’t take effect. Manage this container where it was created.'
+              : 'Unsaved changes — the app keeps running until you apply them.'}
+          </span>
           <div className="row">
             <button className="btn sm" disabled={busy} onClick={() => setDraft(JSON.parse(baseline))}>Discard</button>
-            <button className="btn sm" disabled={busy} onClick={() => save(false)}><Save size={12} /> Save only</button>
-            <button className="btn sm primary" disabled={busy} onClick={() => save(true)}><Rocket size={12} /> Save & redeploy</button>
+            {!svc.adopted && <button className="btn sm" disabled={busy} onClick={() => save(false)}><Save size={12} /> Save only</button>}
+            {!svc.adopted && <button className="btn sm primary" disabled={busy} onClick={() => save(true)}><Rocket size={12} /> Save & redeploy</button>}
           </div>
         </div>
       )}

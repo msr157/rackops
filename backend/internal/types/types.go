@@ -201,6 +201,15 @@ type Service struct {
 	ComposeYML string `json:"composeYml,omitempty"`
 	TemplateID string `json:"templateId,omitempty"`
 
+	// Adopted marks a service RackOps discovered already running on a node
+	// (created outside RackOps). RackOps manages its lifecycle (start/stop/
+	// restart/remove/logs) by acting on the real container, but never rebuilds
+	// or auto-heals it — it has no deploy recipe for something it didn't create.
+	Adopted bool `json:"adopted,omitempty"`
+	// ExternalName is the real container name to target for adopted services
+	// (their container isn't named/labelled by RackOps).
+	ExternalName string `json:"externalName,omitempty"`
+
 	// Placement
 	NodeID     string `json:"nodeId"`               // where it runs
 	AutoPlace  bool   `json:"autoPlace"`            // scheduler picked the node
@@ -478,6 +487,13 @@ type ContainerStatus struct {
 	// Tunnel marks a quick-tunnel (cloudflared) helper container; it belongs
 	// to the service but must not drive the service's own status.
 	Tunnel bool `json:"tunnel,omitempty"`
+	// External marks a container NOT created by RackOps (no rackops label).
+	// The server adopts these so pre-existing workloads show up and become
+	// manageable; they're matched to services by container name, not label.
+	External bool `json:"external,omitempty"`
+	// HostPort is the first published host port (external containers only), so
+	// an adopted app surfaces a reachable address.
+	HostPort int `json:"hostPort,omitempty"`
 }
 
 // TaskKind is the type of work the control plane asks an agent to do.

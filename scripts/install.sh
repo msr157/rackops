@@ -64,13 +64,124 @@ else
 fi
 say "▸ Installed: $DEST"
 
-# ---- docker check ----
-if ! command -v docker >/dev/null 2>&1; then
-  say ""
-  say "⚠  Docker isn't installed — RackOps needs it to run apps (telemetry still works)."
-  say "     Linux:         curl -fsSL https://get.docker.com | sh"
-  say "     Windows/WSL2:  install Docker Desktop, then enable it for your WSL distro"
-  say "                    (Settings → Resources → WSL integration)"
+# ============================================================================
+# Prerequisites — RackOps scans the machine and installs anything missing, so
+# the user never has to set up Docker, compose, or git by hand. Requirements:
+#   • docker (or podman) ...... run app containers               [auto-install]
+#   • docker compose plugin ... multi-service templates/stacks   [auto-install]
+#   • git ..................... deploy apps straight from a repo  [auto-install]
+# ============================================================================
+
+# detect_pkg finds the host package manager (for git / compose-plugin installs).
+PKG=""
+detect_pkg() {
+  [ -n "$PKG" ] && return 0
+  for m in apt-get dnf yum apk pacman zypper; do
+    if command -v "$m" >/dev/null 2>&1; then PKG="$m"; return 0; fi
+  done
+  return 1
+}
+
+# pkg_install installs one or more packages with the detected package manager.
+pkg_install() {
+  detect_pkg || return 1
+  case "$PKG" in
+    apt-get) $SUDO apt-get update -y >/dev/null 2>&1; $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y "$@" >/dev/null 2>&1 ;;
+    dnf)     $SUDO dnf install -y "$@" >/dev/null 2>&1 ;;
+    yum)     $SUDO yum install -y "$@" >/dev/null 2>&1 ;;
+    apk)     $SUDO apk add --no-cache "$@" >/dev/null 2>&1 ;;
+    pacman)  $SUDO pacman -Sy --noconfirm "$@" >/dev/null 2>&1 ;;
+    zypper)  $SUDO zypper --non-interactive install "$@" >/dev/null 2>&1 ;;
+    *) return 1 ;;
+  esac
+}
+
+runtime_ready() {
+  # docker (daemon reachable) or podman (daemonless) counts as ready.
+  if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then return 0; fi
+  if command -v podman >/dev/null 2>&1 && podman info >/dev/null 2>&1; then return 0; fi
+  return 1
+}
+
+start_docker() {
+  if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+    $SUDO systemctl enable --now docker >/dev/null 2>&1 || $SUDO systemctl start docker >/dev/null 2>&1 || true
+  elif ! docker info >/dev/null 2>&1; then
+    # No systemd (e.g. plain WSL2): start the daemon in the background.
+    say "     starting the Docker daemon (no systemd detected)…"
+    $SUDO sh -c 'nohup dockerd >/var/log/rackops-dockerd.log 2>&1 &' || true
+    j=0; while [ "$j" -lt 15 ]; do docker info >/dev/null 2>&1 && break; j=$((j + 1)); sleep 1; done
+  fi
+}
+
+install_docker() {
+  if ! is_root_capable; then
+    say "  ⚠ docker — can't install without root. Install it, then re-run:"
+    say "      curl -fsSL https://get.docker.com | sh"
+    return 1
+  fi
+  if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
+    say "  ⚠ docker — need curl or wget to install it."
+    return 1
+  fi
+  say "  ▸ docker — installing Docker Engine (this can take a minute)…"
+  # The official convenience script handles every major distro and pulls in the
+  # compose + buildx plugins; it's non-interactive, so safe under `curl | bash`.
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL https://get.docker.com | $SUDO sh >/dev/null 2>&1 || { say "  ⚠ docker — install failed (try: curl -fsSL https://get.docker.com | sh)"; return 1; }
+  else
+    wget -qO- https://get.docker.com | $SUDO sh >/dev/null 2>&1 || { say "  ⚠ docker — install failed (try: curl -fsSL https://get.docker.com | sh)"; return 1; }
+  fi
+  start_docker
+  # Let the invoking (non-root) user run docker without sudo next time.
+  if [ "$(id -u)" -ne 0 ] && command -v usermod >/dev/null 2>&1; then
+    $SUDO usermod -aG docker "$(id -un)" >/dev/null 2>&1 || true
+  fi
+  return 0
+}
+
+say ""
+say "▸ Checking prerequisites…"
+
+# --- git (deploy from a git repo) ---
+if command -v git >/dev/null 2>&1; then
+  say "  ✓ git"
+elif is_root_capable && pkg_install git && command -v git >/dev/null 2>&1; then
+  say "  ✓ git — installed"
+else
+  say "  ⚠ git — not installed (git-repo deploys will be unavailable; image & template deploys still work)"
+fi
+
+# --- container runtime (docker/podman) ---
+if runtime_ready; then
+  say "  ✓ container runtime ($(command -v docker >/dev/null 2>&1 && echo docker || echo podman))"
+else
+  if command -v docker >/dev/null 2>&1 || command -v podman >/dev/null 2>&1; then
+    # Installed but not running (common on WSL2): just start it.
+    say "  ▸ container runtime — installed but not running, starting it…"
+    start_docker
+  else
+    install_docker || true
+  fi
+  if runtime_ready; then
+    say "  ✓ container runtime — ready"
+  else
+    say "  ⚠ container runtime — not ready. RackOps still starts (telemetry works),"
+    say "      but app deploys need it. On Windows/WSL2 install Docker Desktop and"
+    say "      enable WSL integration, or start the daemon with:  sudo dockerd &"
+  fi
+fi
+
+# --- docker compose plugin (multi-service templates & compose stacks) ---
+if command -v docker >/dev/null 2>&1; then
+  if docker compose version >/dev/null 2>&1; then
+    say "  ✓ docker compose"
+  elif is_root_capable && pkg_install docker-compose-plugin && docker compose version >/dev/null 2>&1; then
+    say "  ✓ docker compose — installed"
+  else
+    say "  ⚠ docker compose — not available (multi-service templates won't deploy;"
+    say "      single-container apps still work). Fix: install the docker-compose-plugin package."
+  fi
 fi
 
 # ---- start ----
@@ -97,7 +208,15 @@ else
   say "▸ Starting RackOps in the background…"
   pkill -f "$DEST server" 2>/dev/null || true
   mkdir -p "$HOME/.rackops"
-  setsid "$DEST" server --listen ":$PORT" >"$HOME/.rackops/server.log" 2>&1 < /dev/null &
+  # Docker's socket is root:docker. A freshly added group only applies to new
+  # logins, so this same-session process can't reach it yet — run RackOps under
+  # sudo (matching the systemd path, which runs as root) so app deploys work
+  # immediately. If docker is already reachable as this user, no sudo needed.
+  RUN_AS=""
+  if [ -n "$SUDO" ] && ! docker info >/dev/null 2>&1 && $SUDO docker info >/dev/null 2>&1; then
+    RUN_AS="$SUDO"
+  fi
+  setsid $RUN_AS "$DEST" server --listen ":$PORT" >"$HOME/.rackops/server.log" 2>&1 < /dev/null &
   say "     logs: $HOME/.rackops/server.log"
   say "     stop: pkill -f 'rackops server'"
 fi

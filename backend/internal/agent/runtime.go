@@ -39,12 +39,54 @@ func DetectRuntime() (*Runtime, error) {
 }
 
 // List returns rackops-labeled containers (services and quick-tunnel
-// helpers) with live stats. Reporting both lets the control plane detect
-// missing containers and heal them.
+// helpers) plus any external containers already running on the host. Reporting
+// the labeled ones lets the control plane detect missing containers and heal
+// them; reporting the external ones lets it adopt pre-existing workloads so
+// they show up and become manageable.
 func (r *Runtime) List() []types.ContainerStatus {
 	stats := r.stats()
 	list := r.listLabeled("rackops.service", false, stats)
-	return append(list, r.listLabeled("rackops.tunnel", true, stats)...)
+	list = append(list, r.listLabeled("rackops.tunnel", true, stats)...)
+	return append(list, r.listExternal(stats)...)
+}
+
+// listExternal collects containers NOT created by RackOps — anything without a
+// rackops label and not named with the rackops- prefix. These are surfaced so
+// the control plane can adopt them.
+func (r *Runtime) listExternal(stats map[string]containerStat) []types.ContainerStatus {
+	out, err := exec.Command(r.Bin, "ps", "-a",
+		"--format", "{{.ID}}|{{.Names}}|{{.Image}}|{{.State}}|{{.Ports}}|{{.Labels}}").Output()
+	if err != nil {
+		return nil
+	}
+	var list []types.ContainerStatus
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line == "" {
+			continue
+		}
+		f := strings.SplitN(line, "|", 6)
+		if len(f) < 6 {
+			continue
+		}
+		name := f[1]
+		labels := f[5]
+		// Skip anything RackOps owns: labeled containers (services, tunnels,
+		// edge) and anything under the rackops- naming convention.
+		if strings.Contains(labels, "rackops.service=") || strings.Contains(labels, "rackops.tunnel=") ||
+			strings.HasPrefix(name, "rackops-") {
+			continue
+		}
+		cs := types.ContainerStatus{
+			ID: f[0], Name: name, Image: f[2], State: strings.ToLower(f[3]), External: true,
+			HostPort: firstPublishedPort(f[4]),
+		}
+		if st, ok := stats[cs.ID]; ok {
+			cs.CPUPct = st.cpu
+			cs.MemUsedMB = st.memMB
+		}
+		list = append(list, cs)
+	}
+	return list
 }
 
 // listLabeled collects containers carrying one rackops label.
@@ -292,6 +334,20 @@ func firstFreePort(prefer, containerPort int) int {
 		}
 	}
 	return start
+}
+
+// portsRe extracts the host side of a docker "Ports" column entry, e.g.
+// "0.0.0.0:8080->80/tcp, :::8080->80/tcp" -> 8080.
+var portsRe = regexp.MustCompile(`:(\d+)->`)
+
+// firstPublishedPort returns the first published host port from docker's Ports
+// column, or 0 if the container publishes none.
+func firstPublishedPort(ports string) int {
+	if m := portsRe.FindStringSubmatch(ports); m != nil {
+		p, _ := strconv.Atoi(m[1])
+		return p
+	}
+	return 0
 }
 
 // Simple runs a one-shot container command (stop/start/restart/rm).

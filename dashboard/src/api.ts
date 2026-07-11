@@ -33,6 +33,7 @@ export interface Mount {
 export interface Service {
   id: string; projectId: string; envId: string; name: string; kind: string; status: string;
   gitRepo?: string; gitBranch?: string; image?: string; composeYml?: string; templateId?: string;
+  adopted?: boolean; externalName?: string;
   nodeId: string; autoPlace: boolean;
   port: number; containerPort?: number; ports?: number[]; command?: string; domain: string; ingress: string;
   quickTunnelUrl?: string;

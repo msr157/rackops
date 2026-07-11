@@ -222,6 +222,44 @@ func (s *Store) SortedNodes() []*types.Node {
 	return out
 }
 
+// defaultPlacement returns the project ID and an environment ID to file
+// auto-created (adopted) services under. It prefers the "production" env of
+// the earliest project, falling back to any env, and creates a default project
+// if the store somehow has none. Callers must hold the write lock.
+func (s *Store) defaultPlacement() (projectID, envID string) {
+	// Earliest project by creation time keeps placement stable across restarts.
+	var proj *types.Project
+	for _, p := range s.Projects {
+		if proj == nil || p.CreatedAt.Before(proj.CreatedAt) {
+			proj = p
+		}
+	}
+	if proj == nil {
+		proj = &types.Project{
+			ID: NewID(), Name: "Default Infrastructure",
+			Description: "Auto-created default project", CreatedAt: time.Now(),
+		}
+		s.Projects[proj.ID] = proj
+	}
+	for _, e := range s.Envs {
+		if e.ProjectID != proj.ID {
+			continue
+		}
+		if e.Name == "production" {
+			return proj.ID, e.ID
+		}
+		if envID == "" {
+			envID = e.ID // fallback: first env in the project
+		}
+	}
+	if envID == "" {
+		e := &types.Environment{ID: NewID(), ProjectID: proj.ID, Name: "production", CreatedAt: time.Now()}
+		s.Envs[e.ID] = e
+		envID = e.ID
+	}
+	return proj.ID, envID
+}
+
 // NewID returns a random 12-hex-char identifier.
 func NewID() string {
 	b := make([]byte, 6)
