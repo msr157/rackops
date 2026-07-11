@@ -57,6 +57,24 @@ func (s *Store) migrate() {
 	} else {
 		log.Println("store: postgres table rackops_nodes ready")
 	}
+
+	if s.db != nil {
+		_, err = s.db.Exec(`
+			CREATE TABLE IF NOT EXISTS early_access_requests (
+				id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+				email       TEXT UNIQUE NOT NULL,
+				name        TEXT NOT NULL,
+				industry    TEXT NOT NULL,
+				notes       TEXT,
+				created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+			)
+		`)
+		if err != nil {
+			log.Printf("store: migrate early_access_requests failed: %v", err)
+		} else {
+			log.Println("store: postgres table early_access_requests ready")
+		}
+	}
 }
 
 // warmup pre-loads persisted nodes into memory on startup.
@@ -152,4 +170,21 @@ func withStatus(n api.Node) api.Node {
 		n.Status = api.StatusOnline
 	}
 	return n
+}
+
+// AddEarlyAccessRequest adds a new early access request.
+// Returns an error if the email already exists or if DB is not configured.
+func (s *Store) AddEarlyAccessRequest(req api.EarlyAccessRequest) error {
+	if s.db == nil {
+		// If running in-memory only, just log and pretend it succeeded.
+		log.Printf("store: received early access request for %s (in-memory mode, ignoring)", req.Email)
+		return nil
+	}
+
+	_, err := s.db.Exec(`
+		INSERT INTO early_access_requests (email, name, industry, notes)
+		VALUES ($1, $2, $3, $4)
+	`, req.Email, req.Name, req.Industry, req.Notes)
+
+	return err
 }

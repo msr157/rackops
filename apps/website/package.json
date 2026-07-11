@@ -18,6 +18,7 @@
     "three": "^0.175.0"
   },
   "devDependencies": {
+    "@rackops/api": "workspace:*",
     "@rackops/tsconfig": "workspace:*",
     "@types/react": "^19.0.10",
     "@types/react-dom": "^19.0.4",

@@ -17,15 +17,15 @@
   margin-bottom: 16px;
 }
 
-.cta-input-row {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
+.cta-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
 }
 
-.cta-input-row input {
-  flex: 1;
-  min-width: 220px;
+.cta-form-grid input,
+.cta-form-grid textarea {
+  width: 100%;
   background: transparent;
   border: none;
   border-bottom: 1px solid var(--rule-strong);
@@ -38,12 +38,43 @@
   border-radius: 0;
 }
 
-.cta-input-row input::placeholder {
+.cta-form-grid textarea {
+  grid-column: 1 / -1;
+  resize: vertical;
+  min-height: 48px;
+}
+
+.cta-form-grid input::placeholder,
+.cta-form-grid textarea::placeholder {
   color: var(--ink-3);
 }
 
-.cta-input-row input:focus {
+.cta-form-grid input:focus,
+.cta-form-grid textarea:focus {
   border-bottom-color: var(--signal);
+}
+
+.cta-form-grid input:disabled,
+.cta-form-grid textarea:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.cta-error {
+  grid-column: 1 / -1;
+  margin-top: 8px;
+}
+
+.cta-submit {
+  grid-column: 1 / -1;
+  justify-self: start;
+  margin-top: 8px;
+}
+
+@media (max-width: 600px) {
+  .cta-form-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .cta-confirm {

@@ -39,6 +39,13 @@ export interface Snapshot {
   collectedAt: string;
 }
 
+export interface EarlyAccessRequest {
+  email: string;
+  name: string;
+  industry: string;
+  notes?: string;
+}
+
 export type NodeStatus = 'online' | 'stale';
 
 export interface Node {

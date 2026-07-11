@@ -1,22 +1,52 @@
 import { useState, type FormEvent } from 'react';
 import { useScrollReveal } from '@/hooks/useScrollReveal';
+import type { EarlyAccessRequest } from '@rackops/api';
 import './CTA.css';
 
-// TODO: swap for POST /waitlist when the API lands.
 const CONTACT_EMAIL = 'early@rackops.dev';
+const API_URL = 'https://api.rackops.in/api/v1/early-access';
 
 export default function CTA() {
   const sectionRef = useScrollReveal<HTMLElement>();
-  const [email, setEmail] = useState('');
-  const [drafted, setDrafted] = useState(false);
+  const [formData, setFormData] = useState<EarlyAccessRequest>({
+    email: '',
+    name: '',
+    industry: '',
+    notes: '',
+  });
+  const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [errorMessage, setErrorMessage] = useState('');
 
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return;
-    window.location.href = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent(
-      'Early access request',
-    )}&body=${encodeURIComponent(`Requesting early access for: ${email}`)}`;
-    setDrafted(true);
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) return;
+    
+    setStatus('loading');
+    setErrorMessage('');
+
+    try {
+      const res = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formData),
+      });
+
+      if (!res.ok) {
+        if (res.status === 409) {
+          throw new Error('This email has already requested early access.');
+        }
+        throw new Error('Failed to submit request. Please try again later.');
+      }
+
+      setStatus('success');
+    } catch (err) {
+      setStatus('error');
+      setErrorMessage(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
   return (
@@ -29,32 +59,71 @@ export default function CTA() {
 
         <form className="cta-prompt reveal" onSubmit={handleSubmit}>
           <label className="cta-path mono-label" htmlFor="cta-email">
-            ~/rackops $ join --email
+            ~/rackops $ join --early-access
           </label>
-          {drafted ? (
+          
+          {status === 'success' ? (
             <p className="cta-confirm mono-label signal">
-              ✓ request drafted in your mail client — hit send
+              ✓ you're on the list. we'll be in touch soon.
             </p>
           ) : (
-            <div className="cta-input-row">
+            <div className="cta-form-grid">
+              <input
+                id="cta-name"
+                name="name"
+                type="text"
+                required
+                placeholder="Name"
+                value={formData.name}
+                onChange={handleChange}
+                disabled={status === 'loading'}
+              />
               <input
                 id="cta-email"
+                name="email"
                 type="email"
                 required
-                placeholder="you@example.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                placeholder="Email Address"
+                value={formData.email}
+                onChange={handleChange}
                 autoComplete="email"
+                disabled={status === 'loading'}
               />
-              <button type="submit" className="btn btn-solid">
-                [ Enter ]
+              <input
+                id="cta-industry"
+                name="industry"
+                type="text"
+                required
+                placeholder="Industry / Occupation"
+                value={formData.industry}
+                onChange={handleChange}
+                disabled={status === 'loading'}
+              />
+              <textarea
+                id="cta-notes"
+                name="notes"
+                placeholder="Description or notes (optional)"
+                value={formData.notes}
+                onChange={handleChange}
+                disabled={status === 'loading'}
+                rows={2}
+              />
+              
+              {status === 'error' && (
+                <p className="cta-error mono-label" style={{ color: 'var(--red, #ff4444)' }}>
+                  ✗ {errorMessage}
+                </p>
+              )}
+              
+              <button type="submit" className="btn btn-solid cta-submit" disabled={status === 'loading'}>
+                {status === 'loading' ? '[ Processing... ]' : '[ Enter ]'}
               </button>
             </div>
           )}
         </form>
 
         <p className="cta-fallback mono-label reveal">
-          no mail client? write to {CONTACT_EMAIL}
+          questions? write to {CONTACT_EMAIL}
         </p>
       </div>
     </section>

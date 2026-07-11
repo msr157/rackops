@@ -51,6 +51,14 @@ type ReportRequest struct {
 	Snapshot Snapshot `json:"snapshot"`
 }
 
+// EarlyAccessRequest is what the website POSTs to /api/v1/early-access
+type EarlyAccessRequest struct {
+	Email    string `json:"email"`
+	Name     string `json:"name"`
+	Industry string `json:"industry"`
+	Notes    string `json:"notes,omitempty"`
+}
+
 const (
 	StatusOnline = "online"
 	StatusStale  = "stale"

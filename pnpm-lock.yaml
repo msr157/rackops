@@ -101,6 +101,9 @@ importers:
         specifier: ^0.175.0
         version: 0.175.0
     devDependencies:
+      '@rackops/api':
+        specifier: workspace:*
+        version: link:../../packages/api
       '@rackops/tsconfig':
         specifier: workspace:*
         version: link:../../packages/tsconfig

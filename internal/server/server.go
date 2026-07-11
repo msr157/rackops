@@ -57,6 +57,7 @@ func New(opts Options) http.Handler {
 	mux.HandleFunc("GET /api/v1/nodes", s.handleListNodes)
 	mux.HandleFunc("GET /api/v1/nodes/{id}", s.handleGetNode)
 	mux.HandleFunc("GET /api/v1/meta", s.handleMeta)
+	mux.HandleFunc("POST /api/v1/early-access", s.handleEarlyAccess)
 	mux.HandleFunc("GET /healthz", handleHealthz)
 
 	if opts.Extra != nil {
