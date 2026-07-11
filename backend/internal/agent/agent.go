@@ -213,14 +213,15 @@ func (a *Agent) execute(task types.AgentTask) types.TaskResult {
 
 	switch task.Kind {
 	case types.TaskDeploy:
-		cid, logOut, err := a.runtime.Deploy(p)
+		cid, hostPort, logOut, err := a.runtime.Deploy(p)
 		res.Log = logOut
 		res.ContainerID = cid
+		res.HostPort = hostPort
 		res.OK = err == nil
 		if err != nil {
 			res.Log += "\nERROR: " + err.Error()
-		} else if p.Port > 0 {
-			a.servicePorts[p.ServiceID] = p.Port
+		} else if hostPort > 0 {
+			a.servicePorts[p.ServiceID] = hostPort
 		}
 	case types.TaskStop:
 		out, err := a.runtime.Simple("stop", containerName(p))
@@ -301,28 +302,29 @@ func (a *Agent) fetchLogs(p DeployPayload) (string, bool) {
 // DeployPayload mirrors server.DeployPayload (kept in sync; agent is
 // deliberately decoupled from the server package).
 type DeployPayload struct {
-	ServiceID   string         `json:"serviceId"`
-	Name        string         `json:"name"`
-	Image       string         `json:"image,omitempty"`
-	GitRepo     string         `json:"gitRepo,omitempty"`
-	GitBranch   string         `json:"gitBranch,omitempty"`
-	GitToken    string         `json:"gitToken,omitempty"`
-	ComposeYML  string         `json:"composeYml,omitempty"`
-	Port        int            `json:"port"`
-	Ports       []int          `json:"ports,omitempty"`
-	Command     string         `json:"command,omitempty"`
-	Env         []types.EnvVar `json:"env"`
-	Volumes     []string       `json:"volumes,omitempty"`
-	Mounts      []types.Mount  `json:"mounts,omitempty"`
-	PinnedPath  string         `json:"pinnedPath,omitempty"`
-	MemLimitMB  int64          `json:"memLimitMb,omitempty"`
-	CPULimit    float64        `json:"cpuLimit,omitempty"`
-	RestartPol  string         `json:"restartPolicy,omitempty"`
-	GPU         bool           `json:"gpu,omitempty"`
-	HostNet     bool           `json:"hostNet,omitempty"`
-	ContainerID string         `json:"containerId,omitempty"`
-	Since       string         `json:"since,omitempty"`
-	Path        string         `json:"path,omitempty"`
+	ServiceID     string         `json:"serviceId"`
+	Name          string         `json:"name"`
+	Image         string         `json:"image,omitempty"`
+	GitRepo       string         `json:"gitRepo,omitempty"`
+	GitBranch     string         `json:"gitBranch,omitempty"`
+	GitToken      string         `json:"gitToken,omitempty"`
+	ComposeYML    string         `json:"composeYml,omitempty"`
+	Port          int            `json:"port"`
+	ContainerPort int            `json:"containerPort,omitempty"`
+	Ports         []int          `json:"ports,omitempty"`
+	Command       string         `json:"command,omitempty"`
+	Env           []types.EnvVar `json:"env"`
+	Volumes       []string       `json:"volumes,omitempty"`
+	Mounts        []types.Mount  `json:"mounts,omitempty"`
+	PinnedPath    string         `json:"pinnedPath,omitempty"`
+	MemLimitMB    int64          `json:"memLimitMb,omitempty"`
+	CPULimit      float64        `json:"cpuLimit,omitempty"`
+	RestartPol    string         `json:"restartPolicy,omitempty"`
+	GPU           bool           `json:"gpu,omitempty"`
+	HostNet       bool           `json:"hostNet,omitempty"`
+	ContainerID   string         `json:"containerId,omitempty"`
+	Since         string         `json:"since,omitempty"`
+	Path          string         `json:"path,omitempty"`
 }
 
 func containerName(p DeployPayload) string {

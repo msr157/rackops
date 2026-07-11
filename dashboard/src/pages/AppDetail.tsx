@@ -24,7 +24,7 @@ const TABS: { key: Tab; label: string; icon: React.ReactNode }[] = [
 
 // Draft holds the editable copy of a service; saved via PATCH.
 interface Draft {
-  image: string; command: string; port: string; ports: string;
+  image: string; command: string; port: string; containerPort: string; ports: string;
   env: EnvVar[]; mounts: Mount[];
   memLimitMb: string; cpuLimit: string; restartPolicy: string; gpu: boolean; nodeId: string;
 }
@@ -32,7 +32,8 @@ interface Draft {
 function toDraft(s: Service): Draft {
   return {
     image: s.image ?? '', command: s.command ?? '',
-    port: s.port ? String(s.port) : '', ports: (s.ports ?? []).join(', '),
+    port: s.port ? String(s.port) : '', containerPort: s.containerPort ? String(s.containerPort) : '',
+    ports: (s.ports ?? []).join(', '),
     env: (s.env ?? []).map((e) => ({ ...e })),
     mounts: (s.mounts ?? []).map((m) => ({ ...m })),
     memLimitMb: s.memLimitMb ? String(s.memLimitMb) : '',
@@ -85,6 +86,7 @@ export function AppDetail() {
       const upd: ServiceUpdate = {
         image: draft.image, command: draft.command,
         port: parseInt(draft.port, 10) || 0,
+        containerPort: parseInt(draft.containerPort, 10) || 0,
         ports: draft.ports.split(',').map((p) => parseInt(p.trim(), 10)).filter((p) => p > 0),
         env: draft.env.filter((e) => e.key),
         mounts: draft.mounts.filter((m) => m.target),
@@ -375,9 +377,14 @@ function NetworkingTab({ svc, draft, setDraft, reload }: {
       {/* Ports */}
       <div className="card">
         <div className="eyebrow" style={{ marginBottom: 12 }}>Ports</div>
-        <div className="grid-2">
+        <div className="grid-3">
           <div className="field" style={{ marginBottom: 0 }}>
-            <label>Primary port (published on the machine)</label>
+            <label>App listens on (container)</label>
+            <input className="input mono" placeholder="e.g. 3000" value={draft.containerPort}
+              onChange={(e) => setDraft({ ...draft, containerPort: e.target.value.replace(/\D/g, '') })} />
+          </div>
+          <div className="field" style={{ marginBottom: 0 }}>
+            <label>Reachable on host port</label>
             <input className="input mono" value={draft.port}
               onChange={(e) => setDraft({ ...draft, port: e.target.value.replace(/\D/g, '') })} />
           </div>
@@ -387,6 +394,9 @@ function NetworkingTab({ svc, draft, setDraft, reload }: {
               onChange={(e) => setDraft({ ...draft, ports: e.target.value })} />
           </div>
         </div>
+        {draft.containerPort && draft.port && draft.containerPort !== draft.port && (
+          <div className="faint" style={{ marginTop: 8 }}>Publishes host <span className="mono">{draft.port}</span> → container <span className="mono">{draft.containerPort}</span>.</div>
+        )}
       </div>
     </>
   );

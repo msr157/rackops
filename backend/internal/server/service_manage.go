@@ -13,19 +13,20 @@ import (
 // ServiceUpdate is the editable subset of a service. Pointer fields distinguish
 // "not provided" from zero values.
 type ServiceUpdate struct {
-	Image      *string         `json:"image,omitempty"`
-	GitBranch  *string         `json:"gitBranch,omitempty"`
-	Command    *string         `json:"command,omitempty"`
-	Port       *int            `json:"port,omitempty"`
-	Ports      *[]int          `json:"ports,omitempty"`
-	Env        *[]types.EnvVar `json:"env,omitempty"`
-	Mounts     *[]types.Mount  `json:"mounts,omitempty"`
-	MemLimitMB *int64          `json:"memLimitMb,omitempty"`
-	CPULimit   *float64        `json:"cpuLimit,omitempty"`
-	RestartPol *string         `json:"restartPolicy,omitempty"`
-	GPU        *bool           `json:"gpu,omitempty"`
-	NodeID     *string         `json:"nodeId,omitempty"` // migration target
-	Redeploy   bool            `json:"redeploy"`         // apply now (Save & Redeploy)
+	Image         *string         `json:"image,omitempty"`
+	GitBranch     *string         `json:"gitBranch,omitempty"`
+	Command       *string         `json:"command,omitempty"`
+	Port          *int            `json:"port,omitempty"`
+	ContainerPort *int            `json:"containerPort,omitempty"`
+	Ports         *[]int          `json:"ports,omitempty"`
+	Env           *[]types.EnvVar `json:"env,omitempty"`
+	Mounts        *[]types.Mount  `json:"mounts,omitempty"`
+	MemLimitMB    *int64          `json:"memLimitMb,omitempty"`
+	CPULimit      *float64        `json:"cpuLimit,omitempty"`
+	RestartPol    *string         `json:"restartPolicy,omitempty"`
+	GPU           *bool           `json:"gpu,omitempty"`
+	NodeID        *string         `json:"nodeId,omitempty"` // migration target
+	Redeploy      bool            `json:"redeploy"`         // apply now (Save & Redeploy)
 }
 
 // handleUpdateService applies edits to a service. With Redeploy=true the
@@ -72,6 +73,9 @@ func (a *API) handleUpdateService(w http.ResponseWriter, r *http.Request) {
 		}
 		if upd.Port != nil {
 			svc.Port = *upd.Port
+		}
+		if upd.ContainerPort != nil {
+			svc.ContainerPort = *upd.ContainerPort
 		}
 		if upd.Ports != nil {
 			svc.Ports = *upd.Ports

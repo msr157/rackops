@@ -34,7 +34,7 @@ export interface Service {
   id: string; projectId: string; envId: string; name: string; kind: string; status: string;
   gitRepo?: string; gitBranch?: string; image?: string; composeYml?: string; templateId?: string;
   nodeId: string; autoPlace: boolean;
-  port: number; ports?: number[]; command?: string; domain: string; ingress: string;
+  port: number; containerPort?: number; ports?: number[]; command?: string; domain: string; ingress: string;
   quickTunnelUrl?: string;
   env: EnvVar[] | null; mounts?: Mount[]; volumes?: string[];
   cpuPct: number; memUsedMb: number; memLimitMb?: number; cpuLimit?: number;
@@ -43,7 +43,7 @@ export interface Service {
 }
 export interface DirEntry { name: string; isDir: boolean; size?: number }
 export interface ServiceUpdate {
-  image?: string; gitBranch?: string; command?: string; port?: number; ports?: number[];
+  image?: string; gitBranch?: string; command?: string; port?: number; containerPort?: number; ports?: number[];
   env?: EnvVar[]; mounts?: Mount[]; memLimitMb?: number; cpuLimit?: number;
   restartPolicy?: string; gpu?: boolean; nodeId?: string; redeploy: boolean;
 }
@@ -59,7 +59,7 @@ export interface EnvDef { key: string; label: string; default: string; secret: b
 export interface Template {
   id: string; name: string; category: string; description: string; image: string;
   port: number; ports?: number[]; env?: EnvDef[]; volumes?: string[]; memMb: number;
-  gpu?: boolean; notes?: string;
+  gpu?: boolean; notes?: string; composeYml?: string;
 }
 export interface Deployment {
   id: string; serviceId: string; version: number; status: string; trigger: string;
@@ -145,6 +145,8 @@ export const api = {
   serviceAction: (id: string, action: string) => req<Service>(`/api/services/${id}/${action}`, { method: 'POST' }),
   deleteService: (id: string) => req<void>(`/api/services/${id}`, { method: 'DELETE' }),
   placement: (body: object) => req<PlacementScore[]>('/api/placement', { method: 'POST', body: JSON.stringify(body) }),
+  suggestPort: (node: string, port: number) =>
+    req<{ port: number }>(`/api/suggest-port?node=${encodeURIComponent(node)}&port=${port}`),
   templates: () => req<Template[]>('/api/templates'),
   serviceLogs: (id: string) => req<{ logs: string }>(`/api/services/${id}/logs`),
   serviceDeployments: (id: string) => req<Deployment[]>(`/api/services/${id}/deployments`),

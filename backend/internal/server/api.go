@@ -62,6 +62,7 @@ func (a *API) Router() http.Handler {
 
 	// ---- Placement ----
 	mux.HandleFunc("POST /api/placement", a.handlePlacement)
+	mux.HandleFunc("GET /api/suggest-port", a.handleSuggestPort)
 
 	// ---- Templates & logs ----
 	mux.HandleFunc("GET /api/templates", a.handleTemplates)
@@ -428,6 +429,12 @@ func (a *API) applyTaskResult(nodeID string, res types.TaskResult) {
 			if res.OK {
 				svc.Status = types.StatusRunning
 				svc.ContainerID = res.ContainerID
+				// The agent bumps to a free host port if the chosen one was
+				// taken by a non-RackOps process; keep routing pointed at the
+				// port the container is actually published on.
+				if res.HostPort > 0 {
+					svc.Port = res.HostPort
+				}
 			} else {
 				svc.Status = types.StatusFailed
 			}

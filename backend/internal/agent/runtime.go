@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"regexp"
@@ -127,13 +128,16 @@ func parseMemMB(s string) int64 {
 }
 
 // Deploy builds (git) or pulls (image) and runs the container for a service.
-func (r *Runtime) Deploy(p DeployPayload) (containerID, logOut string, err error) {
+// hostPort is the host port the container was actually published on (may differ
+// from the requested one if it was taken); 0 for compose stacks / host-network.
+func (r *Runtime) Deploy(p DeployPayload) (containerID string, hostPort int, logOut string, err error) {
 	var logs strings.Builder
 	name := containerName(p)
 
-	// Compose stacks take a separate path.
+	// Compose stacks take a separate path (they publish their own ports).
 	if p.ComposeYML != "" {
-		return r.deployCompose(p, &logs)
+		cid, out, e := r.deployCompose(p, &logs)
+		return cid, 0, out, e
 	}
 
 	switch {
@@ -141,18 +145,18 @@ func (r *Runtime) Deploy(p DeployPayload) (containerID, logOut string, err error
 		// Build an image from the repo, then run it.
 		image, buildErr := r.buildFromGit(p, &logs)
 		if buildErr != nil {
-			return "", logs.String(), buildErr
+			return "", 0, logs.String(), buildErr
 		}
 		p.Image = image
 	case p.Image == "":
-		return "", "", fmt.Errorf("service has neither an image nor a git repo")
+		return "", 0, "", fmt.Errorf("service has neither an image nor a git repo")
 	default:
 		// Pull the image.
 		logs.WriteString("$ " + r.Bin + " pull " + p.Image + "\n")
 		out, pullErr := exec.Command(r.Bin, "pull", p.Image).CombinedOutput()
 		logs.Write(out)
 		if pullErr != nil {
-			return "", logs.String(), fmt.Errorf("pull failed: %w", pullErr)
+			return "", 0, logs.String(), fmt.Errorf("pull failed: %w", pullErr)
 		}
 	}
 
@@ -166,16 +170,36 @@ func (r *Runtime) Deploy(p DeployPayload) (containerID, logOut string, err error
 	args := []string{"run", "-d", "--name", name,
 		"--label", "rackops.service=" + p.ServiceID,
 		"--restart", restart}
+	// Port publishing: -p <hostPort>:<containerPort>. The container port is what
+	// the app listens on inside (fixed by the image); the host port is what it's
+	// reachable on. They're only equal by coincidence — publishing host:host
+	// (the old behaviour) silently broke every app with a fixed internal port.
+	containerPort := p.ContainerPort
+	if containerPort == 0 {
+		containerPort = p.Port // image/git deploys: the given port is the container port
+	}
 	if p.HostNet {
 		args = append(args, "--network", "host")
-	} else if p.Port > 0 {
-		// Publish the service's internal port on the same host port.
-		args = append(args, "-p", fmt.Sprintf("%d:%d", p.Port, p.Port))
+	} else if containerPort > 0 {
+		// Claim a host port that's actually free on this machine (covers ports
+		// held by non-RackOps processes, not just other services).
+		hostPort = firstFreePort(p.Port, containerPort)
+		args = append(args, "-p", fmt.Sprintf("%d:%d", hostPort, containerPort))
+		if p.Port > 0 && hostPort != p.Port {
+			logs.WriteString(fmt.Sprintf("host port %d busy — published on %d instead\n", p.Port, hostPort))
+		}
 	} else {
 		args = append(args, "-P") // publish exposed ports to ephemeral host ports
 	}
+	// Extra ports (e.g. DNS :53): publish on the same host port when free, else
+	// the next free one — so one busy secondary port (a host resolver already on
+	// :53 is common) doesn't sink the whole deploy. The container side is kept.
 	for _, extra := range p.Ports {
-		args = append(args, "-p", fmt.Sprintf("%d:%d", extra, extra))
+		hp := firstFreePort(extra, extra)
+		args = append(args, "-p", fmt.Sprintf("%d:%d", hp, extra))
+		if hp != extra {
+			logs.WriteString(fmt.Sprintf("extra port %d busy on host — published on %d instead\n", extra, hp))
+		}
 	}
 	for _, e := range p.Env {
 		args = append(args, "-e", e.Key+"="+e.Value)
@@ -190,7 +214,7 @@ func (r *Runtime) Deploy(p DeployPayload) (containerID, logOut string, err error
 	for _, m := range p.Mounts {
 		spec, err := mountSpec(p, m)
 		if err != nil {
-			return "", logs.String(), err
+			return "", 0, logs.String(), err
 		}
 		args = append(args, "-v", spec)
 	}
@@ -214,27 +238,8 @@ func (r *Runtime) Deploy(p DeployPayload) (containerID, logOut string, err error
 	logs.WriteString("$ " + r.Bin + " " + strings.Join(args, " ") + "\n")
 	out, err := exec.Command(r.Bin, args...).CombinedOutput()
 	logs.Write(out)
-	if err != nil && p.Port > 0 && strings.Contains(string(out), "address already in use") {
-		// Host port taken — retry publishing to an ephemeral host port.
-		logs.WriteString("host port busy — retrying with an ephemeral port\n")
-		_ = exec.Command(r.Bin, "rm", "-f", name).Run()
-		for i, a := range args {
-			if a == "-p" && i+1 < len(args) && args[i+1] == fmt.Sprintf("%d:%d", p.Port, p.Port) {
-				args[i+1] = fmt.Sprintf("%d", p.Port) // container port only = random host port
-			}
-		}
-		logs.WriteString("$ " + r.Bin + " " + strings.Join(args, " ") + "\n")
-		out, err = exec.Command(r.Bin, args...).CombinedOutput()
-		logs.Write(out)
-		if err == nil {
-			// Surface the actual mapping in the log.
-			if mapped, mapErr := exec.Command(r.Bin, "port", name).Output(); mapErr == nil {
-				logs.WriteString("published ports:\n" + string(mapped))
-			}
-		}
-	}
 	if err != nil {
-		return "", logs.String(), fmt.Errorf("run failed: %w", err)
+		return "", hostPort, logs.String(), fmt.Errorf("run failed: %w", err)
 	}
 	// The container ID is the last non-empty output line (podman-docker's
 	// "Emulate Docker CLI" banner and pull progress may precede it).
@@ -264,10 +269,29 @@ func (r *Runtime) Deploy(p DeployPayload) (containerID, logOut string, err error
 		st := strings.TrimSpace(string(state))
 		logs.WriteString("container state after start: " + st + "\n")
 		if st != "running" {
-			return cid, logs.String(), fmt.Errorf("container exited immediately (state %s) — see output above", st)
+			return cid, hostPort, logs.String(), fmt.Errorf("container exited immediately (state %s) — see output above", st)
 		}
 	}
-	return cid, logs.String(), nil
+	return cid, hostPort, logs.String(), nil
+}
+
+// firstFreePort returns prefer if it can be bound on this host, else the next
+// bindable port; containerPort is the fallback when no host port was requested.
+func firstFreePort(prefer, containerPort int) int {
+	start := prefer
+	if start <= 0 {
+		start = containerPort
+	}
+	if start <= 0 {
+		start = 8080
+	}
+	for p := start; p <= 65535 && p < start+2000; p++ {
+		if ln, err := net.Listen("tcp", fmt.Sprintf(":%d", p)); err == nil {
+			_ = ln.Close()
+			return p
+		}
+	}
+	return start
 }
 
 // Simple runs a one-shot container command (stop/start/restart/rm).

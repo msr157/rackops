@@ -167,8 +167,8 @@ const (
 // Mount attaches node storage to a container path.
 type Mount struct {
 	Type     MountType `json:"type"`
-	Source   string    `json:"source"`   // bind: host path · volume: volume name
-	Target   string    `json:"target"`   // container path
+	Source   string    `json:"source"` // bind: host path · volume: volume name
+	Target   string    `json:"target"` // container path
 	ReadOnly bool      `json:"readOnly"`
 	// DrivePath (volume only): mount point of the drive the volume lives on
 	// (e.g. /mnt/bigdisk). Empty = default docker volume storage.
@@ -210,23 +210,24 @@ type Service struct {
 	RelayPort int `json:"relayPort,omitempty"`
 
 	// Runtime
-	Port       int         `json:"port"`              // internal container port
-	Ports      []int       `json:"ports,omitempty"`   // extra published ports
-	Command    string      `json:"command,omitempty"` // container command override
-	Volumes    []string    `json:"volumes,omitempty"` // legacy template paths (auto-converted to Mounts)
-	Mounts     []Mount     `json:"mounts,omitempty"`  // storage attachments
-	Domain     string      `json:"domain"`            // chosen domain (empty = generated)
-	Ingress    IngressType `json:"ingress"`
+	Port          int         `json:"port"`                    // published host port (what you reach it on / routing uses)
+	ContainerPort int         `json:"containerPort,omitempty"` // port the app listens on inside the container
+	Ports         []int       `json:"ports,omitempty"`         // extra published ports (host==container)
+	Command       string      `json:"command,omitempty"`       // container command override
+	Volumes       []string    `json:"volumes,omitempty"`       // legacy template paths (auto-converted to Mounts)
+	Mounts        []Mount     `json:"mounts,omitempty"`        // storage attachments
+	Domain        string      `json:"domain"`                  // chosen domain (empty = generated)
+	Ingress       IngressType `json:"ingress"`
 	// QuickTunnelURL is a temporary trycloudflare.com URL (testing only —
 	// changes on every tunnel restart; not for production traffic).
-	QuickTunnelURL string `json:"quickTunnelUrl,omitempty"`
-	Env        []EnvVar    `json:"env"`
-	CPUPct     float64     `json:"cpuPct"`
-	MemUsedMB  int64       `json:"memUsedMb"`
-	MemLimitMB int64       `json:"memLimitMb,omitempty"`
-	CPULimit   float64     `json:"cpuLimit,omitempty"`      // cores, 0 = unlimited
-	RestartPol string      `json:"restartPolicy,omitempty"` // unless-stopped | always | on-failure | no
-	GPU        bool        `json:"gpu,omitempty"`
+	QuickTunnelURL string   `json:"quickTunnelUrl,omitempty"`
+	Env            []EnvVar `json:"env"`
+	CPUPct         float64  `json:"cpuPct"`
+	MemUsedMB      int64    `json:"memUsedMb"`
+	MemLimitMB     int64    `json:"memLimitMb,omitempty"`
+	CPULimit       float64  `json:"cpuLimit,omitempty"`      // cores, 0 = unlimited
+	RestartPol     string   `json:"restartPolicy,omitempty"` // unless-stopped | always | on-failure | no
+	GPU            bool     `json:"gpu,omitempty"`
 	// LogsClearedAt: UI-level log clearing — fetches use --since this time.
 	LogsClearedAt time.Time `json:"logsClearedAt,omitempty"`
 
@@ -514,6 +515,7 @@ type TaskResult struct {
 	OK          bool   `json:"ok"`
 	Log         string `json:"log"`
 	ContainerID string `json:"containerId,omitempty"`
+	HostPort    int    `json:"hostPort,omitempty"` // actual host port the container was published on
 }
 
 // AgentResponse is the control plane's reply to an AgentReport push.

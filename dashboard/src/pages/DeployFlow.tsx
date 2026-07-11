@@ -44,13 +44,19 @@ export function DeployFlow() {
   const [gitToken, setGitToken] = useState('');
   const [composeYml, setComposeYml] = useState('');
 
-  // step 2 state
+  // step 2 state — containerPort is what the app listens on; hostPort is what
+  // it's published/reached on (auto-suggested free unless the user edits it).
   const [name, setName] = useState('');
-  const [port, setPort] = useState('');
+  const [containerPort, setContainerPort] = useState('');
+  const [hostPort, setHostPort] = useState('');
+  const [hostTouched, setHostTouched] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
   const [nodeId, setNodeId] = useState('auto');
   const [envVars, setEnvVars] = useState<EnvVar[]>([]);
   const [scores, setScores] = useState<PlacementScore[]>([]);
   const [busy, setBusy] = useState(false);
+
+  const isCompose = source === 'compose' || !!tpl?.composeYml;
 
   // step 3 state
   const [svcId, setSvcId] = useState('');
@@ -68,10 +74,24 @@ export function DeployFlow() {
   const pickTemplate = (t: Template) => {
     setTpl(t);
     setName(t.id);
-    setPort(String(t.port));
+    setContainerPort(t.composeYml ? '' : String(t.port));
+    setHostTouched(false); // re-suggest a free host port for this template
     setEnvVars((t.env ?? []).map((d) => ({ key: d.key, value: d.default, secret: d.secret })));
     setStep(2);
   };
+
+  // Auto-fill a free host port when the target/port changes (until the user
+  // types their own). For a compose stack the routing port is the template's.
+  useEffect(() => {
+    if (step !== 2 || hostTouched) return;
+    const prefer = isCompose ? (tpl?.port ?? 0) : parseInt(containerPort, 10) || 0;
+    if (!prefer) return;
+    setSuggesting(true);
+    api.suggestPort(nodeId, prefer)
+      .then((r) => setHostPort(String(r.port)))
+      .catch(() => setHostPort(String(prefer)))
+      .finally(() => setSuggesting(false));
+  }, [step, nodeId, containerPort, isCompose, tpl, hostTouched]);
 
   const sourceReady =
     (source === 'template' && !!tpl) ||
@@ -88,7 +108,8 @@ export function DeployFlow() {
       projectId: projects[0]?.id ?? '',
       envId: envs.find((e) => e.name === 'production')?.id ?? envs[0]?.id ?? '',
       nodeId,
-      port: port ? parseInt(port, 10) : 0,
+      port: hostPort ? parseInt(hostPort, 10) : 0,
+      containerPort: isCompose ? 0 : (parseInt(containerPort, 10) || 0),
       env: envVars.filter((v) => v.key),
     };
     if (source === 'template') {
@@ -238,18 +259,38 @@ export function DeployFlow() {
             </div>
           )}
 
-          <div className="grid-2">
-            <div className="field">
-              <label>App name</label>
-              <input className="input" placeholder="my-app" value={name} autoFocus
-                onChange={(e) => setName(e.target.value)} />
-            </div>
-            <div className="field">
-              <label>Port {tpl ? `(template default: ${tpl.port})` : source === 'compose' ? '(from compose file)' : '(the port your app listens on)'}</label>
-              <input className="input mono" placeholder="8080" value={port}
-                onChange={(e) => setPort(e.target.value.replace(/\D/g, ''))} />
-            </div>
+          <div className="field">
+            <label>App name</label>
+            <input className="input" placeholder="my-app" value={name} autoFocus
+              onChange={(e) => setName(e.target.value)} />
           </div>
+
+          {isCompose ? (
+            <div className="field">
+              <label>Web port {suggesting && <span className="faint">· finding a free one…</span>}</label>
+              <input className="input mono" placeholder="8080" value={hostPort}
+                onChange={(e) => { setHostPort(e.target.value.replace(/\D/g, '')); setHostTouched(true); }} />
+              <span className="faint">The stack publishes its own ports; RackOps routes to this one. Auto-picked to avoid clashes.</span>
+            </div>
+          ) : (
+            <div className="grid-2">
+              <div className="field">
+                <label>App listens on port</label>
+                <input className="input mono" placeholder="8080" value={containerPort}
+                  onChange={(e) => setContainerPort(e.target.value.replace(/\D/g, ''))} />
+                <span className="faint">{tpl ? 'From the template — the port inside the container.' : "The port your app listens on inside the container."}</span>
+              </div>
+              <div className="field">
+                <label>Reachable on host port {suggesting && <span className="faint">· finding a free one…</span>}</label>
+                <input className="input mono" placeholder="auto" value={hostPort}
+                  onChange={(e) => { setHostPort(e.target.value.replace(/\D/g, '')); setHostTouched(true); }} />
+                <span className="faint">
+                  How you'll reach it — auto-picked to avoid clashes.
+                  {containerPort && hostPort && ` Maps ${hostPort} → ${containerPort}.`}
+                </span>
+              </div>
+            </div>
+          )}
 
           <div className="field">
             <label>Machine</label>

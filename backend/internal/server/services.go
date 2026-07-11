@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -11,30 +12,76 @@ import (
 	"github.com/rackops/rackops/internal/types"
 )
 
+// suggestHostPort returns a free host port on a node: prefer if nothing else
+// uses it, otherwise the next unused port. nodeID "" (or "auto") considers
+// ports across every node — a safe superset before placement is known.
+// excludeID lets an edit skip the service's own current port.
+func (a *API) suggestHostPort(nodeID string, prefer int, excludeID string) int {
+	used := map[int]bool{}
+	a.Store.View(func() {
+		for _, s := range a.Store.Services {
+			if s.ID == excludeID {
+				continue
+			}
+			if nodeID != "" && nodeID != "auto" && s.NodeID != nodeID {
+				continue
+			}
+			if s.Port > 0 {
+				used[s.Port] = true
+			}
+			for _, p := range s.Ports {
+				used[p] = true
+			}
+		}
+	})
+	if prefer <= 0 {
+		prefer = 8080
+	}
+	p := prefer
+	for i := 0; i < 20000; i++ {
+		if !used[p] && p >= 1 && p <= 65535 {
+			return p
+		}
+		p++
+		if p > 65535 {
+			p = 1024
+		}
+	}
+	return prefer
+}
+
+// handleSuggestPort powers the deploy form's auto-filled host port.
+func (a *API) handleSuggestPort(w http.ResponseWriter, r *http.Request) {
+	node := r.URL.Query().Get("node")
+	prefer, _ := strconv.Atoi(r.URL.Query().Get("port"))
+	writeJSON(w, map[string]int{"port": a.suggestHostPort(node, prefer, "")})
+}
+
 // DeployPayload is the JSON blob sent to an agent inside a deploy task.
 type DeployPayload struct {
-	ServiceID   string         `json:"serviceId"`
-	Name        string         `json:"name"`
-	Image       string         `json:"image,omitempty"`
-	GitRepo     string         `json:"gitRepo,omitempty"`
-	GitBranch   string         `json:"gitBranch,omitempty"`
-	GitToken    string         `json:"gitToken,omitempty"`
-	ComposeYML  string         `json:"composeYml,omitempty"`
-	Port        int            `json:"port"`
-	Ports       []int          `json:"ports,omitempty"`
-	Command     string         `json:"command,omitempty"`
-	Env         []types.EnvVar `json:"env"`
-	Volumes     []string       `json:"volumes,omitempty"` // legacy template container paths
-	Mounts      []types.Mount  `json:"mounts,omitempty"`
-	PinnedPath  string         `json:"pinnedPath,omitempty"`
-	MemLimitMB  int64          `json:"memLimitMb,omitempty"`
-	CPULimit    float64        `json:"cpuLimit,omitempty"`
-	RestartPol  string         `json:"restartPolicy,omitempty"`
-	GPU         bool           `json:"gpu,omitempty"`
-	HostNet     bool           `json:"hostNet,omitempty"`     // run with --network host (ingress edge)
-	ContainerID string         `json:"containerId,omitempty"` // for stop/start/restart/remove
-	Since       string         `json:"since,omitempty"`       // logs: RFC3339 lower bound
-	Path        string         `json:"path,omitempty"`        // listdir: directory to list
+	ServiceID     string         `json:"serviceId"`
+	Name          string         `json:"name"`
+	Image         string         `json:"image,omitempty"`
+	GitRepo       string         `json:"gitRepo,omitempty"`
+	GitBranch     string         `json:"gitBranch,omitempty"`
+	GitToken      string         `json:"gitToken,omitempty"`
+	ComposeYML    string         `json:"composeYml,omitempty"`
+	Port          int            `json:"port"`                    // published host port
+	ContainerPort int            `json:"containerPort,omitempty"` // port the app listens on inside
+	Ports         []int          `json:"ports,omitempty"`
+	Command       string         `json:"command,omitempty"`
+	Env           []types.EnvVar `json:"env"`
+	Volumes       []string       `json:"volumes,omitempty"` // legacy template container paths
+	Mounts        []types.Mount  `json:"mounts,omitempty"`
+	PinnedPath    string         `json:"pinnedPath,omitempty"`
+	MemLimitMB    int64          `json:"memLimitMb,omitempty"`
+	CPULimit      float64        `json:"cpuLimit,omitempty"`
+	RestartPol    string         `json:"restartPolicy,omitempty"`
+	GPU           bool           `json:"gpu,omitempty"`
+	HostNet       bool           `json:"hostNet,omitempty"`     // run with --network host (ingress edge)
+	ContainerID   string         `json:"containerId,omitempty"` // for stop/start/restart/remove
+	Since         string         `json:"since,omitempty"`       // logs: RFC3339 lower bound
+	Path          string         `json:"path,omitempty"`        // listdir: directory to list
 }
 
 // handleCreateService creates a service and queues its first deployment.
@@ -80,6 +127,9 @@ func (a *API) handleCreateService(w http.ResponseWriter, r *http.Request) {
 			req.ComposeYML = tpl.ComposeYML
 		} else {
 			req.Image = tpl.Image
+			// The app listens on the template's declared port inside the
+			// container; the user only chooses the host port it's published on.
+			req.ContainerPort = tpl.Port
 			req.Ports = tpl.Ports
 			req.Command = tpl.Command
 			// Template volumes become editable managed mounts (visible on the
@@ -152,6 +202,21 @@ func (a *API) handleCreateService(w http.ResponseWriter, r *http.Request) {
 		req.AutoPlace = true
 	}
 
+	// Port model: ContainerPort is what the app listens on inside the container;
+	// Port is the host port it's published on (and what routing/URLs use). For a
+	// plain image/git deploy the single port the user gives is the container
+	// port. Auto-pick a free host port so deploys don't collide — an explicit,
+	// already-free choice is kept; only conflicts get bumped. (Compose stacks
+	// publish their own ports, so this doesn't apply.)
+	if req.Kind != types.KindCompose {
+		if req.ContainerPort == 0 {
+			req.ContainerPort = req.Port
+		}
+		if prefer := req.Port; prefer > 0 {
+			req.Port = a.suggestHostPort(req.NodeID, prefer, "")
+		}
+	}
+
 	svc := req.Service
 	svc.ID = NewID()
 	svc.Status = types.StatusBuilding
@@ -196,7 +261,7 @@ func (a *API) queueDeploy(svc *types.Service, trigger string) *types.Deployment 
 	payload, _ := json.Marshal(DeployPayload{
 		ServiceID: svc.ID, Name: svc.Name, Image: svc.Image,
 		GitRepo: svc.GitRepo, GitBranch: svc.GitBranch, GitToken: svc.GitToken,
-		ComposeYML: svc.ComposeYML, Port: svc.Port, Ports: svc.Ports,
+		ComposeYML: svc.ComposeYML, Port: svc.Port, ContainerPort: svc.ContainerPort, Ports: svc.Ports,
 		Command: svc.Command, Env: svc.Env, Volumes: svc.Volumes, Mounts: svc.Mounts,
 		PinnedPath: svc.PinnedPath, MemLimitMB: svc.MemLimitMB,
 		CPULimit: svc.CPULimit, RestartPol: svc.RestartPol, GPU: svc.GPU,
