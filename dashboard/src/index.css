@@ -526,3 +526,44 @@ a:hover { text-decoration: underline; text-underline-offset: 3px; }
   .search-trigger { width: auto; }
   .kpi-row { grid-template-columns: 1fr 1fr; }
 }
+
+/* ============ InfoTip ============ */
+.infotip {
+  position: relative; display: inline-flex; align-items: center;
+  color: var(--faint); cursor: help; vertical-align: middle;
+  margin-left: 5px; outline: none;
+}
+.infotip:hover, .infotip:focus-visible { color: var(--amber); }
+.infotip-bubble {
+  position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
+  width: 230px; padding: 8px 11px; border-radius: var(--r-md);
+  background: var(--bg-3, #24211a); border: 1px solid var(--border-hi);
+  color: var(--fg); font-size: 12px; font-weight: 400; line-height: 1.55;
+  text-transform: none; letter-spacing: 0;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+  opacity: 0; visibility: hidden; transition: opacity 0.12s ease;
+  pointer-events: none; z-index: 60; white-space: normal;
+}
+.infotip.wide .infotip-bubble { width: 320px; }
+.infotip:hover .infotip-bubble, .infotip:focus-visible .infotip-bubble,
+.infotip:focus .infotip-bubble { opacity: 1; visibility: visible; }
+/* bubbles near the left edge shouldn't clip offscreen */
+.field .infotip-bubble { left: 0; transform: none; }
+
+/* ============ Password eye toggle ============ */
+.pw-wrap { position: relative; width: 100%; }
+.pw-wrap .input { width: 100%; padding-right: 36px; }
+.pw-eye {
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+  background: none; border: none; color: var(--faint); cursor: pointer;
+  padding: 5px; border-radius: var(--r-sm, 6px); display: grid; place-items: center;
+}
+.pw-eye:hover { color: var(--fg); }
+
+/* ============ Update banner ============ */
+.update-banner {
+  display: flex; align-items: center; gap: 12px;
+  border: 1px solid var(--amber); border-radius: var(--r-md);
+  background: var(--amber-dim); color: var(--fg);
+  padding: 9px 14px; margin-bottom: 16px; font-size: 13px;
+}

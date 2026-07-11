@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/rackops/rackops/internal/types"
@@ -147,12 +148,35 @@ var nodeRules = []alertRule{
 	}},
 }
 
-// EvaluateAlerts runs alert rules for a node, opening/resolving alerts.
-func (s *Store) EvaluateAlerts(n *types.Node) []*types.Alert {
-	var raised []*types.Alert
+// alertSustain counts consecutive firing reports per (rule, node). A single
+// metrics spike must not page anyone: an alert opens only after the condition
+// holds for sustainReports consecutive agent reports (~15-20s), and closes as
+// soon as one clean report arrives. This keeps "Needs attention" reserved for
+// real, ongoing problems instead of momentary blips.
+var alertSustain sync.Map // "kind:nodeID" -> int
+
+const sustainReports = 3
+
+// EvaluateAlerts runs alert rules for a node. It returns newly raised alerts
+// and alerts that just resolved, so callers can broadcast both — the UI needs
+// the resolution as much as the alarm.
+func (s *Store) EvaluateAlerts(n *types.Node) (raised, resolved []*types.Alert) {
 	for _, r := range nodeRules {
 		firing, msg := r.check(n)
 		key := r.kind + ":" + n.ID
+
+		if firing {
+			count := 1
+			if v, ok := alertSustain.Load(key); ok {
+				count = v.(int) + 1
+			}
+			alertSustain.Store(key, count)
+			if count < sustainReports {
+				continue // not sustained yet — no alert
+			}
+		} else {
+			alertSustain.Delete(key)
+		}
 
 		s.mu.Lock()
 		var existing *types.Alert
@@ -173,11 +197,23 @@ func (s *Store) EvaluateAlerts(n *types.Node) []*types.Alert {
 		} else if !firing && existing != nil {
 			existing.Resolved = true
 			s.dirty = true
+			resolved = append(resolved, existing)
 		}
 		s.mu.Unlock()
-		_ = key
 	}
-	return raised
+
+	// A reporting node is by definition not down: close any open node_down
+	// alert for it (nothing else ever resolves those).
+	s.mu.Lock()
+	for _, a := range s.Alerts {
+		if !a.Resolved && a.NodeID == n.ID && a.Kind == "node_down" {
+			a.Resolved = true
+			s.dirty = true
+			resolved = append(resolved, a)
+		}
+	}
+	s.mu.Unlock()
+	return raised, resolved
 }
 
 // MarkOfflineNodes flags nodes that haven't reported within the deadline.
@@ -187,12 +223,22 @@ func (s *Store) MarkOfflineNodes(deadline time.Duration) []*types.Node {
 		for _, n := range s.Nodes {
 			if n.Status == types.NodeOnline && time.Since(n.LastSeen) > deadline {
 				n.Status = types.NodeOffline
-				a := &types.Alert{
-					ID: NewID(), NodeID: n.ID, Level: types.AlertCritical, Kind: "node_down",
-					Message:   fmt.Sprintf("Node %s stopped reporting (last seen %s ago)", n.Name, time.Since(n.LastSeen).Round(time.Second)),
-					CreatedAt: time.Now(),
+				// One open node_down alert per node — never stack duplicates.
+				exists := false
+				for _, a := range s.Alerts {
+					if !a.Resolved && a.NodeID == n.ID && a.Kind == "node_down" {
+						exists = true
+						break
+					}
 				}
-				s.Alerts[a.ID] = a
+				if !exists {
+					a := &types.Alert{
+						ID: NewID(), NodeID: n.ID, Level: types.AlertCritical, Kind: "node_down",
+						Message:   fmt.Sprintf("Node %s stopped reporting (last seen %s ago)", n.Name, time.Since(n.LastSeen).Round(time.Second)),
+						CreatedAt: time.Now(),
+					}
+					s.Alerts[a.ID] = a
+				}
 				wentOffline = append(wentOffline, n)
 			}
 		}

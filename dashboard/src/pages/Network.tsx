@@ -9,7 +9,7 @@ import type { Domain, IngressConfig, MeshStatus, ClusterStatus, NetworkDiagnosis
 import { useData } from '../data';
 import { useToast, cleanError } from '../components/toast';
 import { useConfirm } from '../components/confirm';
-import { Led, CopyBtn, CopyField, Modal, Spinner, UrlChip, publicUrls } from '../components/ui';
+import { Led, CopyBtn, CopyField, InfoTip, Modal, Spinner, UrlChip, publicUrls } from '../components/ui';
 
 // recordHost: what goes in the registrar's "Host/Name" field.
 function recordHost(domain: string): string {
@@ -133,6 +133,11 @@ export function NetworkPage() {
 
   const tlsOn = !!acmeEmail.trim();
   const edgeReady = ingress?.enabled && ingress.status === 'running';
+  // The edge is mid-deploy between "Update edge" and the running/failed
+  // report — keep the buttons locked for that whole window, not just the
+  // HTTP round-trip, so a double-click can't queue two deployments.
+  const edgeDeploying = !!ingress?.enabled && (ingress.status === 'pending' || ingress.status === '');
+  const edgeBusy = busy || edgeDeploying;
   const lanOnly = diagnosis?.lanOnly ?? false;
   const publicApps = services.filter((s) => s.domain || s.quickTunnelUrl);
 
@@ -158,6 +163,7 @@ export function NetworkPage() {
         <div className="card">
           <div className="section-title" style={{ margin: '0 0 12px' }}>
             <Shield size={15} /> Edge proxy
+            <InfoTip text="The edge is the front door: one Traefik reverse proxy that receives all web traffic and forwards each domain/URL to the right app — even apps on other machines (via the mesh)." wide />
             <span style={{ marginLeft: 'auto' }}>
               {!ingress?.enabled ? <span className="badge gray">off</span>
                 : ingress.status === 'running' ? <span className="badge green"><Led status="running" /> running on {nodeName(ingress.nodeId)}</span>
@@ -174,7 +180,9 @@ export function NetworkPage() {
             </div>
           )}
           <div className="field">
-            <label>Run the edge on</label>
+            <label>Run the edge on
+              <InfoTip text="Pick the machine the internet can reach — the one with a public IP or port forwarding. Traffic for apps on other machines relays over the encrypted mesh automatically." wide />
+            </label>
             <select className="input" value={ingressNode} onChange={(e) => setIngressNode(e.target.value)}>
               <option value="">— select a machine —</option>
               {nodes.map((n) => <option key={n.id} value={n.id}>{n.name} ({n.publicIp || n.ip})</option>)}
@@ -191,19 +199,23 @@ export function NetworkPage() {
             </div>
           </div>
           <div className="field">
-            <label>Let's Encrypt email {tlsOn ? '' : '(optional — enables automatic HTTPS)'}</label>
+            <label>Let's Encrypt email {tlsOn ? '' : '(optional — enables automatic HTTPS)'}
+              <InfoTip text="Set any email you own and every domain you route gets a free HTTPS certificate automatically. Let's Encrypt uses the address only for expiry warnings." wide />
+            </label>
             <input className="input" placeholder="you@example.com" value={acmeEmail} onChange={(e) => setAcmeEmail(e.target.value)} />
             {tlsOn && <span className="faint">
               HTTPS on: certificates issue automatically. Port {httpPort} must be reachable from the internet; HTTP redirects to HTTPS.
             </span>}
           </div>
           <div className="row">
-            <button className="btn primary" disabled={busy || !ingressNode} onClick={() => applyIngress(true)}>
-              {busy ? <Spinner size={13} /> : null} {ingress?.enabled ? 'Update edge' : 'Enable edge'}
+            <button className="btn primary" disabled={edgeBusy || !ingressNode} onClick={() => applyIngress(true)}>
+              {edgeBusy ? <Spinner size={13} /> : null}{' '}
+              {edgeDeploying ? 'Updating…' : ingress?.enabled ? 'Update edge' : 'Enable edge'}
             </button>
             {ingress?.enabled && (
-              <button className="btn danger" disabled={busy} onClick={() => applyIngress(false)}>Disable</button>
+              <button className="btn danger" disabled={edgeBusy} onClick={() => applyIngress(false)}>Disable</button>
             )}
+            <InfoTip text="Updating redeploys the Traefik edge container with the settings above — routes drop for a second or two while it restarts. The buttons unlock when the edge reports back." wide />
           </div>
         </div>
 
@@ -211,6 +223,7 @@ export function NetworkPage() {
         <div className="card">
           <div className="section-title" style={{ margin: '0 0 12px' }}>
             <Waypoints size={15} /> WireGuard mesh
+            <InfoTip text="A private encrypted network between all your machines. Every machine dials out to the hub, so it works behind home routers and CGNAT with zero port forwarding." wide />
             {meshStatus?.enabled
               ? <span className="badge green" style={{ marginLeft: 'auto' }}>active</span>
               : <span className="badge gray" style={{ marginLeft: 'auto' }}>disabled</span>}
@@ -246,7 +259,10 @@ export function NetworkPage() {
       </div>
 
       {/* Domains */}
-      <div className="section-title"><Globe size={15} /> Your domains</div>
+      <div className="section-title">
+        <Globe size={15} /> Your domains
+        <InfoTip text="Add a domain you own and RackOps shows the exact DNS record to create, then keeps verifying DNS, edge reachability, and the HTTPS certificate until everything is green." wide />
+      </div>
       <div className="card">
         <div className="row" style={{ marginBottom: 12 }}>
           <input className="input" placeholder="app.example.com — or *.example.com to give every app its own subdomain"

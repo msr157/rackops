@@ -8,7 +8,7 @@ import { api } from '../api';
 import type { Template, EnvVar, PlacementScore, Service, Deployment } from '../api';
 import { useData } from '../data';
 import { useToast, cleanError } from '../components/toast';
-import { Led, Spinner, UrlChip, publicUrls } from '../components/ui';
+import { InfoTip, Led, Spinner, UrlChip, publicUrls } from '../components/ui';
 
 type Source = 'template' | 'image' | 'git' | 'compose';
 
@@ -224,7 +224,9 @@ export function DeployFlow() {
                   <input className="input mono" value={gitBranch} onChange={(e) => setGitBranch(e.target.value)} />
                 </div>
                 <div className="field">
-                  <label>Access token (private repos)</label>
+                  <label>Access token (private repos)
+                    <InfoTip text="Only needed for private repositories. On GitHub: Settings → Developer settings → Personal access tokens (read-only repo scope is enough). Stored server-side, never shown again." wide />
+                  </label>
                   <input className="input" type="password" placeholder="optional" value={gitToken} onChange={(e) => setGitToken(e.target.value)} />
                 </div>
               </div>
@@ -293,7 +295,9 @@ export function DeployFlow() {
           )}
 
           <div className="field">
-            <label>Machine</label>
+            <label>Machine
+              <InfoTip text="Auto scores every online machine on free CPU, memory, storage, and temperature, and picks the best fit. Choose a specific machine only when the app must live somewhere particular (e.g. next to its data)." wide />
+            </label>
             <select className="input" value={nodeId} onChange={(e) => setNodeId(e.target.value)}>
               <option value="auto">Auto — pick the best machine for me</option>
               {nodes.map((n) => <option key={n.id} value={n.id}>{n.name}{n.status !== 'online' ? ' — offline' : ''}</option>)}

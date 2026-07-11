@@ -1,28 +1,23 @@
 import { useEffect, useState } from 'react';
-import { Key, Bell, Trash2, Plus, Zap } from 'lucide-react';
+import { Key, Bell, Zap, Mail, LifeBuoy, ArrowRight } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { api } from '../api';
-import type { Settings, APIToken } from '../api';
+import type { Settings } from '../api';
 import { useToast, cleanError } from '../components/toast';
-import { useConfirm } from '../components/confirm';
-import { CopyField, Spinner } from '../components/ui';
+import { InfoTip, Spinner } from '../components/ui';
 
-type Tab = 'ai' | 'notify' | 'tokens';
+type Tab = 'ai' | 'notify' | 'email' | 'crm';
 
 export function SettingsPage() {
   const toast = useToast();
-  const confirm = useConfirm();
   const [tab, setTab] = useState<Tab>('ai');
   const [s, setS] = useState<Settings>({ notifyDeploys: true, notifyAlerts: true });
-  const [tokens, setTokens] = useState<APIToken[]>([]);
-  const [newTokenName, setNewTokenName] = useState('');
-  const [freshToken, setFreshToken] = useState('');
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; provider: string; error?: string } | null>(null);
 
   useEffect(() => {
     api.settings().then(setS).catch(() => {});
-    api.tokens().then((t) => setTokens(t ?? [])).catch(() => {});
   }, []);
 
   const save = async () => {
@@ -41,27 +36,6 @@ export function SettingsPage() {
     setTesting(false);
   };
 
-  const mkToken = async () => {
-    if (!newTokenName.trim()) return;
-    try {
-      const r = await api.createApiToken(newTokenName.trim());
-      setFreshToken(r.token);
-      setNewTokenName('');
-      api.tokens().then((t) => setTokens(t ?? [])).catch(() => {});
-    } catch (e) { toast.err(cleanError(e)); }
-  };
-
-  const rmToken = async (t: APIToken) => {
-    const yes = await confirm({
-      title: `Revoke "${t.name || 'unnamed token'}"?`,
-      body: 'Anything using this token loses access immediately.',
-      confirmLabel: 'Revoke', danger: true,
-    });
-    if (!yes) return;
-    await api.deleteApiToken(t.id).catch((e) => toast.err(cleanError(e)));
-    api.tokens().then((x) => setTokens(x ?? [])).catch(() => {});
-  };
-
   const set = (patch: Partial<Settings>) => setS({ ...s, ...patch });
   const prov = s.aiProvider ?? 'auto';
   const show = (p: string) => prov === 'auto' || prov === p;
@@ -69,13 +43,19 @@ export function SettingsPage() {
   return (
     <div className="page" style={{ maxWidth: 720 }}>
       <div className="page-title">Settings</div>
-      <div className="page-sub">Copilot providers, notifications, and API access</div>
+      <div className="page-sub">Copilot providers, notifications, email, and support</div>
+
+      <div className="card row spread" style={{ padding: '10px 16px', marginBottom: 16 }}>
+        <span className="dim">Looking for API keys? They moved to your profile — one key per tool, revocable individually.</span>
+        <Link to="/profile" className="btn sm">Profile &amp; API keys <ArrowRight size={11} /></Link>
+      </div>
 
       <div className="tabs">
         {([
           ['ai', <Key size={14} key="a" />, 'Copilot AI'],
           ['notify', <Bell size={14} key="n" />, 'Notifications'],
-          ['tokens', <Key size={14} key="t" />, 'API tokens'],
+          ['email', <Mail size={14} key="e" />, 'Email (SMTP)'],
+          ['crm', <LifeBuoy size={14} key="c" />, 'Support & CRM'],
         ] as [Tab, React.ReactNode, string][]).map(([key, icon, label]) => (
           <button key={key} className={`tab ${tab === key ? 'active' : ''}`} onClick={() => setTab(key)}>
             {icon} {label}
@@ -214,30 +194,67 @@ export function SettingsPage() {
         </div>
       )}
 
-      {tab === 'tokens' && (
+      {tab === 'email' && (
         <div className="card">
-          <div className="row" style={{ marginBottom: 14 }}>
-            <input className="input" placeholder="Token name (e.g. ci-pipeline)" value={newTokenName}
-              onChange={(e) => setNewTokenName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && mkToken()} />
-            <button className="btn primary" onClick={mkToken}><Plus size={13} /> Create</button>
+          <div className="dim" style={{ marginBottom: 14, lineHeight: 1.7 }}>
+            SMTP powers <strong>password-reset emails</strong>. Optional — without it, reset links
+            are written to the server log (<span className="mono">journalctl -u rackops</span>) so
+            you&rsquo;re never locked out.
           </div>
-          {freshToken && (
-            <div className="card inset" style={{ borderColor: 'var(--amber)', marginBottom: 14 }}>
-              <div className="dim" style={{ marginBottom: 8 }}>Copy now — shown only once:</div>
-              <CopyField text={freshToken} />
+          <div className="grid-2">
+            <div className="field">
+              <label>SMTP host
+                <InfoTip text="Your mail relay, e.g. smtp.gmail.com, smtp.fastmail.com, or a self-hosted one. Gmail needs an App Password (not your account password)." wide />
+              </label>
+              <input className="input" placeholder="smtp.example.com" value={s.smtpHost ?? ''} onChange={(e) => set({ smtpHost: e.target.value })} />
             </div>
-          )}
-          {tokens.map((t) => (
-            <div className="row spread" key={t.id} style={{ padding: '7px 0', borderTop: '1px solid var(--border)' }}>
-              <span>{t.name || '(unnamed)'} <span className="faint">{new Date(t.createdAt).toLocaleDateString()}</span></span>
-              <button className="btn sm danger" aria-label={`Revoke ${t.name}`} onClick={() => rmToken(t)}>
-                <Trash2 size={12} />
-              </button>
+            <div className="field">
+              <label>Port
+                <InfoTip text="587 (STARTTLS) is the common default; 465 or 25 depending on your provider." />
+              </label>
+              <input className="input mono" placeholder="587" value={s.smtpPort ? String(s.smtpPort) : ''}
+                onChange={(e) => set({ smtpPort: parseInt(e.target.value.replace(/\D/g, ''), 10) || 0 })} />
             </div>
-          ))}
-          {tokens.length === 0 && (
-            <div className="faint">No API tokens. Use them with the CLI: <code className="mono">RACKOPS_TOKEN=rk_… rackops nodes</code></div>
-          )}
+          </div>
+          <div className="grid-2">
+            <div className="field">
+              <label>Username</label>
+              <input className="input" placeholder="you@example.com" value={s.smtpUser ?? ''} onChange={(e) => set({ smtpUser: e.target.value })} />
+            </div>
+            <div className="field">
+              <label>Password</label>
+              <input className="input" type="password" value={s.smtpPass ?? ''} onChange={(e) => set({ smtpPass: e.target.value })} />
+            </div>
+          </div>
+          <div className="field">
+            <label>From address
+              <InfoTip text="What recipients see in the From field. Defaults to the username if left blank." />
+            </label>
+            <input className="input" placeholder="rackops@example.com" value={s.smtpFrom ?? ''} onChange={(e) => set({ smtpFrom: e.target.value })} />
+          </div>
+          <button className="btn primary" disabled={saving} onClick={save}>{saving ? <Spinner size={13} /> : null} Save settings</button>
+        </div>
+      )}
+
+      {tab === 'crm' && (
+        <div className="card">
+          <div className="dim" style={{ marginBottom: 14, lineHeight: 1.7 }}>
+            Support tickets opened on the <strong>Support</strong> page always stay on this server.
+            When a CRM endpoint is configured, each ticket is also forwarded there together with an
+            anonymous usage snapshot (version, machine/app counts, features in use — never your
+            data or logs), so the vendor&rsquo;s support and product teams can actually help.
+          </div>
+          <div className="field">
+            <label>CRM ingest endpoint
+              <InfoTip text="An HTTPS URL that accepts POSTed JSON: { ticket, usage }. Leave blank to keep tickets purely local." wide />
+            </label>
+            <input className="input" placeholder="https://crm.example.com/api/ingest/tickets" value={s.crmEndpoint ?? ''} onChange={(e) => set({ crmEndpoint: e.target.value })} />
+          </div>
+          <div className="field">
+            <label>CRM API key (sent as Bearer token)</label>
+            <input className="input" type="password" value={s.crmKey ?? ''} onChange={(e) => set({ crmKey: e.target.value })} />
+          </div>
+          <button className="btn primary" disabled={saving} onClick={save}>{saving ? <Spinner size={13} /> : null} Save settings</button>
         </div>
       )}
     </div>

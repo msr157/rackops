@@ -20,18 +20,20 @@ import (
 type Store struct {
 	mu sync.RWMutex
 
-	Nodes       map[string]*types.Node        `json:"nodes"`
-	Projects    map[string]*types.Project     `json:"projects"`
-	Envs        map[string]*types.Environment `json:"envs"`
-	Services    map[string]*types.Service     `json:"services"`
-	Deployments map[string]*types.Deployment  `json:"deployments"`
-	Users       map[string]*types.User        `json:"users"`
-	Tokens      map[string]*types.APIToken    `json:"tokens"`
-	Alerts      map[string]*types.Alert       `json:"alerts"`
-	Domains     map[string]*types.Domain      `json:"domains"`
-	Ingress     types.IngressConfig           `json:"ingress"`
-	Settings    Settings                      `json:"settings"`
-	Events      []*types.Event                `json:"events"`
+	Nodes       map[string]*types.Node          `json:"nodes"`
+	Orgs        map[string]*types.Organization  `json:"orgs"`
+	Projects    map[string]*types.Project       `json:"projects"`
+	Envs        map[string]*types.Environment   `json:"envs"`
+	Services    map[string]*types.Service       `json:"services"`
+	Deployments map[string]*types.Deployment    `json:"deployments"`
+	Users       map[string]*types.User          `json:"users"`
+	Tokens      map[string]*types.APIToken      `json:"tokens"`
+	Alerts      map[string]*types.Alert         `json:"alerts"`
+	Domains     map[string]*types.Domain        `json:"domains"`
+	Tickets     map[string]*types.SupportTicket `json:"tickets"`
+	Ingress     types.IngressConfig             `json:"ingress"`
+	Settings    Settings                        `json:"settings"`
+	Events      []*types.Event                  `json:"events"`
 
 	// taskQueue maps nodeID -> pending agent tasks (not persisted; re-derived).
 	taskQueue map[string][]types.AgentTask
@@ -67,12 +69,25 @@ type Settings struct {
 	OpenAIKey      string `json:"openaiKey,omitempty"`
 	OpenAIBase     string `json:"openaiBase,omitempty"` // for Ollama/compatible: http://host:11434/v1
 	OpenAIModel    string `json:"openaiModel,omitempty"`
+	// SMTP for password-reset email. Reset also works without SMTP: the reset
+	// link is printed to the server log so a self-hosted operator can recover.
+	SMTPHost string `json:"smtpHost,omitempty"`
+	SMTPPort int    `json:"smtpPort,omitempty"`
+	SMTPUser string `json:"smtpUser,omitempty"`
+	SMTPPass string `json:"smtpPass,omitempty"`
+	SMTPFrom string `json:"smtpFrom,omitempty"`
+	// CRM ingest endpoint for support tickets (vendor-side). Tickets are
+	// always stored locally; forwarding is best-effort and includes an
+	// anonymous usage snapshot.
+	CRMEndpoint string `json:"crmEndpoint,omitempty"`
+	CRMKey      string `json:"crmKey,omitempty"`
 }
 
 // NewStore loads state from dataDir or initializes a fresh store.
 func NewStore(dataDir string) (*Store, error) {
 	s := &Store{
 		Nodes:       map[string]*types.Node{},
+		Orgs:        map[string]*types.Organization{},
 		Projects:    map[string]*types.Project{},
 		Envs:        map[string]*types.Environment{},
 		Services:    map[string]*types.Service{},
@@ -81,6 +96,7 @@ func NewStore(dataDir string) (*Store, error) {
 		Tokens:      map[string]*types.APIToken{},
 		Alerts:      map[string]*types.Alert{},
 		Domains:     map[string]*types.Domain{},
+		Tickets:     map[string]*types.SupportTicket{},
 		taskQueue:   map[string][]types.AgentTask{},
 		dataDir:     dataDir,
 	}
@@ -92,6 +108,13 @@ func NewStore(dataDir string) (*Store, error) {
 		if err := json.Unmarshal(data, s); err != nil {
 			return nil, err
 		}
+	}
+	// Maps absent in older snapshots must never stay nil.
+	if s.Orgs == nil {
+		s.Orgs = map[string]*types.Organization{}
+	}
+	if s.Tickets == nil {
+		s.Tickets = map[string]*types.SupportTicket{}
 	}
 	// Ensure a default project + environments exist.
 	if len(s.Projects) == 0 {
@@ -106,8 +129,53 @@ func NewStore(dataDir string) (*Store, error) {
 		}
 		s.dirty = true
 	}
+	// Organisation migration: every install gets a default org, and projects
+	// created before organisations existed are filed under it. Existing users
+	// become members so nothing disappears from their view.
+	s.ensureDefaultOrg()
 	go s.persistLoop()
 	return s, nil
+}
+
+// ensureDefaultOrg guarantees at least one organisation exists, attaches
+// org-less projects to the earliest org, and enrolls every existing user.
+func (s *Store) ensureDefaultOrg() {
+	var def *types.Organization
+	for _, o := range s.Orgs {
+		if def == nil || o.CreatedAt.Before(def.CreatedAt) {
+			def = o
+		}
+	}
+	if def == nil {
+		def = &types.Organization{
+			ID: NewID(), Name: "My Organization", CreatedAt: time.Now(),
+		}
+		s.Orgs[def.ID] = def
+		s.dirty = true
+	}
+	for _, p := range s.Projects {
+		if p.OrgID == "" || s.Orgs[p.OrgID] == nil {
+			p.OrgID = def.ID
+			s.dirty = true
+		}
+	}
+	for _, u := range s.Users {
+		enrolled := false
+		for _, o := range s.Orgs {
+			if o.HasMember(u.ID) {
+				enrolled = true
+				break
+			}
+		}
+		if !enrolled {
+			role := types.OrgRoleMember
+			if u.Role == types.RoleOwner || u.Role == types.RoleAdmin {
+				role = types.OrgRoleOwner
+			}
+			def.Members = append(def.Members, types.OrgMember{UserID: u.ID, Role: role, AddedAt: time.Now()})
+			s.dirty = true
+		}
+	}
 }
 
 // persistLoop snapshots state to disk when dirty.
@@ -147,6 +215,7 @@ func (s *Store) ImportJSON(data []byte) error {
 	defer s.mu.Unlock()
 	s.importing = true
 	s.Nodes = in.Nodes
+	s.Orgs = in.Orgs
 	s.Projects = in.Projects
 	s.Envs = in.Envs
 	s.Services = in.Services
@@ -155,10 +224,17 @@ func (s *Store) ImportJSON(data []byte) error {
 	s.Tokens = in.Tokens
 	s.Alerts = in.Alerts
 	s.Domains = in.Domains
+	s.Tickets = in.Tickets
 	s.Ingress = in.Ingress
 	s.Settings = in.Settings
 	s.Events = in.Events
 	s.ClusterHTTP = in.ClusterHTTP
+	if s.Orgs == nil {
+		s.Orgs = map[string]*types.Organization{}
+	}
+	if s.Tickets == nil {
+		s.Tickets = map[string]*types.SupportTicket{}
+	}
 	s.dirty = true // persist locally
 	s.importing = false
 	return nil
@@ -236,7 +312,7 @@ func (s *Store) defaultPlacement() (projectID, envID string) {
 	}
 	if proj == nil {
 		proj = &types.Project{
-			ID: NewID(), Name: "Default Infrastructure",
+			ID: NewID(), Name: "Default Infrastructure", OrgID: s.defaultOrgID(),
 			Description: "Auto-created default project", CreatedAt: time.Now(),
 		}
 		s.Projects[proj.ID] = proj
@@ -258,6 +334,22 @@ func (s *Store) defaultPlacement() (projectID, envID string) {
 		envID = e.ID
 	}
 	return proj.ID, envID
+}
+
+// defaultOrgID returns the earliest organisation's ID (creating one if the
+// store somehow has none). Callers must hold the write lock.
+func (s *Store) defaultOrgID() string {
+	var def *types.Organization
+	for _, o := range s.Orgs {
+		if def == nil || o.CreatedAt.Before(def.CreatedAt) {
+			def = o
+		}
+	}
+	if def == nil {
+		def = &types.Organization{ID: NewID(), Name: "My Organization", CreatedAt: time.Now()}
+		s.Orgs[def.ID] = def
+	}
+	return def.ID
 }
 
 // NewID returns a random 12-hex-char identifier.

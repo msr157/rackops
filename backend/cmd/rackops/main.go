@@ -36,6 +36,10 @@ func main() {
 		runAgent(os.Args[2:])
 	case "probe":
 		runProbe()
+	case "mcp":
+		runMCP(os.Args[2:])
+	case "update":
+		runUpdate()
 	case "nodes", "services", "deploy", "alerts", "ask":
 		runCLI(os.Args[1], os.Args[2:])
 	case "version":
@@ -46,6 +50,37 @@ func main() {
 	}
 }
 
+// runUpdate self-updates the binary to the latest GitHub release.
+func runUpdate() {
+	fmt.Printf("rackops %s — checking for updates…\n", version)
+	tag, _, err := server.LatestRelease()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error: couldn't reach GitHub releases:", err)
+		os.Exit(1)
+	}
+	cur := "v" + version
+	if tag == cur {
+		fmt.Printf("already up to date (%s)\n", tag)
+		return
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(1)
+	}
+	fmt.Printf("updating %s → %s …\n", cur, tag)
+	if err := server.SelfUpdate(exe, tag); err != nil {
+		if os.IsPermission(err) || strings.Contains(err.Error(), "permission denied") {
+			fmt.Fprintf(os.Stderr, "error: %v\nre-run with sudo: sudo rackops update\n", err)
+		} else {
+			fmt.Fprintln(os.Stderr, "error:", err)
+		}
+		os.Exit(1)
+	}
+	fmt.Printf("✓ updated to %s (%s)\n", tag, exe)
+	fmt.Println("restart the server to pick it up: sudo systemctl restart rackops")
+}
+
 func usage() {
 	fmt.Fprintln(os.Stderr, `RackOps — The Infrastructure Operating System
 
@@ -53,6 +88,9 @@ Usage:
   rackops server [flags]     Run the control plane (+ embedded local agent)
   rackops agent  [flags]     Run the node agent
   rackops probe              Print discovered hardware + live metrics (debug)
+  rackops update             Self-update to the latest release
+  rackops mcp                Serve the Model Context Protocol over stdio
+                             (connect VS Code / Claude / Cursor to your fleet)
   rackops version            Print version
 
 CLI (uses RACKOPS_SERVER / RACKOPS_TOKEN env or --server/--token flags):
@@ -90,6 +128,7 @@ func runServer(args []string) {
 	nodeID := fs.String("node-id", "", "stable server node ID (default: derived from advertise addr)")
 	_ = fs.Parse(args)
 
+	server.ServerVersion = version
 	store, err := server.NewStore(*dataDir)
 	if err != nil {
 		log.Fatalf("server: %v", err)

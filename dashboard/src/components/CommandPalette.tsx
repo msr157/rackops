@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LayoutGrid, Boxes, HardDrive, Network, Settings, Rocket, Plus, Bot, Search } from 'lucide-react';
+import {
+  LayoutGrid, Boxes, HardDrive, Network, Settings, Rocket, Plus, Bot, Search,
+  User, Building2, LifeBuoy, BookOpen,
+} from 'lucide-react';
 import { useData } from '../data';
 import { Led } from './ui';
 
@@ -38,7 +41,11 @@ export function CommandPalette({ open, onClose, onAddMachine, onCopilot }: {
       { key: 'apps', label: 'Apps', icon: <Boxes size={14} />, hint: 'page', run: go('/apps') },
       { key: 'machines', label: 'Machines', icon: <HardDrive size={14} />, hint: 'page', run: go('/machines') },
       { key: 'network', label: 'Network', icon: <Network size={14} />, hint: 'page', run: go('/network') },
+      { key: 'orgs', label: 'Organizations', icon: <Building2 size={14} />, hint: 'page', run: go('/organizations') },
+      { key: 'support', label: 'Support tickets', icon: <LifeBuoy size={14} />, hint: 'page', run: go('/support') },
+      { key: 'profile', label: 'Profile & API keys', icon: <User size={14} />, hint: 'page', run: go('/profile') },
       { key: 'settings', label: 'Settings', icon: <Settings size={14} />, hint: 'page', run: go('/settings') },
+      { key: 'swagger', label: 'API docs (Swagger)', icon: <BookOpen size={14} />, hint: 'docs', run: () => { window.open('/swagger', '_blank'); onClose(); } },
     ];
     const appEntries: Entry[] = services.map((s) => ({
       key: `app-${s.id}`, label: s.name, icon: <Led status={s.status} />, hint: 'app',

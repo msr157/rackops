@@ -1,14 +1,23 @@
 import { useEffect, useState } from 'react';
-import { Server, LogIn, UserPlus } from 'lucide-react';
+import { Server, LogIn, UserPlus, KeyRound, ArrowLeft, MailCheck } from 'lucide-react';
 import { api, setToken } from '../api';
+import { PasswordInput } from '../components/ui';
+
+type Mode = 'login' | 'signup' | 'forgot' | 'reset';
 
 export function AuthScreen({ onAuthed }: { onAuthed: () => void }) {
-  const [mode, setMode] = useState<'signup' | 'login'>('login');
+  // /reset-password?token=… (from the emailed link) lands straight in reset mode.
+  const resetToken = new URLSearchParams(window.location.search).get('token') ?? '';
+  const [mode, setMode] = useState<Mode>(
+    window.location.pathname === '/reset-password' && resetToken ? 'reset' : 'login',
+  );
   const [needsSetup, setNeedsSetup] = useState(false);
   const [email, setEmail] = useState('');
   const [fullName, setFullName] = useState('');
   const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -18,10 +27,43 @@ export function AuthScreen({ onAuthed }: { onAuthed: () => void }) {
     }).catch(() => {});
   }, []);
 
+  const switchMode = (m: Mode) => {
+    setMode(m); setError(''); setNotice(''); setPassword(''); setConfirm('');
+  };
+
   const submit = async () => {
-    setError('');
+    setError(''); setNotice('');
+
+    if (mode === 'forgot') {
+      if (!email.includes('@')) { setError('Enter the email address of your account.'); return; }
+      setBusy(true);
+      try {
+        const r = await api.forgotPassword(email);
+        setNotice(r.smtpConfigured
+          ? 'If that address has an account, a reset link is on its way. Check your inbox (and spam).'
+          : 'Reset link created. Email isn’t configured on this server, so the link was written to the server log — run: journalctl -u rackops | grep "reset link" (or check ~/.rackops/server.log).');
+      } catch (e) { setError(cleanAuthError(e)); }
+      setBusy(false);
+      return;
+    }
+
+    if (mode === 'reset') {
+      if (password.length < 8) { setError('Password must be at least 8 characters.'); return; }
+      if (password !== confirm) { setError('Passwords don’t match.'); return; }
+      setBusy(true);
+      try {
+        const r = await api.resetPassword(resetToken, password);
+        setToken(r.token);
+        window.history.replaceState(null, '', '/');
+        onAuthed();
+        return;
+      } catch (e) { setError(cleanAuthError(e)); setBusy(false); }
+      return;
+    }
+
     if (!email.includes('@')) { setError('Enter a valid email address.'); return; }
     if (password.length < 8) { setError('Password must be at least 8 characters.'); return; }
+    if (mode === 'signup' && password !== confirm) { setError('Passwords don’t match — retype them.'); return; }
     setBusy(true);
     try {
       const r = mode === 'signup'
@@ -30,7 +72,7 @@ export function AuthScreen({ onAuthed }: { onAuthed: () => void }) {
       setToken(r.token);
       onAuthed();
     } catch (e) {
-      setError(String(e).replace(/^Error: \d+: /, ''));
+      setError(cleanAuthError(e));
       setBusy(false);
     }
   };
@@ -63,10 +105,14 @@ export function AuthScreen({ onAuthed }: { onAuthed: () => void }) {
             <span className="led ok" />
           </div>
           <div style={{ fontFamily: 'var(--display)', fontSize: 20, fontWeight: 700, letterSpacing: '-0.02em' }}>RackOps</div>
-          <div className="dim" style={{ marginTop: 4 }}>Your hardware. Your cloud.</div>
+          <div className="dim" style={{ marginTop: 4 }}>
+            {mode === 'forgot' ? 'Reset your password'
+              : mode === 'reset' ? 'Choose a new password'
+              : 'Your hardware. Your cloud.'}
+          </div>
         </div>
 
-        {needsSetup && (
+        {needsSetup && mode === 'signup' && (
           <div className="badge amber" style={{ width: '100%', justifyContent: 'center', marginBottom: 16 }}>
             First run — create the owner account
           </div>
@@ -78,30 +124,64 @@ export function AuthScreen({ onAuthed }: { onAuthed: () => void }) {
             <input className="input" value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Chief Operator" />
           </div>
         )}
-        <div className="field">
-          <label>Email address</label>
-          <input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@lab.local"
-            onKeyDown={(e) => e.key === 'Enter' && submit()} />
-        </div>
-        <div className="field">
-          <label>Password</label>
-          <input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="8+ characters"
-            onKeyDown={(e) => e.key === 'Enter' && submit()} />
-        </div>
 
-        {error && <div className="badge red" style={{ width: '100%', marginBottom: 12 }}>{error}</div>}
-
-        <button className="btn primary" style={{ width: '100%' }} disabled={busy} onClick={submit}>
-          {mode === 'signup' ? <><UserPlus size={14} /> Create account</> : <><LogIn size={14} /> Sign in</>}
-        </button>
-
-        {!needsSetup && (
-          <div style={{ textAlign: 'center', marginTop: 16 }}>
-            <button className="btn ghost sm" onClick={() => setMode(mode === 'signup' ? 'login' : 'signup')}>
-              {mode === 'signup' ? 'Back to sign in' : 'Create a new account'}
-            </button>
+        {mode !== 'reset' && (
+          <div className="field">
+            <label>Email address</label>
+            <input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@lab.local"
+              onKeyDown={(e) => e.key === 'Enter' && submit()} />
           </div>
         )}
+
+        {(mode === 'login' || mode === 'signup' || mode === 'reset') && (
+          <div className="field">
+            <label>{mode === 'reset' ? 'New password' : 'Password'}</label>
+            <PasswordInput value={password} onChange={setPassword} onEnter={submit}
+              placeholder="8+ characters" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} />
+          </div>
+        )}
+
+        {(mode === 'signup' || mode === 'reset') && (
+          <div className="field">
+            <label>Confirm password</label>
+            <PasswordInput value={confirm} onChange={setConfirm} onEnter={submit}
+              placeholder="type it again" autoComplete="new-password" />
+            {confirm.length > 0 && confirm !== password && (
+              <span className="faint" style={{ color: 'var(--warn)' }}>doesn&rsquo;t match yet</span>
+            )}
+          </div>
+        )}
+
+        {error && <div className="badge red" style={{ width: '100%', marginBottom: 12, whiteSpace: 'normal', height: 'auto', lineHeight: 1.5, padding: '8px 10px' }}>{error}</div>}
+        {notice && (
+          <div className="badge green" style={{ width: '100%', marginBottom: 12, whiteSpace: 'normal', height: 'auto', lineHeight: 1.5, padding: '8px 10px' }}>
+            <MailCheck size={12} style={{ flexShrink: 0 }} /> {notice}
+          </div>
+        )}
+
+        <button className="btn primary" style={{ width: '100%' }} disabled={busy} onClick={submit}>
+          {mode === 'signup' ? <><UserPlus size={14} /> Create account</>
+            : mode === 'forgot' ? <><KeyRound size={14} /> Send reset link</>
+            : mode === 'reset' ? <><KeyRound size={14} /> Set new password</>
+            : <><LogIn size={14} /> Sign in</>}
+        </button>
+
+        <div style={{ textAlign: 'center', marginTop: 16, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {mode === 'login' && (
+            <>
+              <button className="btn ghost sm" onClick={() => switchMode('forgot')}>Forgot your password?</button>
+              {!needsSetup && (
+                <button className="btn ghost sm" onClick={() => switchMode('signup')}>Create a new account</button>
+              )}
+            </>
+          )}
+          {mode === 'signup' && !needsSetup && (
+            <button className="btn ghost sm" onClick={() => switchMode('login')}>Back to sign in</button>
+          )}
+          {(mode === 'forgot' || mode === 'reset') && (
+            <button className="btn ghost sm" onClick={() => switchMode('login')}><ArrowLeft size={12} /> Back to sign in</button>
+          )}
+        </div>
 
         <div className="faint row" style={{ marginTop: 20, justifyContent: 'center', gap: 6 }}>
           <Server size={11} /> Self-hosted · your hardware, your data
@@ -109,4 +189,8 @@ export function AuthScreen({ onAuthed }: { onAuthed: () => void }) {
       </div>
     </div>
   );
+}
+
+function cleanAuthError(e: unknown): string {
+  return String(e).replace(/^Error: \d+: /, '').trim() || 'Something went wrong — try again.';
 }

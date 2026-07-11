@@ -108,11 +108,61 @@ type Metrics struct {
 	ProcessCnt int       `json:"processCount"`
 }
 
+// ---- Organisations ----
+
+// OrgRole is a member's role inside one organisation.
+type OrgRole string
+
+const (
+	OrgRoleOwner  OrgRole = "owner"
+	OrgRoleAdmin  OrgRole = "admin"
+	OrgRoleMember OrgRole = "member"
+)
+
+// OrgMember ties a user account to an organisation.
+type OrgMember struct {
+	UserID  string    `json:"userId"`
+	Role    OrgRole   `json:"role"`
+	AddedAt time.Time `json:"addedAt"`
+}
+
+// Organization groups projects and members, Dokploy-style. Every project
+// belongs to exactly one organisation; the dashboard scopes its view to the
+// currently selected one.
+type Organization struct {
+	ID        string      `json:"id"`
+	Name      string      `json:"name"`
+	CreatedBy string      `json:"createdBy"`
+	CreatedAt time.Time   `json:"createdAt"`
+	Members   []OrgMember `json:"members"`
+}
+
+// HasMember reports whether a user belongs to the organisation.
+func (o *Organization) HasMember(userID string) bool {
+	for _, m := range o.Members {
+		if m.UserID == userID {
+			return true
+		}
+	}
+	return false
+}
+
+// MemberRole returns the user's role in the organisation ("" if not a member).
+func (o *Organization) MemberRole(userID string) OrgRole {
+	for _, m := range o.Members {
+		if m.UserID == userID {
+			return m.Role
+		}
+	}
+	return ""
+}
+
 // ---- Projects / Environments / Services ----
 
 // Project is the top-level logical grouping (a "project folder").
 type Project struct {
 	ID          string    `json:"id"`
+	OrgID       string    `json:"orgId"`
 	Name        string    `json:"name"`
 	Description string    `json:"description"`
 	CreatedBy   string    `json:"createdBy"`
@@ -395,12 +445,20 @@ type User struct {
 	PasswordHash string    `json:"passwordHash,omitempty"`
 	Role         UserRole  `json:"role"`
 	CreatedAt    time.Time `json:"createdAt"`
+
+	// Password reset: a short-lived token hash (email flow) — never the token
+	// itself. Sanitized() strips both fields.
+	ResetTokenHash string    `json:"resetTokenHash,omitempty"`
+	ResetExpires   time.Time `json:"resetExpires,omitzero"`
 }
 
-// Sanitized returns a copy safe to send to API clients (no password hash).
+// Sanitized returns a copy safe to send to API clients (no password hash,
+// no reset token material).
 func (u *User) Sanitized() *User {
 	c := *u
 	c.PasswordHash = ""
+	c.ResetTokenHash = ""
+	c.ResetExpires = time.Time{}
 	return &c
 }
 
@@ -422,6 +480,64 @@ func (t *APIToken) Sanitized() *APIToken {
 	return &c
 }
 
+// ---- Support tickets ----
+
+// TicketStatus is a support ticket's lifecycle state.
+type TicketStatus string
+
+const (
+	TicketOpen     TicketStatus = "open"
+	TicketPending  TicketStatus = "pending" // waiting on the user
+	TicketResolved TicketStatus = "resolved"
+	TicketClosed   TicketStatus = "closed"
+)
+
+// TicketMessage is one entry in a ticket's conversation thread.
+type TicketMessage struct {
+	ID        string    `json:"id"`
+	AuthorID  string    `json:"authorId"`  // user ID, or "" for system notes
+	Author    string    `json:"author"`    // display name snapshot
+	Body      string    `json:"body"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+// SupportTicket is an in-app support request. Tickets live locally (the
+// self-hosted instance owns its data) and are optionally forwarded to a CRM
+// ingest endpoint together with an anonymous usage snapshot, so the vendor
+// can see what customers use and struggle with.
+type SupportTicket struct {
+	ID        string          `json:"id"`
+	Subject   string          `json:"subject"`
+	Category  string          `json:"category"` // bug | question | feature-request | billing | other
+	Severity  string          `json:"severity"` // low | normal | high | urgent
+	Status    TicketStatus    `json:"status"`
+	CreatedBy string          `json:"createdBy"`
+	Email     string          `json:"email"` // reply-to for the CRM side
+	Messages  []TicketMessage `json:"messages"`
+	CreatedAt time.Time       `json:"createdAt"`
+	UpdatedAt time.Time       `json:"updatedAt"`
+	// Forwarded marks successful delivery to the configured CRM endpoint.
+	Forwarded bool `json:"forwarded,omitempty"`
+}
+
+// UsageSnapshot is the anonymous telemetry bundle attached to forwarded
+// tickets — enough for a CRM to understand context (version, scale, features
+// in use) without leaking user data. Assembled fresh at forward time.
+type UsageSnapshot struct {
+	Version       string   `json:"version"`
+	Nodes         int      `json:"nodes"`
+	Services      int      `json:"services"`
+	ServicesByKind map[string]int `json:"servicesByKind,omitempty"`
+	AdoptedCount  int      `json:"adoptedCount"`
+	DomainsCount  int      `json:"domainsCount"`
+	EdgeEnabled   bool     `json:"edgeEnabled"`
+	MeshEnabled   bool     `json:"meshEnabled"`
+	HAEnabled     bool     `json:"haEnabled"`
+	FeaturesUsed  []string `json:"featuresUsed,omitempty"` // e.g. tunnels, templates, gpu
+	OS            string   `json:"os"`
+	Arch          string   `json:"arch"`
+}
+
 // ---- Agent protocol ----
 
 // AgentReport is what an agent pushes to the control plane each interval.
@@ -435,6 +551,11 @@ type AgentReport struct {
 	AgentVer    string            `json:"agentVersion"`
 	Mesh        *MeshInfo         `json:"mesh,omitempty"`
 	TaskResults []TaskResult      `json:"taskResults,omitempty"`
+	// ExternalScanOK confirms the external-container scan ran successfully
+	// this cycle. The server only prunes adopted services on a trusted scan —
+	// a docker-daemon hiccup returning zero containers must not mass-delete
+	// every adopted service.
+	ExternalScanOK bool `json:"externalScanOk,omitempty"`
 }
 
 // HostInfo is static host identity info.

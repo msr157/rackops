@@ -43,21 +43,24 @@ func DetectRuntime() (*Runtime, error) {
 // the labeled ones lets the control plane detect missing containers and heal
 // them; reporting the external ones lets it adopt pre-existing workloads so
 // they show up and become manageable.
-func (r *Runtime) List() []types.ContainerStatus {
+func (r *Runtime) List() ([]types.ContainerStatus, bool) {
 	stats := r.stats()
 	list := r.listLabeled("rackops.service", false, stats)
 	list = append(list, r.listLabeled("rackops.tunnel", true, stats)...)
-	return append(list, r.listExternal(stats)...)
+	ext, scanOK := r.listExternal(stats)
+	return append(list, ext...), scanOK
 }
 
 // listExternal collects containers NOT created by RackOps — anything without a
 // rackops label and not named with the rackops- prefix. These are surfaced so
-// the control plane can adopt them.
-func (r *Runtime) listExternal(stats map[string]containerStat) []types.ContainerStatus {
+// the control plane can adopt them. The bool reports whether the scan itself
+// succeeded — the server must distinguish "no external containers" from
+// "docker didn't answer" before pruning adopted services.
+func (r *Runtime) listExternal(stats map[string]containerStat) ([]types.ContainerStatus, bool) {
 	out, err := exec.Command(r.Bin, "ps", "-a",
 		"--format", "{{.ID}}|{{.Names}}|{{.Image}}|{{.State}}|{{.Ports}}|{{.Labels}}").Output()
 	if err != nil {
-		return nil
+		return nil, false
 	}
 	var list []types.ContainerStatus
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
@@ -86,7 +89,7 @@ func (r *Runtime) listExternal(stats map[string]containerStat) []types.Container
 		}
 		list = append(list, cs)
 	}
-	return list
+	return list, true
 }
 
 // listLabeled collects containers carrying one rackops label.

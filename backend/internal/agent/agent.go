@@ -140,7 +140,7 @@ func (a *Agent) Run() {
 			report.Mesh = &types.MeshInfo{PublicKey: a.mesh.keys.Public, MeshIP: a.mesh.meshIP}
 		}
 		if a.runtime != nil {
-			report.Containers = a.runtime.List()
+			report.Containers, report.ExternalScanOK = a.runtime.List()
 		}
 
 		resp, err := a.push(report)
