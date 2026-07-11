@@ -5,6 +5,7 @@ import (
 	"flag"
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/msr157/rackops/internal/server"
 )
@@ -14,9 +15,15 @@ func main() {
 	dashboard := flag.String("dashboard", "", "path to a built dashboard dist/ to serve at / (optional)")
 	flag.Parse()
 
+	// DATABASE_URL follows the standard Postgres DSN format:
+	// postgres://user:password@host:port/dbname?sslmode=disable
+	// When unset the server runs with an in-memory node registry.
+	dbURL := os.Getenv("DATABASE_URL")
+
 	handler := server.New(server.Options{
 		Edition:      "lite",
 		DashboardDir: *dashboard,
+		DatabaseURL:  dbURL,
 	})
 
 	addr := ":" + *port

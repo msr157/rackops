@@ -1,8 +1,13 @@
 package server
 
 import (
+	"database/sql"
+	"encoding/json"
+	"log"
 	"sync"
 	"time"
+
+	_ "github.com/lib/pq"
 
 	"github.com/msr157/rackops/internal/api"
 )
@@ -10,26 +15,113 @@ import (
 // staleAfter marks a node stale when it hasn't reported for this long.
 const staleAfter = 15 * time.Second
 
-// Store is an in-memory node registry. Persistence is intentionally out of
-// scope for the MVP — restarting the control plane just waits one report
-// interval for agents to re-register.
+// Store is the node registry. It always keeps an in-memory cache for
+// sub-millisecond reads, and optionally persists to Postgres so that
+// restarting the control plane doesn't lose the last known state.
 type Store struct {
 	mu    sync.RWMutex
 	nodes map[string]*api.Node
+
+	// db is nil when no DATABASE_URL is configured (pure in-memory mode).
+	db *sql.DB
 }
 
+// NewStore creates an in-memory-only store.
 func NewStore() *Store {
 	return &Store{nodes: make(map[string]*api.Node)}
 }
 
+// NewStoreWithDB creates a store backed by Postgres.
+// It creates the required table if it does not exist and pre-warms the
+// in-memory cache from persisted rows.
+func NewStoreWithDB(db *sql.DB) *Store {
+	s := &Store{nodes: make(map[string]*api.Node), db: db}
+	s.migrate()
+	s.warmup()
+	return s
+}
+
+// migrate ensures the rackops_nodes table exists.
+func (s *Store) migrate() {
+	_, err := s.db.Exec(`
+		CREATE TABLE IF NOT EXISTS rackops_nodes (
+			id          TEXT PRIMARY KEY,
+			hostname    TEXT NOT NULL,
+			last_seen   TIMESTAMPTZ NOT NULL,
+			snapshot    JSONB NOT NULL
+		)
+	`)
+	if err != nil {
+		log.Printf("store: migrate failed (continuing in-memory): %v", err)
+		s.db = nil
+	} else {
+		log.Println("store: postgres table rackops_nodes ready")
+	}
+}
+
+// warmup pre-loads persisted nodes into memory on startup.
+func (s *Store) warmup() {
+	if s.db == nil {
+		return
+	}
+	rows, err := s.db.Query(`SELECT id, hostname, last_seen, snapshot FROM rackops_nodes`)
+	if err != nil {
+		log.Printf("store: warmup query failed: %v", err)
+		return
+	}
+	defer rows.Close()
+
+	count := 0
+	for rows.Next() {
+		var (
+			id, hostname string
+			lastSeen     time.Time
+			snapJSON     []byte
+		)
+		if err := rows.Scan(&id, &hostname, &lastSeen, &snapJSON); err != nil {
+			continue
+		}
+		var snap api.Snapshot
+		if err := json.Unmarshal(snapJSON, &snap); err != nil {
+			continue
+		}
+		s.nodes[id] = &api.Node{
+			ID:       id,
+			Hostname: hostname,
+			LastSeen: lastSeen,
+			Latest:   snap,
+		}
+		count++
+	}
+	log.Printf("store: warmed up %d nodes from postgres", count)
+}
+
 func (s *Store) Upsert(report api.ReportRequest) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.nodes[report.NodeID] = &api.Node{
 		ID:       report.NodeID,
 		Hostname: report.Snapshot.Hostname,
 		LastSeen: time.Now().UTC(),
 		Latest:   report.Snapshot,
+	}
+	node := s.nodes[report.NodeID]
+	s.mu.Unlock()
+
+	if s.db != nil {
+		snapJSON, err := json.Marshal(node.Latest)
+		if err == nil {
+			_, err = s.db.Exec(`
+				INSERT INTO rackops_nodes (id, hostname, last_seen, snapshot)
+				VALUES ($1, $2, $3, $4)
+				ON CONFLICT (id) DO UPDATE
+				SET hostname  = EXCLUDED.hostname,
+				    last_seen = EXCLUDED.last_seen,
+				    snapshot  = EXCLUDED.snapshot
+			`, node.ID, node.Hostname, node.LastSeen, snapJSON)
+			if err != nil {
+				log.Printf("store: upsert to postgres failed: %v", err)
+			}
+		}
 	}
 }
 

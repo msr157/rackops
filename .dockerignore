@@ -1,5 +1,10 @@
 # ─────────────────────────────────────────────
 # .dockerignore — exclude from Docker build ctx
+#
+# NOTE: Per-Dockerfile .dockerignore files are also present:
+#   Dockerfile.website.dockerignore   (excludes Go sources for website builds)
+#   Dockerfile.backend.dockerignore   (excludes Node/TS sources for backend builds)
+# Docker BuildKit uses those automatically when -f Dockerfile.X is specified.
 # ─────────────────────────────────────────────
 
 # Git
@@ -10,17 +15,17 @@
 
 # Docs & metadata
 README.md
+CHANGELOG.md
 LICENSE
 docs/
 
 # Dev files
-*.md
 *.log
 *.env
 *.env.*
 .env.example
 
-# Node (any depth — pnpm workspaces have nested node_modules)
+# Node (explicit paths — Dokploy's tar builder doesn't support globstars)
 node_modules
 apps/*/node_modules
 packages/*/node_modules
@@ -32,14 +37,6 @@ apps/*/.turbo
 packages/*/.turbo
 npm-debug.log*
 yarn-error.log*
-
-# Go (not needed in the website image)
-cmd/
-internal/
-go.mod
-go.sum
-bin/
-*.exe
 
 # OS generated
 .DS_Store
@@ -55,4 +52,3 @@ desktop.ini
 # Test artifacts
 coverage/
 test-results/
-
