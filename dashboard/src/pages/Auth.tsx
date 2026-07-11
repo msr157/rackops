@@ -40,34 +40,35 @@ export function AuthScreen({ onAuthed }: { onAuthed: () => void }) {
       position: 'fixed', inset: 0, display: 'grid', placeItems: 'center',
       background: 'var(--bg)', overflow: 'hidden',
     }}>
-      {/* grid mesh + radial glow backdrop */}
+      {/* backdrop: rack slats fading out — the hardware behind the glass */}
       <div style={{
         position: 'absolute', inset: 0,
-        backgroundImage: 'linear-gradient(var(--border) 1px, transparent 1px), linear-gradient(90deg, var(--border) 1px, transparent 1px)',
-        backgroundSize: '48px 48px',
-        maskImage: 'radial-gradient(ellipse 70% 60% at 50% 45%, black 30%, transparent 75%)',
-        WebkitMaskImage: 'radial-gradient(ellipse 70% 60% at 50% 45%, black 30%, transparent 75%)',
-        opacity: 0.5,
+        backgroundImage: 'repeating-linear-gradient(180deg, var(--border) 0 1px, transparent 1px 42px)',
+        maskImage: 'radial-gradient(ellipse 65% 60% at 50% 45%, black 25%, transparent 75%)',
+        WebkitMaskImage: 'radial-gradient(ellipse 65% 60% at 50% 45%, black 25%, transparent 75%)',
+        opacity: 0.6,
       }} />
       <div style={{
         position: 'absolute', width: 420, height: 420, borderRadius: '50%',
-        background: 'var(--accent)', opacity: 0.07, filter: 'blur(110px)',
+        background: 'var(--amber)', opacity: 0.06, filter: 'blur(110px)',
       }} />
 
       <div style={{
         position: 'relative', width: 400, maxWidth: '92vw',
-        background: 'rgba(16,16,20,0.72)', backdropFilter: 'blur(20px)',
+        background: 'rgba(20, 18, 14, 0.78)', backdropFilter: 'blur(20px)',
         border: '1px solid var(--border-hi)', borderRadius: 16, padding: 30,
       }}>
         <div style={{ textAlign: 'center', marginBottom: 24 }}>
-          <div className="brand-icon" style={{ width: 44, height: 44, fontSize: 21, margin: '0 auto 12px' }}>R</div>
-          <div style={{ fontSize: 19, fontWeight: 700 }}>RackOps Lite</div>
-          <div className="dim" style={{ marginTop: 4 }}>The Infrastructure Operating System</div>
+          <div className="brand-unit" style={{ width: 52, height: 38, margin: '0 auto 12px', padding: '0 10px' }}>
+            <span className="led ok" />
+          </div>
+          <div style={{ fontFamily: 'var(--display)', fontSize: 20, fontWeight: 700, letterSpacing: '-0.02em' }}>RackOps</div>
+          <div className="dim" style={{ marginTop: 4 }}>Your hardware. Your cloud.</div>
         </div>
 
         {needsSetup && (
-          <div className="badge cyan" style={{ width: '100%', justifyContent: 'center', marginBottom: 16 }}>
-            First run — provision the owner account
+          <div className="badge amber" style={{ width: '100%', justifyContent: 'center', marginBottom: 16 }}>
+            First run — create the owner account
           </div>
         )}
 
@@ -83,22 +84,21 @@ export function AuthScreen({ onAuthed }: { onAuthed: () => void }) {
             onKeyDown={(e) => e.key === 'Enter' && submit()} />
         </div>
         <div className="field">
-          <label>Master password</label>
+          <label>Password</label>
           <input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="8+ characters"
             onKeyDown={(e) => e.key === 'Enter' && submit()} />
         </div>
 
         {error && <div className="badge red" style={{ width: '100%', marginBottom: 12 }}>{error}</div>}
 
-        <button className="btn primary" style={{ width: '100%', justifyContent: 'center' }} disabled={busy} onClick={submit}>
-          {mode === 'signup' ? <><UserPlus size={14} /> Provision Account</> : <><LogIn size={14} /> Operator Login</>}
+        <button className="btn primary" style={{ width: '100%' }} disabled={busy} onClick={submit}>
+          {mode === 'signup' ? <><UserPlus size={14} /> Create account</> : <><LogIn size={14} /> Sign in</>}
         </button>
 
         {!needsSetup && (
           <div style={{ textAlign: 'center', marginTop: 16 }}>
-            <button className="nav-item" style={{ display: 'inline', textDecoration: 'underline dotted', color: 'var(--text-dim)' }}
-              onClick={() => setMode(mode === 'signup' ? 'login' : 'signup')}>
-              {mode === 'signup' ? 'Back to operator login' : 'Provision a new account'}
+            <button className="btn ghost sm" onClick={() => setMode(mode === 'signup' ? 'login' : 'signup')}>
+              {mode === 'signup' ? 'Back to sign in' : 'Create a new account'}
             </button>
           </div>
         )}

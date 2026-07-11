@@ -1,40 +1,29 @@
 import { useEffect, useState } from 'react';
+import { Routes, Route, NavLink, Navigate, useNavigate } from 'react-router-dom';
 import {
-  LayoutGrid, Server, Boxes, HardDrive, Bell, Plus, Cpu, Activity, Network, Bot, Settings, LogOut,
+  LayoutGrid, Boxes, HardDrive, Network as NetworkIcon, Settings, LogOut, Rocket, Bot, Search, Plus,
 } from 'lucide-react';
-import { api, subscribe, getToken, clearToken } from './api';
-import type { Node, Overview, EventItem, Alert, Service, Project, Environment } from './api';
-import { OverviewPage } from './pages/Overview';
-import { NodesPage } from './pages/Nodes';
-import { ServicesPage } from './pages/Services';
-import { StoragePage } from './pages/Storage';
-import { AlertsPage } from './pages/Alerts';
-import { NetworkPage } from './pages/Network';
-import { CopilotPage } from './pages/Copilot';
-import { ServiceDetail } from './pages/ServiceDetail';
-import { DeployModal } from './pages/DeployModal';
-import { OnboardModal } from './pages/OnboardModal';
-import { SettingsModal } from './pages/SettingsModal';
+import { api, getToken, clearToken } from './api';
+import { DataProvider, useData } from './data';
+import { ToastProvider } from './components/toast';
+import { ConfirmProvider } from './components/confirm';
+import { CopilotProvider, useCopilot } from './components/CopilotDrawer';
+import { CommandPalette } from './components/CommandPalette';
+import { AddMachineModal } from './components/AddMachineModal';
+import { Led } from './components/ui';
 import { AuthScreen } from './pages/Auth';
-
-type Tab = 'overview' | 'nodes' | 'services' | 'network' | 'storage' | 'alerts' | 'copilot';
+import { HomePage } from './pages/Home';
+import { AppsPage } from './pages/Apps';
+import { AppDetail } from './pages/AppDetail';
+import { DeployFlow } from './pages/DeployFlow';
+import { MachinesPage, MachineDetail } from './pages/Machines';
+import { NetworkPage } from './pages/Network';
+import { SettingsPage } from './pages/SettingsPage';
 
 export default function App() {
   const [authed, setAuthed] = useState<boolean | null>(null);
-  const [tab, setTab] = useState<Tab>('overview');
-  const [nodes, setNodes] = useState<Node[]>([]);
-  const [overview, setOverview] = useState<Overview | null>(null);
-  const [events, setEvents] = useState<EventItem[]>([]);
-  const [alerts, setAlerts] = useState<Alert[]>([]);
-  const [services, setServices] = useState<Service[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [envs, setEnvs] = useState<Environment[]>([]);
-  const [showDeploy, setShowDeploy] = useState(false);
-  const [showOnboard, setShowOnboard] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
-  const [detailService, setDetailService] = useState('');
 
-  // Auth gate: needsSetup or an existing session decides the screen.
+  // Auth gate: first-run setup or an existing session decides the screen.
   useEffect(() => {
     const onLogout = () => setAuthed(false);
     window.addEventListener('rackops-logout', onLogout);
@@ -44,160 +33,127 @@ export default function App() {
     return () => window.removeEventListener('rackops-logout', onLogout);
   }, []);
 
-  const refresh = () => {
-    api.overview().then(setOverview).catch(() => {});
-    api.nodes().then((n) => setNodes(n ?? [])).catch(() => {});
-    api.services().then((s) => setServices(s ?? [])).catch(() => {});
-    api.events().then((e) => setEvents((e ?? []).slice(0, 60))).catch(() => {});
-    api.alerts().then((a) => setAlerts(a ?? [])).catch(() => {});
-  };
-
-  useEffect(() => {
-    if (!authed) return;
-    refresh();
-    api.projects().then(async (ps) => {
-      setProjects(ps ?? []);
-      if (ps?.length) setEnvs((await api.envs(ps[0].id)) ?? []);
-    }).catch(() => {});
-
-    // Live updates over SSE.
-    const off = subscribe({
-      node_metrics: (data) => {
-        const n = data as Node;
-        setNodes((prev) => {
-          const i = prev.findIndex((p) => p.id === n.id);
-          if (i === -1) return [...prev, n];
-          const next = [...prev];
-          next[i] = n;
-          return next;
-        });
-      },
-      node_joined: () => refresh(),
-      node_down: () => refresh(),
-      service_update: (data) => {
-        const s = data as Service;
-        setServices((prev) => {
-          const i = prev.findIndex((p) => p.id === s.id);
-          if (i === -1) return [...prev, s];
-          const next = [...prev];
-          next[i] = s;
-          return next;
-        });
-        api.overview().then(setOverview).catch(() => {});
-        api.events().then((e) => setEvents((e ?? []).slice(0, 60))).catch(() => {});
-      },
-      service_removed: (data) => {
-        const { id } = data as { id: string };
-        setServices((prev) => prev.filter((p) => p.id !== id));
-      },
-      alert: (data) => setAlerts((prev) => [data as Alert, ...prev]),
-    });
-
-    // Slow poll as fallback for overview KPIs.
-    const t = setInterval(() => api.overview().then(setOverview).catch(() => {}), 5000);
-    return () => { off(); clearInterval(t); };
-  }, [authed]);
-
-  const openAlerts = alerts.filter((a) => !a.resolved);
-
   if (authed === null) return null;
   if (!authed) return <AuthScreen onAuthed={() => setAuthed(true)} />;
 
-  const navItems: { key: Tab; label: string; icon: React.ReactNode; count?: number }[] = [
-    { key: 'overview', label: 'Cluster Overview', icon: <LayoutGrid size={16} /> },
-    { key: 'nodes', label: 'Nodes & Hardware', icon: <Cpu size={16} />, count: nodes.length },
-    { key: 'services', label: 'Apps & Services', icon: <Boxes size={16} />, count: services.length },
-    { key: 'network', label: 'Network & Ingress', icon: <Network size={16} /> },
-    { key: 'storage', label: 'Storage', icon: <HardDrive size={16} /> },
-    { key: 'alerts', label: 'Alerts', icon: <Bell size={16} />, count: openAlerts.length },
-    { key: 'copilot', label: 'AI Co-Pilot', icon: <Bot size={16} /> },
+  return (
+    <ToastProvider>
+      <ConfirmProvider>
+        <DataProvider>
+          <CopilotProvider>
+            <Shell onLogout={() => { clearToken(); setAuthed(false); }} />
+          </CopilotProvider>
+        </DataProvider>
+      </ConfirmProvider>
+    </ToastProvider>
+  );
+}
+
+function Shell({ onLogout }: { onLogout: () => void }) {
+  const { overview, services, nodes, alerts } = useData();
+  const { setOpen: setCopilotOpen } = useCopilot();
+  const navigate = useNavigate();
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [addMachine, setAddMachine] = useState(false);
+
+  // ⌘K / Ctrl+K opens the palette from anywhere.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setPaletteOpen((v) => !v);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  const failing = services.filter((s) => s.status === 'failed').length;
+  const openAlerts = alerts.filter((a) => !a.resolved).length;
+  const attention = failing + openAlerts;
+  const fleetStatus = nodes.some((n) => n.status === 'offline') || failing > 0 ? 'failed'
+    : nodes.length === 0 ? 'stopped' : 'running';
+
+  const nav = [
+    { to: '/', label: 'Home', icon: <LayoutGrid size={16} />, count: attention, end: true },
+    { to: '/apps', label: 'Apps', icon: <Boxes size={16} />, count: services.length },
+    { to: '/machines', label: 'Machines', icon: <HardDrive size={16} />, count: nodes.length },
+    { to: '/network', label: 'Network', icon: <NetworkIcon size={16} /> },
   ];
 
   return (
     <>
       <aside className="sidebar">
-        <div className="brand">
-          <div className="brand-icon">R</div>
+        <NavLink to="/" className="brand">
+          <div className="brand-unit"><Led status={fleetStatus} /></div>
           <div>
             <div className="brand-name">RackOps</div>
             <div className="brand-ver">LITE · v0.1.0</div>
           </div>
-        </div>
+        </NavLink>
 
-        <button className="btn primary" style={{ margin: '0 4px 8px', justifyContent: 'center' }} onClick={() => setShowDeploy(true)}>
-          <Plus size={15} /> Deploy
-        </button>
-
-        <div className="nav-section">Infrastructure</div>
-        {navItems.map((n) => (
-          <button key={n.key} className={`nav-item ${tab === n.key ? 'active' : ''}`} onClick={() => setTab(n.key)}>
-            {n.icon} {n.label}
+        <div className="nav-section">Your rack</div>
+        {nav.map((n) => (
+          <NavLink key={n.to} to={n.to} end={n.end}
+            className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+            {n.icon} <span className="nav-label">{n.label}</span>
             {n.count !== undefined && n.count > 0 && <span className="count">{n.count}</span>}
-          </button>
+          </NavLink>
         ))}
 
         <div className="sidebar-footer">
-          <div className="dim" style={{ marginBottom: 10 }}>
-            <span className="online-dot" />
-            {overview?.nodesOnline ?? 0}/{overview?.nodesTotal ?? 0} nodes online
+          <div className="dim row" style={{ gap: 8, padding: '0 6px' }}>
+            <Led status={overview && overview.nodesOnline === overview.nodesTotal && overview.nodesTotal > 0 ? 'running' : overview?.nodesOnline ? 'building' : 'stopped'} />
+            <span className="nav-label">{overview?.nodesOnline ?? 0}/{overview?.nodesTotal ?? 0} machines online</span>
           </div>
-          <button className="btn" style={{ width: '100%', justifyContent: 'center', marginBottom: 8 }} onClick={() => setShowOnboard(true)}>
-            <Server size={14} /> Add Node
+          <button className="btn" onClick={() => setAddMachine(true)}>
+            <Plus size={14} /> <span className="nav-label">Add machine</span>
           </button>
           <div className="row">
-            <button className="btn sm" style={{ flex: 1, justifyContent: 'center' }} onClick={() => setShowSettings(true)} title="Settings">
+            <NavLink to="/settings" className="btn sm" style={{ flex: 1 }} title="Settings">
               <Settings size={13} />
-            </button>
-            <button className="btn sm" style={{ flex: 1, justifyContent: 'center' }} title="Log out"
-              onClick={() => { clearToken(); setAuthed(false); }}>
+            </NavLink>
+            <button className="btn sm" style={{ flex: 1 }} title="Log out" onClick={onLogout}>
               <LogOut size={13} />
             </button>
           </div>
         </div>
       </aside>
 
-      <main className="main">
-        {tab === 'overview' && <OverviewPage overview={overview} nodes={nodes} events={events} services={services} />}
-        {tab === 'nodes' && <NodesPage nodes={nodes} services={services} />}
-        {tab === 'services' && (detailService ? (
-          <ServiceDetail
-            serviceId={detailService} nodes={nodes}
-            onBack={() => setDetailService('')} onChanged={refresh}
-          />
-        ) : (
-          <ServicesPage
-            services={services} nodes={nodes} projects={projects} envs={envs}
-            onDeploy={() => setShowDeploy(true)} onChanged={refresh}
-            onOpen={(id) => setDetailService(id)}
-          />
-        ))}
-        {tab === 'network' && <NetworkPage nodes={nodes} services={services} onChanged={refresh} />}
-        {tab === 'storage' && <StoragePage nodes={nodes} />}
-        {tab === 'alerts' && <AlertsPage alerts={alerts} nodes={nodes} />}
-        {tab === 'copilot' && <CopilotPage overview={overview} />}
-      </main>
+      <div className="shell-right">
+        <header className="topbar">
+          <button className="search-trigger" onClick={() => setPaletteOpen(true)}>
+            <Search size={14} /> Jump to app, machine, action…
+            <kbd>⌘K</kbd>
+          </button>
+          <div style={{ marginLeft: 'auto' }} className="row">
+            <button className="btn" onClick={() => setCopilotOpen(true)}>
+              <Bot size={14} /> Copilot
+            </button>
+            <button className="btn primary" onClick={() => navigate('/apps/new')}>
+              <Rocket size={14} /> Deploy app
+            </button>
+          </div>
+        </header>
 
-      {showDeploy && (
-        <DeployModal
-          nodes={nodes} projects={projects} envs={envs}
-          onClose={() => setShowDeploy(false)}
-          onDeployed={() => { setShowDeploy(false); setTab('services'); refresh(); }}
-        />
-      )}
-      {showOnboard && <OnboardModal onClose={() => setShowOnboard(false)} />}
-      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+        <main className="main">
+          <Routes>
+            <Route path="/" element={<HomePage onAddMachine={() => setAddMachine(true)} />} />
+            <Route path="/apps" element={<AppsPage />} />
+            <Route path="/apps/new" element={<DeployFlow />} />
+            <Route path="/apps/:id/:tab?" element={<AppDetail />} />
+            <Route path="/machines" element={<MachinesPage onAddMachine={() => setAddMachine(true)} />} />
+            <Route path="/machines/:id" element={<MachineDetail />} />
+            <Route path="/network" element={<NetworkPage />} />
+            <Route path="/settings" element={<SettingsPage />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </main>
+      </div>
+
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)}
+        onAddMachine={() => setAddMachine(true)} onCopilot={() => setCopilotOpen(true)} />
+      {addMachine && <AddMachineModal onClose={() => setAddMachine(false)} />}
     </>
-  );
-}
-
-export function StatusBadge({ status }: { status: string }) {
-  const map: Record<string, string> = {
-    running: 'green', online: 'green', building: 'yellow', pending: 'yellow',
-    stopped: 'gray', offline: 'red', failed: 'red',
-  };
-  return (
-    <span className={`badge ${map[status] ?? 'gray'}`}>
-      <Activity size={11} /> {status}
-    </span>
   );
 }
