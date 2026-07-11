@@ -2,7 +2,28 @@
 
 **The Infrastructure Operating System** — one control plane for every machine in your fleet: hardware telemetry, intelligent workload placement, and one-command deployments. No Kubernetes. No complexity tax.
 
-## Quick start
+## Install
+
+One line — downloads the binary, installs it, and starts RackOps. Then open **http://localhost:8080**.
+
+```sh
+curl -fsSL https://github.com/msr157/rackops/releases/latest/download/install.sh | bash
+```
+
+Works on any **Linux** machine (x86-64 or ARM). RackOps uses **Docker** to run apps — install it first with `curl -fsSL https://get.docker.com | sh` if you don't have it (telemetry works without it).
+
+<a name="windows"></a>
+### Windows (as a server, via WSL2)
+
+RackOps is a Linux program, but Windows can host it through WSL2 — a real Linux kernel built into Windows. Once set up, you reach RackOps from Windows at `http://localhost:8080`.
+
+1. **Install WSL2** — open PowerShell as Administrator and run `wsl --install`, then reboot. This gives you Ubuntu.
+2. **Install Docker Desktop** — download from docker.com, and in its Settings → Resources → **WSL integration**, enable your Ubuntu distro.
+3. **Open Ubuntu** (Start menu → "Ubuntu") and run the one-liner above.
+
+RackOps now runs on your Windows machine and manages Docker Desktop. It keeps running while WSL is open; to keep it up after closing the window, leave a terminal running or start WSL at login.
+
+## Quick start (build from source)
 
 ```sh
 # Build the dashboard, then the single binary
