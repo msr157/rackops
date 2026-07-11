@@ -34,7 +34,7 @@ LABEL org.opencontainers.image.licenses="MIT"
 RUN rm -rf /usr/share/nginx/html/*
 
 COPY --from=builder /build/apps/website/dist/ /usr/share/nginx/html/
-COPY apps/website/nginx.conf /etc/nginx/nginx.conf
+COPY --from=builder /build/apps/website/nginx.conf /etc/nginx/nginx.conf
 
 EXPOSE 80
 
