@@ -15,7 +15,8 @@ type Template struct {
 	Volumes     []string `json:"volumes,omitempty"` // container paths needing persistence
 	MemMB       int64    `json:"memMb"`             // typical footprint, used by placement
 	GPU         bool     `json:"gpu,omitempty"`
-	Command     string   `json:"command,omitempty"` // container command override
+	Command     string   `json:"command,omitempty"`    // container command override
+	ComposeYML  string   `json:"composeYml,omitempty"` // multi-container stack; when set, Image is ignored
 	Notes       string   `json:"notes,omitempty"`
 }
 
@@ -59,7 +60,9 @@ var templates = []Template{
 
 	// ---- Homelab ----
 	{ID: "jellyfin", Name: "Jellyfin", Category: "homelab", Description: "Media server for movies, TV & music", Image: "jellyfin/jellyfin:latest", Port: 8096, MemMB: 1024, Volumes: []string{"/config", "/media"}},
-	{ID: "immich", Name: "Immich", Category: "homelab", Description: "Self-hosted photo & video backup", Image: "ghcr.io/immich-app/immich-server:release", Port: 2283, MemMB: 1024, Volumes: []string{"/usr/src/app/upload"}, Notes: "needs postgres+redis; deploy those templates first"},
+	{ID: "immich", Name: "Immich", Category: "homelab", Description: "Self-hosted photo & video backup (Google Photos alternative)", Port: 2283, MemMB: 3072, ComposeYML: immichCompose,
+		Env:   []EnvDef{{Key: "DB_PASSWORD", Label: "Database password", Secret: true, Generate: true}},
+		Notes: "full stack (server + machine-learning + Postgres + Redis) — one click, no setup"},
 	{ID: "nextcloud", Name: "Nextcloud", Category: "homelab", Description: "Files, calendar, contacts — your own cloud", Image: "nextcloud:latest", Port: 80, MemMB: 1024, Volumes: []string{"/var/www/html"}},
 	{ID: "home-assistant", Name: "Home Assistant", Category: "homelab", Description: "Home automation hub", Image: "ghcr.io/home-assistant/home-assistant:stable", Port: 8123, MemMB: 1024, Volumes: []string{"/config"}},
 	{ID: "vaultwarden", Name: "Vaultwarden", Category: "homelab", Description: "Bitwarden-compatible password manager", Image: "vaultwarden/server:latest", Port: 80, MemMB: 256, Volumes: []string{"/data"}},
@@ -78,14 +81,20 @@ var templates = []Template{
 	{ID: "qdrant", Name: "Qdrant", Category: "ai", Description: "Vector database for AI applications", Image: "qdrant/qdrant:latest", Port: 6333, MemMB: 512, Volumes: []string{"/qdrant/storage"}},
 
 	// ---- Web / Business ----
-	{ID: "wordpress", Name: "WordPress", Category: "web", Description: "The classic CMS", Image: "wordpress:latest", Port: 80, MemMB: 512, Volumes: []string{"/var/www/html"},
-		Env: []EnvDef{{Key: "WORDPRESS_DB_HOST", Label: "MySQL host", Required: true}, {Key: "WORDPRESS_DB_USER", Label: "DB user", Default: "wordpress"}, {Key: "WORDPRESS_DB_PASSWORD", Label: "DB password", Secret: true, Required: true}, {Key: "WORDPRESS_DB_NAME", Label: "DB name", Default: "wordpress"}}},
+	{ID: "wordpress", Name: "WordPress", Category: "web", Description: "The classic CMS", Port: 8081, MemMB: 1024, ComposeYML: wordpressCompose,
+		Env:   []EnvDef{{Key: "DB_PASSWORD", Label: "Database password", Secret: true, Generate: true}},
+		Notes: "full stack (WordPress + MariaDB) — one click, no setup"},
 	{ID: "ghost", Name: "Ghost", Category: "web", Description: "Modern publishing & newsletters", Image: "ghost:5-alpine", Port: 2368, MemMB: 512, Volumes: []string{"/var/lib/ghost/content"},
 		Env: []EnvDef{{Key: "url", Label: "Public URL", Default: "http://localhost:2368", Required: true}, {Key: "database__client", Label: "DB client", Default: "sqlite3"}}},
-	{ID: "plausible", Name: "Plausible CE", Category: "web", Description: "Privacy-friendly web analytics", Image: "ghcr.io/plausible/community-edition:v2.1", Port: 8000, MemMB: 512, Notes: "needs postgres + clickhouse"},
-	{ID: "umami", Name: "Umami", Category: "web", Description: "Simple website analytics", Image: "ghcr.io/umami-software/umami:postgresql-latest", Port: 3000, MemMB: 256,
-		Env: []EnvDef{{Key: "DATABASE_URL", Label: "Postgres URL", Required: true}, {Key: "APP_SECRET", Label: "App secret", Secret: true, Generate: true}}},
-	{ID: "listmonk", Name: "Listmonk", Category: "web", Description: "Newsletter & mailing list manager", Image: "listmonk/listmonk:latest", Port: 9000, MemMB: 256, Notes: "needs postgres"},
+	{ID: "plausible", Name: "Plausible CE", Category: "web", Description: "Privacy-friendly web analytics", Port: 8000, MemMB: 1536, ComposeYML: plausibleCompose,
+		Env: []EnvDef{{Key: "SECRET_KEY_BASE", Label: "Secret key", Secret: true, Generate: true}, {Key: "DB_PASSWORD", Label: "Database password", Secret: true, Generate: true}, {Key: "BASE_URL", Label: "Public URL", Default: "http://localhost:8000", Required: true}},
+		Notes: "full stack (Plausible + Postgres + ClickHouse) — set Public URL to your domain once routed"},
+	{ID: "umami", Name: "Umami", Category: "web", Description: "Simple website analytics", Port: 3000, MemMB: 512, ComposeYML: umamiCompose,
+		Env:   []EnvDef{{Key: "APP_SECRET", Label: "App secret", Secret: true, Generate: true}, {Key: "DB_PASSWORD", Label: "Database password", Secret: true, Generate: true}},
+		Notes: "full stack (Umami + Postgres) — one click. Default login admin / umami"},
+	{ID: "listmonk", Name: "Listmonk", Category: "web", Description: "Newsletter & mailing list manager", Port: 9000, MemMB: 512, ComposeYML: listmonkCompose,
+		Env:   []EnvDef{{Key: "DB_PASSWORD", Label: "Database password", Secret: true, Generate: true}},
+		Notes: "full stack (Listmonk + Postgres) — one click. Default login admin / listmonk"},
 
 	// ---- Tools ----
 	{ID: "excalidraw", Name: "Excalidraw", Category: "tools", Description: "Collaborative whiteboard sketching", Image: "excalidraw/excalidraw:latest", Port: 80, MemMB: 128},
@@ -126,3 +135,276 @@ var templates = []Template{
 	{ID: "redis", Name: "Redis", Category: "database", Description: "In-memory cache & data store", Image: "redis:7-alpine", Port: 6379, MemMB: 256, Volumes: []string{"/data"}},
 	{ID: "clickhouse", Name: "ClickHouse", Category: "database", Description: "Columnar OLAP database", Image: "clickhouse/clickhouse-server:latest", Port: 8123, Ports: []int{9000}, MemMB: 2048, Volumes: []string{"/var/lib/clickhouse"}},
 }
+
+// immichCompose is Immich's official four-service stack (server, machine
+// learning, Postgres with the VectorChord extension, and Valkey/Redis),
+// pinned to the images upstream ships with the `release` channel. The server
+// defaults DB_HOSTNAME=database / DB_USERNAME=postgres / DB_DATABASE_NAME=immich
+// / REDIS_HOSTNAME=redis, all matching the service names on the stack's private
+// network — so the only value we inject is the generated DB_PASSWORD, shared
+// between Postgres and the server via ${DB_PASSWORD} (supplied through the
+// stack's .env). Named volumes keep the library and database across redeploys.
+const immichCompose = `name: immich
+
+services:
+  immich-server:
+    container_name: immich_server
+    image: ghcr.io/immich-app/immich-server:release
+    environment:
+      DB_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - library:/data
+      - /etc/localtime:/etc/localtime:ro
+    ports:
+      - "2283:2283"
+    depends_on:
+      - redis
+      - database
+    restart: unless-stopped
+    healthcheck:
+      disable: false
+
+  immich-machine-learning:
+    container_name: immich_machine_learning
+    image: ghcr.io/immich-app/immich-machine-learning:release
+    volumes:
+      - model-cache:/cache
+    restart: unless-stopped
+    healthcheck:
+      disable: false
+
+  redis:
+    container_name: immich_redis
+    image: docker.io/valkey/valkey:8-bookworm
+    healthcheck:
+      test: redis-cli ping || exit 1
+    restart: unless-stopped
+
+  database:
+    container_name: immich_postgres
+    image: ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0
+    environment:
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_USER: postgres
+      POSTGRES_DB: immich
+      POSTGRES_INITDB_ARGS: '--data-checksums'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    shm_size: 128mb
+    restart: unless-stopped
+
+volumes:
+  library:
+  model-cache:
+  pgdata:
+`
+
+// wordpressCompose is WordPress + MariaDB. WordPress reaches the database at
+// the service name `db`; the generated DB_PASSWORD is shared between them.
+const wordpressCompose = `name: wordpress
+
+services:
+  wordpress:
+    container_name: wordpress_app
+    image: wordpress:latest
+    environment:
+      WORDPRESS_DB_HOST: db
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: ${DB_PASSWORD}
+      WORDPRESS_DB_NAME: wordpress
+    volumes:
+      - wp-data:/var/www/html
+    ports:
+      - "8081:80"
+    depends_on:
+      - db
+    restart: unless-stopped
+
+  db:
+    container_name: wordpress_db
+    image: mariadb:11
+    environment:
+      MARIADB_DATABASE: wordpress
+      MARIADB_USER: wordpress
+      MARIADB_PASSWORD: ${DB_PASSWORD}
+      MARIADB_ROOT_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - db-data:/var/lib/mysql
+    restart: unless-stopped
+
+volumes:
+  wp-data:
+  db-data:
+`
+
+// umamiCompose is Umami + Postgres. Umami connects via DATABASE_URL to the
+// service name `db`; first-run seeds the default admin (admin / umami).
+const umamiCompose = `name: umami
+
+services:
+  umami:
+    container_name: umami_app
+    image: ghcr.io/umami-software/umami:postgresql-latest
+    environment:
+      DATABASE_TYPE: postgresql
+      DATABASE_URL: postgresql://umami:${DB_PASSWORD}@db:5432/umami
+      APP_SECRET: ${APP_SECRET}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - db
+    restart: unless-stopped
+
+  db:
+    container_name: umami_db
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: umami
+      POSTGRES_USER: umami
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  db-data:
+`
+
+// listmonkCompose is Listmonk + Postgres. The app runs --install/--upgrade
+// idempotently on every start (safe to re-run), reaches Postgres at `db`, and
+// seeds the super admin (admin / listmonk).
+const listmonkCompose = `name: listmonk
+
+services:
+  app:
+    container_name: listmonk_app
+    image: listmonk/listmonk:latest
+    depends_on:
+      - db
+    command: ["sh", "-c", "./listmonk --install --idempotent --yes --config '' && ./listmonk --upgrade --yes --config '' && ./listmonk --config ''"]
+    environment:
+      LISTMONK_app__address: 0.0.0.0:9000
+      LISTMONK_db__host: db
+      LISTMONK_db__port: 5432
+      LISTMONK_db__user: listmonk
+      LISTMONK_db__password: ${DB_PASSWORD}
+      LISTMONK_db__database: listmonk
+      LISTMONK_db__ssl_mode: disable
+      LISTMONK_ADMIN_USER: admin
+      LISTMONK_ADMIN_PASSWORD: listmonk
+      TZ: Etc/UTC
+    ports:
+      - "9000:9000"
+    volumes:
+      - uploads:/listmonk/uploads
+    restart: unless-stopped
+
+  db:
+    container_name: listmonk_db
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: listmonk
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: listmonk
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U listmonk"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  uploads:
+  db-data:
+`
+
+// plausibleCompose is Plausible + Postgres + ClickHouse. The app runs its
+// createdb/migrate steps then serves. ClickHouse's IPv4-bind and low-resource
+// tuning (needed on small boxes) are inlined via compose configs so the stack
+// stays a single self-contained file. DATABASE_URL/CLICKHOUSE_DATABASE_URL
+// point at the service names; SECRET_KEY_BASE is generated, BASE_URL defaults
+// to localhost until a domain is routed.
+const plausibleCompose = `name: plausible
+
+services:
+  plausible_db:
+    container_name: plausible_db
+    image: postgres:16-alpine
+    restart: unless-stopped
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      start_period: 1m
+
+  plausible_events_db:
+    container_name: plausible_events_db
+    image: clickhouse/clickhouse-server:24.12-alpine
+    restart: unless-stopped
+    volumes:
+      - event-data:/var/lib/clickhouse
+    environment:
+      CLICKHOUSE_SKIP_USER_SETUP: "1"
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    configs:
+      - source: ch_ipv4
+        target: /etc/clickhouse-server/config.d/ipv4-only.xml
+      - source: ch_lowres
+        target: /etc/clickhouse-server/config.d/low-resources.xml
+      - source: ch_logs
+        target: /etc/clickhouse-server/config.d/logs.xml
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 -O - http://127.0.0.1:8123/ping || exit 1"]
+      start_period: 1m
+
+  plausible:
+    container_name: plausible_app
+    image: ghcr.io/plausible/community-edition:v3.2.1
+    restart: unless-stopped
+    command: sh -c "/entrypoint.sh db createdb && /entrypoint.sh db migrate && /entrypoint.sh run"
+    depends_on:
+      plausible_db:
+        condition: service_healthy
+      plausible_events_db:
+        condition: service_healthy
+    volumes:
+      - plausible-data:/var/lib/plausible
+    ports:
+      - "8000:8000"
+    environment:
+      TMPDIR: /var/lib/plausible/tmp
+      BASE_URL: ${BASE_URL}
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+      DATABASE_URL: postgres://postgres:${DB_PASSWORD}@plausible_db:5432/plausible_db
+      CLICKHOUSE_DATABASE_URL: http://plausible_events_db:8123/plausible_events_db
+
+configs:
+  ch_ipv4:
+    content: |
+      <clickhouse><listen_host>0.0.0.0</listen_host></clickhouse>
+  ch_lowres:
+    content: |
+      <clickhouse>
+        <mark_cache_size>524288000</mark_cache_size>
+        <max_server_memory_usage_to_ram_ratio>0.5</max_server_memory_usage_to_ram_ratio>
+      </clickhouse>
+  ch_logs:
+    content: |
+      <clickhouse>
+        <logger><level>warning</level><console>true</console></logger>
+        <query_log remove="remove"/>
+        <query_thread_log remove="remove"/>
+      </clickhouse>
+
+volumes:
+  db-data:
+  event-data:
+  plausible-data:
+`

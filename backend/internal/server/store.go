@@ -228,3 +228,12 @@ func NewID() string {
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
 }
+
+// genSecret returns a 64-character hex secret (32 random bytes) for generated
+// template credentials — long enough for apps that require a minimum length,
+// and purely alphanumeric so no app rejects the character set.
+func genSecret() string {
+	b := make([]byte, 32)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}

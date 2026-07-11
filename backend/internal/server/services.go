@@ -67,20 +67,30 @@ func (a *API) handleCreateService(w http.ResponseWriter, r *http.Request) {
 		if tpl.Category == "database" {
 			req.Kind = types.KindDatabase
 		}
-		req.Image = tpl.Image
 		if req.Port == 0 {
 			req.Port = tpl.Port
 		}
-		req.Ports = tpl.Ports
-		req.Command = tpl.Command
-		// Template volumes become editable managed mounts (visible on the
-		// service's Storage tab, re-placeable onto a chosen drive).
-		for _, cpath := range tpl.Volumes {
-			req.Mounts = append(req.Mounts, types.Mount{
-				Type:   types.MountVolume,
-				Source: strings.ReplaceAll(strings.Trim(cpath, "/"), "/", "-"),
-				Target: cpath,
-			})
+		if tpl.ComposeYML != "" {
+			// Multi-container template: deploy as a compose stack. The stack
+			// wires its own services on a private network and manages its own
+			// volumes, so the single-image fields (image/mounts) don't apply.
+			// Env vars still flow through — they become the stack's .env, which
+			// compose uses for ${VAR} substitution.
+			req.Kind = types.KindCompose
+			req.ComposeYML = tpl.ComposeYML
+		} else {
+			req.Image = tpl.Image
+			req.Ports = tpl.Ports
+			req.Command = tpl.Command
+			// Template volumes become editable managed mounts (visible on the
+			// service's Storage tab, re-placeable onto a chosen drive).
+			for _, cpath := range tpl.Volumes {
+				req.Mounts = append(req.Mounts, types.Mount{
+					Type:   types.MountVolume,
+					Source: strings.ReplaceAll(strings.Trim(cpath, "/"), "/", "-"),
+					Target: cpath,
+				})
+			}
 		}
 		if req.MemLimitMB == 0 && tpl.MemMB > 0 {
 			// Placement hint only; no hard container limit unless user set one.
@@ -104,7 +114,10 @@ func (a *API) handleCreateService(w http.ResponseWriter, r *http.Request) {
 			}
 			val := def.Default
 			if def.Generate && val == "" {
-				val = NewID() + NewID()
+				// 64 hex chars (32 bytes) — long enough for secrets that
+				// mandate a minimum length (e.g. Plausible's SECRET_KEY_BASE),
+				// alphanumeric so no app rejects the character set.
+				val = genSecret()
 			}
 			if val == "" && def.Required {
 				http.Error(w, "missing required env: "+def.Key, http.StatusBadRequest)
