@@ -27,8 +27,6 @@ func (a *API) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	out.GeminiKey = mask(s.GeminiKey)
 	out.OpenAIKey = mask(s.OpenAIKey)
 	out.TelegramToken = mask(s.TelegramToken)
-	out.SMTPPass = mask(s.SMTPPass)
-	out.CRMKey = mask(s.CRMKey)
 	writeJSON(w, out)
 }
 
@@ -51,8 +49,6 @@ func (a *API) handleSetSettings(w http.ResponseWriter, r *http.Request) {
 		in.GeminiKey = keep(in.GeminiKey, old.GeminiKey)
 		in.OpenAIKey = keep(in.OpenAIKey, old.OpenAIKey)
 		in.TelegramToken = keep(in.TelegramToken, old.TelegramToken)
-		in.SMTPPass = keep(in.SMTPPass, old.SMTPPass)
-		in.CRMKey = keep(in.CRMKey, old.CRMKey)
 		a.Store.Settings = in
 	})
 	a.Store.AddEvent("settings", "Integrations settings updated", "", "")

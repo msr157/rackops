@@ -153,6 +153,14 @@ body {
 
 .sidebar-footer { margin-top: auto; padding: 8px 4px 0; display: flex; flex-direction: column; gap: 8px; }
 
+.release-spotlight {
+  display: flex; align-items: center; gap: 10px;
+  margin: 0 0 16px; padding: 11px 14px;
+  border: 1px solid rgba(255, 176, 46, 0.28); border-radius: var(--r-md);
+  background: linear-gradient(90deg, var(--amber-dim), rgba(255, 176, 46, 0.025));
+  color: var(--amber-hi);
+}
+
 /* topbar search trigger */
 .search-trigger {
   display: flex; align-items: center; gap: 8px;
@@ -231,6 +239,29 @@ a:hover { text-decoration: underline; text-underline-offset: 3px; }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
 @media (max-width: 1100px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } }
+
+.release-links {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px;
+  margin: 20px 0 26px;
+}
+.release-links .card { display: flex; align-items: center; gap: 9px; color: var(--dim); text-decoration: none; }
+.release-links .card svg:last-child { margin-left: auto; }
+.release-list { max-width: 850px; }
+.release-entry { display: grid; grid-template-columns: 24px minmax(0, 1fr); }
+.release-rail { display: flex; justify-content: center; position: relative; }
+.release-rail::after { content: ''; position: absolute; top: 18px; bottom: -18px; width: 1px; background: var(--border-hi); }
+.release-entry:last-child .release-rail::after { display: none; }
+.release-rail span { width: 9px; height: 9px; margin-top: 18px; z-index: 1; border-radius: 50%; background: var(--faint); }
+.release-rail span.live { background: var(--amber); box-shadow: 0 0 8px var(--amber-glow); }
+.release-card { margin-bottom: 14px; }
+.release-card h2 { margin: 12px 0 8px; font-family: var(--display); font-size: 16px; }
+.release-card ul { padding-left: 18px; color: var(--dim); }
+.release-card li { margin: 5px 0; }
+
+@media (max-width: 800px) {
+  .release-links { grid-template-columns: 1fr 1fr; }
+  .release-spotlight { align-items: flex-start; flex-wrap: wrap; }
+}
 
 .row { display: flex; align-items: center; gap: 10px; }
 .row.wrap { flex-wrap: wrap; }

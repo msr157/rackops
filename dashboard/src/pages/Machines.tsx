@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { useData } from '../data';
 import { Rack } from '../components/Rack';
-import { InfoTip, Led, StatusBadge, UsageBar, Kpi, EmptyState, formatUptime, shortGpu } from '../components/ui';
+import { Led, StatusBadge, UsageBar, Kpi, EmptyState, formatUptime, shortGpu } from '../components/ui';
 
 // MachinesPage: the physical rack, plus fleet-wide capacity.
 export function MachinesPage({ onAddMachine }: { onAddMachine: () => void }) {
@@ -124,9 +124,7 @@ export function MachineDetail() {
           <UsageBar pct={m.memPct} />
         </div>
         <div className="card">
-          <div className="eyebrow"><Thermometer size={12} /> Package temp
-            <InfoTip text="The CPU package sensor. Sustained 85°C+ triggers a critical alert and usually means dust, a failed fan, or a cramped case — the scheduler also avoids placing new apps on hot machines." wide />
-          </div>
+          <div className="eyebrow"><Thermometer size={12} /> Package temp</div>
           <div className="kpi-value">{m.tempC.toFixed(0)}<span className="unit">°C</span></div>
           <div className="faint">{m.tempC > 85 ? 'throttling risk' : m.tempC > 70 ? 'warm' : 'healthy'}</div>
           <UsageBar pct={m.tempC} />

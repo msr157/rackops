@@ -80,25 +80,11 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         const { id } = data as { id: string };
         setServices((prev) => prev.filter((p) => p.id !== id));
       },
-      alert: (data) => {
-        const a = data as Alert;
-        // Dedupe: SSE and the periodic refresh can both deliver the same alert.
-        setAlerts((prev) => (prev.some((p) => p.id === a.id) ? prev : [a, ...prev]));
-      },
-      // Resolved alerts leave "Needs attention" the moment the condition
-      // clears — no stale warnings lingering after the issue is fixed.
-      alert_resolved: (data) => {
-        const a = data as Alert;
-        setAlerts((prev) => prev.filter((p) => p.id !== a.id));
-      },
+      alert: (data) => setAlerts((prev) => [data as Alert, ...prev]),
     });
 
-    // Slow poll as SSE fallback for aggregates. Alerts re-fetch too, so
-    // "Needs attention" stays truthful even if an SSE event was missed.
-    const t = setInterval(() => {
-      api.overview().then(setOverview).catch(() => {});
-      api.alerts().then((a) => setAlerts(a ?? [])).catch(() => {});
-    }, 8000);
+    // Slow poll as SSE fallback for aggregates.
+    const t = setInterval(() => api.overview().then(setOverview).catch(() => {}), 8000);
     return () => { off(); clearInterval(t); };
   }, [refresh]);
 

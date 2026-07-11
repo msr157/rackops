@@ -24,7 +24,7 @@ export interface Node {
   lastSeen: string; agentVersion: string; hasPublicIp: boolean;
   hardware: Hardware; metrics: Metrics;
 }
-export interface Project { id: string; orgId: string; name: string; description: string; createdAt: string }
+export interface Project { id: string; name: string; description: string; createdAt: string }
 export interface Environment { id: string; projectId: string; name: string }
 export interface EnvVar { key: string; value: string; secret: boolean }
 export interface Mount {
@@ -91,28 +91,13 @@ export interface ClusterStatus {
   peers?: { id: string; addr: string; role: string }[];
 }
 export interface User { id: string; email: string; fullName: string; role: string; createdAt: string }
-export interface APIToken { id: string; name: string; userId: string; createdAt: string; lastUsed?: string }
-export interface OrgMember { userId: string; role: 'owner' | 'admin' | 'member'; addedAt: string }
-export interface Organization { id: string; name: string; createdBy: string; createdAt: string; members: OrgMember[] | null }
-export interface TicketMessage { id: string; authorId: string; author: string; body: string; createdAt: string }
-export interface SupportTicket {
-  id: string; subject: string; category: string; severity: string;
-  status: 'open' | 'pending' | 'resolved' | 'closed';
-  createdBy: string; email: string; messages: TicketMessage[] | null;
-  createdAt: string; updatedAt: string; forwarded?: boolean;
-}
-export interface VersionInfo {
-  current: string; latest: string; updateAvailable: boolean;
-  releaseUrl: string; checkedAt: string; error?: string;
-}
+export interface APIToken { id: string; name: string; userId: string; createdAt: string }
 export interface Settings {
   discordWebhook?: string; slackWebhook?: string; telegramToken?: string; telegramChatId?: string;
   genericWebhook?: string; notifyDeploys: boolean; notifyAlerts: boolean;
   aiProvider?: string; anthropicKey?: string; anthropicModel?: string;
   geminiKey?: string; geminiModel?: string; openaiKey?: string;
   openaiBase?: string; openaiModel?: string;
-  smtpHost?: string; smtpPort?: number; smtpUser?: string; smtpPass?: string; smtpFrom?: string;
-  crmEndpoint?: string; crmKey?: string;
 }
 
 const base = '';
@@ -187,29 +172,7 @@ export const api = {
     req<{ token: string; user: User }>('/api/auth/signup', { method: 'POST', body: JSON.stringify({ email, fullName, password }) }),
   login: (email: string, password: string) =>
     req<{ token: string; user: User }>('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
-  me: () => req<User>('/api/auth/me'),
-  changePassword: (current: string, newPassword: string) =>
-    req<void>('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ current, new: newPassword }) }),
-  forgotPassword: (email: string) =>
-    req<{ ok: boolean; emailSent: boolean; smtpConfigured: boolean }>('/api/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }) }),
-  resetPassword: (token: string, password: string) =>
-    req<{ token: string; user: User }>('/api/auth/reset-password', { method: 'POST', body: JSON.stringify({ token, password }) }),
   users: () => req<User[]>('/api/users'),
-  orgs: () => req<Organization[]>('/api/orgs'),
-  createOrg: (name: string) => req<Organization>('/api/orgs', { method: 'POST', body: JSON.stringify({ name }) }),
-  renameOrg: (id: string, name: string) => req<Organization>(`/api/orgs/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
-  deleteOrg: (id: string) => req<void>(`/api/orgs/${id}`, { method: 'DELETE' }),
-  addOrgMember: (id: string, email: string, role: string) =>
-    req<Organization>(`/api/orgs/${id}/members`, { method: 'POST', body: JSON.stringify({ email, role }) }),
-  removeOrgMember: (id: string, userId: string) =>
-    req<void>(`/api/orgs/${id}/members/${userId}`, { method: 'DELETE' }),
-  tickets: () => req<SupportTicket[]>('/api/support/tickets'),
-  createTicket: (body: { subject: string; category: string; severity: string; body: string; email?: string }) =>
-    req<SupportTicket>('/api/support/tickets', { method: 'POST', body: JSON.stringify(body) }),
-  replyTicket: (id: string, body: string, status?: string) =>
-    req<SupportTicket>(`/api/support/tickets/${id}/reply`, { method: 'POST', body: JSON.stringify({ body, status }) }),
-  versionCheck: (force = false) => req<VersionInfo>(`/api/version-check${force ? '?force=true' : ''}`),
-  applyUpdate: () => req<{ ok: boolean; version: string; restarting: boolean }>('/api/update', { method: 'POST' }),
   settings: () => req<Settings>('/api/settings'),
   setSettings: (s: Settings) => req<void>('/api/settings', { method: 'POST', body: JSON.stringify(s) }),
   tokens: () => req<APIToken[]>('/api/tokens'),

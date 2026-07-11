@@ -10,7 +10,7 @@ import type { Service, ServiceUpdate, Mount, EnvVar, Deployment, Domain, DirEntr
 import { useData } from '../data';
 import { useToast, cleanError } from '../components/toast';
 import { useConfirm } from '../components/confirm';
-import { StatusBadge, InfoTip, Led, Spinner, UrlChip, publicUrls, dnsLabel, timeAgo } from '../components/ui';
+import { StatusBadge, Led, Spinner, UrlChip, publicUrls, dnsLabel, timeAgo } from '../components/ui';
 
 type Tab = 'overview' | 'networking' | 'logs' | 'deployments' | 'settings';
 
@@ -78,12 +78,6 @@ export function AppDetail() {
   const dirty = useMemo(() => draft && JSON.stringify(draft) !== baseline, [draft, baseline]);
   const node = nodes.find((n) => n.id === svc?.nodeId);
   const urls = svc ? publicUrls(svc, ingress) : [];
-  // While a build/redeploy runs on the agent, lifecycle actions would race
-  // it (stop a container mid-build, queue a second deploy…): lock them all
-  // until the deployment reports back. `busy` covers the HTTP round-trip;
-  // `deploying` covers the whole agent-side window.
-  const deploying = svc?.status === 'building' || svc?.status === 'pending';
-  const actionsLocked = busy || deploying;
 
   const save = async (redeploy: boolean) => {
     if (!draft || !svc) return;
@@ -161,23 +155,11 @@ export function AppDetail() {
           {svc.templateId && <span className="tag">{svc.templateId}</span>}
         </div>
         <div className="row">
-          {deploying && <span className="badge yellow"><Spinner size={11} /> deploying…</span>}
-          <button className="btn sm" disabled={actionsLocked}
-            title={deploying ? 'Locked while the deploy runs — it finishes in a moment.' : undefined}
-            onClick={() => act(svc.status === 'running' ? 'stop' : 'start')}>
+          <button className="btn sm" disabled={busy} onClick={() => act(svc.status === 'running' ? 'stop' : 'start')}>
             {svc.status === 'running' ? <><Square size={12} /> Stop</> : <><Play size={12} /> Start</>}
           </button>
-          <button className="btn sm" disabled={actionsLocked}
-            title={deploying ? 'Locked while the deploy runs.' : 'Stop and start the container in place — config stays as-is.'}
-            onClick={() => act('restart')}><RotateCw size={12} /> Restart</button>
-          {!svc.adopted && (
-            <button className="btn sm" disabled={actionsLocked}
-              title={deploying ? 'A deploy is already running.' : 'Rebuild from source/image and replace the running container.'}
-              onClick={() => act('redeploy')}><Rocket size={12} /> Redeploy</button>
-          )}
-          <InfoTip text={svc.adopted
-            ? 'Stop/Start/Restart act on the real container on its machine. Redeploy is unavailable for adopted apps — RackOps didn’t build them, so it has no recipe to rebuild from.'
-            : 'Stop/Start pause and resume the container. Restart bounces it in place. Redeploy rebuilds it from its image or repo (picking up config changes).'} wide />
+          <button className="btn sm" disabled={busy} onClick={() => act('restart')}><RotateCw size={12} /> Restart</button>
+          {!svc.adopted && <button className="btn sm" disabled={busy} onClick={() => act('redeploy')}><Rocket size={12} /> Redeploy</button>}
         </div>
       </div>
       <div className="row wrap" style={{ marginBottom: 16, gap: 8 }}>
@@ -194,8 +176,8 @@ export function AppDetail() {
           </span>
           <div className="row">
             <button className="btn sm" disabled={busy} onClick={() => setDraft(JSON.parse(baseline))}>Discard</button>
-            {!svc.adopted && <button className="btn sm" disabled={actionsLocked} onClick={() => save(false)}><Save size={12} /> Save only</button>}
-            {!svc.adopted && <button className="btn sm primary" disabled={actionsLocked} onClick={() => save(true)}><Rocket size={12} /> Save & redeploy</button>}
+            {!svc.adopted && <button className="btn sm" disabled={busy} onClick={() => save(false)}><Save size={12} /> Save only</button>}
+            {!svc.adopted && <button className="btn sm primary" disabled={busy} onClick={() => save(true)}><Rocket size={12} /> Save & redeploy</button>}
           </div>
         </div>
       )}
@@ -402,23 +384,17 @@ function NetworkingTab({ svc, draft, setDraft, reload }: {
         <div className="eyebrow" style={{ marginBottom: 12 }}>Ports</div>
         <div className="grid-3">
           <div className="field" style={{ marginBottom: 0 }}>
-            <label>App listens on (container)
-              <InfoTip text="The port the app itself opens inside its container — check its docs (e.g. 3000 for Grafana, 80 for nginx). Changing it doesn't move the app; it tells RackOps where the app already listens." wide />
-            </label>
+            <label>App listens on (container)</label>
             <input className="input mono" placeholder="e.g. 3000" value={draft.containerPort}
               onChange={(e) => setDraft({ ...draft, containerPort: e.target.value.replace(/\D/g, '') })} />
           </div>
           <div className="field" style={{ marginBottom: 0 }}>
-            <label>Reachable on host port
-              <InfoTip text="The port on the machine you actually connect to (http://machine-ip:port). RackOps auto-bumps it if something else already uses it." wide />
-            </label>
+            <label>Reachable on host port</label>
             <input className="input mono" value={draft.port}
               onChange={(e) => setDraft({ ...draft, port: e.target.value.replace(/\D/g, '') })} />
           </div>
           <div className="field" style={{ marginBottom: 0 }}>
-            <label>Extra ports (comma-separated)
-              <InfoTip text="Additional ports published 1:1 (host port = container port). Useful for apps with a second protocol, like a database's admin port." />
-            </label>
+            <label>Extra ports (comma-separated)</label>
             <input className="input mono" placeholder="9000, 5432" value={draft.ports}
               onChange={(e) => setDraft({ ...draft, ports: e.target.value })} />
           </div>
@@ -560,9 +536,7 @@ function SettingsTab({ svc, draft, setDraft, nodes, busy, onDelete }: {
       </div>
 
       <div className="card">
-        <div className="eyebrow" style={{ marginBottom: 12 }}>Environment variables
-          <InfoTip text="Configuration passed to the app at startup (KEY=value). Mark values like passwords as secret to mask them in this UI. Changes apply on Save & redeploy." wide />
-        </div>
+        <div className="eyebrow" style={{ marginBottom: 12 }}>Environment variables</div>
         {draft.env.map((v, i) => (
           <div className="row" key={i} style={{ marginBottom: 8 }}>
             <input className="input mono" placeholder="KEY" value={v.key}
@@ -645,16 +619,13 @@ function SettingsTab({ svc, draft, setDraft, nodes, busy, onDelete }: {
       <div className="card">
         <div className="eyebrow" style={{ marginBottom: 12 }}>Resources & machine</div>
         <div className="grid-3">
-          <div className="field"><label>Memory limit (MB, 0 = none)
-            <InfoTip text="Hard cap — the container is killed and restarted if it exceeds this. Leave 0 unless the app misbehaves or the machine is tight on RAM." /></label>
+          <div className="field"><label>Memory limit (MB, 0 = none)</label>
             <input className="input mono" value={draft.memLimitMb}
               onChange={(e) => setDraft({ ...draft, memLimitMb: e.target.value.replace(/\D/g, '') })} /></div>
-          <div className="field"><label>CPU limit (cores, 0 = none)
-            <InfoTip text="Maximum CPU cores this app may use (1.5 = one and a half cores). 0 lets it use whatever is free." /></label>
+          <div className="field"><label>CPU limit (cores, 0 = none)</label>
             <input className="input mono" placeholder="1.5" value={draft.cpuLimit}
               onChange={(e) => setDraft({ ...draft, cpuLimit: e.target.value.replace(/[^0-9.]/g, '') })} /></div>
-          <div className="field"><label>Restart policy
-            <InfoTip text="unless-stopped (default): auto-restart after crashes and reboots, but stay stopped when YOU stop it. always: restart no matter what. on-failure: only after a crash. no: never." wide /></label>
+          <div className="field"><label>Restart policy</label>
             <select className="input" value={draft.restartPolicy} onChange={(e) => setDraft({ ...draft, restartPolicy: e.target.value })}>
               <option value="unless-stopped">unless-stopped</option>
               <option value="always">always</option>

@@ -96,10 +96,6 @@ func (a *API) Router() http.Handler {
 	mux.HandleFunc("GET /api/auth/status", a.handleAuthStatus)
 	mux.HandleFunc("POST /api/auth/signup", a.handleSignup)
 	mux.HandleFunc("POST /api/auth/login", a.handleLogin)
-	mux.HandleFunc("GET /api/auth/me", a.handleMe)
-	mux.HandleFunc("POST /api/auth/change-password", a.handleChangePassword)
-	mux.HandleFunc("POST /api/auth/forgot-password", a.handleForgotPassword)
-	mux.HandleFunc("POST /api/auth/reset-password", a.handleResetPassword)
 	mux.HandleFunc("GET /api/users", a.handleListUsers)
 	mux.HandleFunc("POST /api/tokens", a.handleCreateToken)
 	mux.HandleFunc("GET /api/tokens", a.handleListTokens)
@@ -108,27 +104,6 @@ func (a *API) Router() http.Handler {
 	mux.HandleFunc("POST /api/settings", a.handleSetSettings)
 	mux.HandleFunc("POST /api/assistant", a.handleAssistant)
 	mux.HandleFunc("POST /api/assistant/test", a.handleAssistantTest)
-
-	// ---- Organisations ----
-	mux.HandleFunc("GET /api/orgs", a.handleListOrgs)
-	mux.HandleFunc("POST /api/orgs", a.handleCreateOrg)
-	mux.HandleFunc("PATCH /api/orgs/{id}", a.handleUpdateOrg)
-	mux.HandleFunc("DELETE /api/orgs/{id}", a.handleDeleteOrg)
-	mux.HandleFunc("POST /api/orgs/{id}/members", a.handleAddOrgMember)
-	mux.HandleFunc("DELETE /api/orgs/{id}/members/{userId}", a.handleRemoveOrgMember)
-
-	// ---- Support tickets ----
-	mux.HandleFunc("GET /api/support/tickets", a.handleListTickets)
-	mux.HandleFunc("POST /api/support/tickets", a.handleCreateTicket)
-	mux.HandleFunc("GET /api/support/tickets/{id}", a.handleGetTicket)
-	mux.HandleFunc("POST /api/support/tickets/{id}/reply", a.handleTicketReply)
-
-	// ---- API docs & updates ----
-	mux.HandleFunc("GET /api/openapi.json", a.handleOpenAPI)
-	mux.HandleFunc("GET /swagger", a.handleSwaggerUI)
-	mux.HandleFunc("GET /swagger/", a.handleSwaggerUI)
-	mux.HandleFunc("GET /api/version-check", a.handleVersionCheck)
-	mux.HandleFunc("POST /api/update", a.handleApplyUpdate)
 
 	// ---- Cluster (HA) ----
 	mux.HandleFunc("GET /api/cluster", a.handleClusterStatus)
@@ -227,7 +202,7 @@ func (a *API) handleIngest(w http.ResponseWriter, r *http.Request) {
 
 	// Adopt containers that were already running on the node (created outside
 	// RackOps) so pre-existing workloads show up and become manageable.
-	a.adoptExternal(rep.NodeID, rep.Containers, rep.ExternalScanOK)
+	a.adoptExternal(rep.NodeID, rep.Containers)
 
 	// Reconcile: the agent's report is ground truth. A service marked running
 	// whose container is GONE (not merely stopped — absent) gets flagged
@@ -239,17 +214,11 @@ func (a *API) handleIngest(w http.ResponseWriter, r *http.Request) {
 		a.Hub.Broadcast("node_joined", node)
 	}
 
-	// Alerts: broadcast new ones AND resolutions — the UI drops a resolved
-	// alert from "Needs attention" the moment the condition clears.
-	raised, resolved := a.Store.EvaluateAlerts(node)
-	for _, alert := range raised {
+	// Alerts.
+	for _, alert := range a.Store.EvaluateAlerts(node) {
 		a.Store.AddEvent("alert", alert.Message, node.ID, "")
 		a.Hub.Broadcast("alert", alert)
 		a.NotifyAlert(alert)
-	}
-	for _, alert := range resolved {
-		a.Store.AddEvent("alert", "Resolved: "+alert.Message, node.ID, "")
-		a.Hub.Broadcast("alert_resolved", alert)
 	}
 
 	a.Hub.Broadcast("node_metrics", node)
@@ -464,34 +433,14 @@ func adoptSuppressed(nodeID, name string) bool {
 // name is stable across restarts, its ID is not. Adopted services are never
 // rebuilt or auto-healed (RackOps has no recipe for them); the user can
 // start/stop/restart/remove them and read their logs.
-func (a *API) adoptExternal(nodeID string, reported []types.ContainerStatus, scanOK bool) {
-	var created, updated, vanished []*types.Service
+func (a *API) adoptExternal(nodeID string, reported []types.ContainerStatus) {
+	var created, updated []*types.Service
 	a.Store.Mutate(func() {
 		// Index this node's existing adopted services by their container name.
 		existing := map[string]*types.Service{}
 		for _, svc := range a.Store.Services {
 			if svc.NodeID == nodeID && svc.Adopted && svc.ExternalName != "" {
 				existing[svc.ExternalName] = svc
-			}
-		}
-		// Adopted services mirror reality: if the container was removed outside
-		// RackOps (docker rm), drop the service instead of showing a ghost
-		// forever. `docker ps -a` lists stopped containers too, so absence
-		// means gone, not merely exited. Only prune on a healthy scan — a
-		// docker-daemon hiccup reporting nothing must not wipe the list.
-		if scanOK {
-			reportedNames := map[string]bool{}
-			for _, cs := range reported {
-				if cs.External {
-					reportedNames[cs.Name] = true
-				}
-			}
-			for name, svc := range existing {
-				if !reportedNames[name] {
-					delete(a.Store.Services, svc.ID)
-					delete(existing, name)
-					vanished = append(vanished, svc)
-				}
 			}
 		}
 		for _, cs := range reported {
@@ -545,10 +494,6 @@ func (a *API) adoptExternal(nodeID string, reported []types.ContainerStatus, sca
 	}
 	for _, svc := range updated {
 		a.Hub.Broadcast("service_update", svc)
-	}
-	for _, svc := range vanished {
-		a.Store.AddEvent("service", fmt.Sprintf("%s: adopted container was removed outside RackOps — entry cleaned up", svc.Name), nodeID, svc.ID)
-		a.Hub.Broadcast("service_removed", map[string]string{"id": svc.ID})
 	}
 }
 
@@ -714,13 +659,9 @@ func (a *API) handleJoinCommand(w http.ResponseWriter, r *http.Request) {
 // ---- Project / env / service handlers ----
 
 func (a *API) handleListProjects(w http.ResponseWriter, r *http.Request) {
-	org := r.URL.Query().Get("org")
 	var out []*types.Project
 	a.Store.View(func() {
 		for _, p := range a.Store.Projects {
-			if org != "" && p.OrgID != org {
-				continue
-			}
 			out = append(out, p)
 		}
 	})
@@ -731,17 +672,13 @@ func (a *API) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name        string `json:"name"`
 		Description string `json:"description"`
-		OrgID       string `json:"orgId"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Name) == "" {
 		http.Error(w, "name required", http.StatusBadRequest)
 		return
 	}
-	p := &types.Project{ID: NewID(), Name: req.Name, Description: req.Description, OrgID: req.OrgID, CreatedAt: time.Now()}
+	p := &types.Project{ID: NewID(), Name: req.Name, Description: req.Description, CreatedAt: time.Now()}
 	a.Store.Mutate(func() {
-		if p.OrgID == "" || a.Store.Orgs[p.OrgID] == nil {
-			p.OrgID = a.Store.defaultOrgID()
-		}
 		a.Store.Projects[p.ID] = p
 		for _, env := range []string{"production", "staging", "development"} {
 			e := &types.Environment{ID: NewID(), ProjectID: p.ID, Name: env, CreatedAt: time.Now()}

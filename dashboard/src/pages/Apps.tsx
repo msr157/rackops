@@ -66,23 +66,12 @@ export function AppsPage() {
                   {s.kind === 'compose' && <span className="tag">stack</span>}
                 </div>
                 <div className="row" onClick={(e) => e.stopPropagation()}>
-                  {(() => {
-                    // Lock the buttons while a deploy/build runs on the agent
-                    // (not just during our own HTTP call) — acting on a
-                    // container mid-build races the deployment.
-                    const locked = busy === s.id || s.status === 'building' || s.status === 'pending';
-                    const lockTip = s.status === 'building' || s.status === 'pending' ? 'Deploy in progress — available when it finishes.' : undefined;
-                    return (
-                      <>
-                        {s.status === 'running' ? (
-                          <button className="btn sm" disabled={locked} title={lockTip ?? 'Stop'} onClick={(e) => act(e, s, 'stop')}><Square size={12} /></button>
-                        ) : (
-                          <button className="btn sm" disabled={locked} title={lockTip ?? 'Start'} onClick={(e) => act(e, s, 'start')}><Play size={12} /></button>
-                        )}
-                        <button className="btn sm" disabled={locked} title={lockTip ?? 'Restart'} onClick={(e) => act(e, s, 'restart')}><RotateCw size={12} /></button>
-                      </>
-                    );
-                  })()}
+                  {s.status === 'running' ? (
+                    <button className="btn sm" disabled={busy === s.id} title="Stop" onClick={(e) => act(e, s, 'stop')}><Square size={12} /></button>
+                  ) : (
+                    <button className="btn sm" disabled={busy === s.id} title="Start" onClick={(e) => act(e, s, 'start')}><Play size={12} /></button>
+                  )}
+                  <button className="btn sm" disabled={busy === s.id} title="Restart" onClick={(e) => act(e, s, 'restart')}><RotateCw size={12} /></button>
                 </div>
               </div>
               <div className="row wrap" style={{ marginTop: 9, gap: 10 }}>

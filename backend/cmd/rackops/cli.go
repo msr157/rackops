@@ -121,53 +121,33 @@ func runCLI(cmd string, args []string) {
 	}
 }
 
-// cliClient talks to the control plane. The *E methods return errors (the
-// MCP server must survive individual call failures); the plain ones exit.
-type cliClient struct {
-	base, token string
-}
+type cliClient struct{ base, token string }
 
-func (c *cliClient) doE(method, path string, in, out any) error {
+func (c *cliClient) do(method, path string, in, out any) {
 	var body io.Reader
 	if in != nil {
 		data, _ := json.Marshal(in)
 		body = bytes.NewReader(data)
 	}
-	req, err := http.NewRequest(method, c.base+path, body)
-	if err != nil {
-		return err
-	}
+	req, _ := http.NewRequest(method, c.base+path, body)
 	if c.token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
-	if in != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("can't reach %s: %w (set RACKOPS_SERVER / RACKOPS_TOKEN)", c.base, err)
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(1)
 	}
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 300 {
-		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
+		fmt.Fprintf(os.Stderr, "error: HTTP %d: %s\n", resp.StatusCode, strings.TrimSpace(string(data)))
+		os.Exit(1)
 	}
 	if out != nil {
 		_ = json.Unmarshal(data, out)
-	}
-	return nil
-}
-
-func (c *cliClient) do(method, path string, in, out any) {
-	if err := c.doE(method, path, in, out); err != nil {
-		fmt.Fprintln(os.Stderr, "error:", err)
-		os.Exit(1)
 	}
 }
 
 func (c *cliClient) get(path string, out any)      { c.do("GET", path, nil, out) }
 func (c *cliClient) post(path string, in, out any) { c.do("POST", path, in, out) }
-
-func (c *cliClient) getE(path string, out any) error      { return c.doE("GET", path, nil, out) }
-func (c *cliClient) postE(path string, in, out any) error { return c.doE("POST", path, in, out) }
-func (c *cliClient) deleteE(path string) error            { return c.doE("DELETE", path, nil, nil) }
