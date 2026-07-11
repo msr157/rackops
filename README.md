@@ -4,13 +4,13 @@
 
 ## Install
 
-One line — downloads the binary, installs it, and starts RackOps. Then open **http://localhost:8080**.
+One line — installs RackOps **and everything it needs** (Docker, compose, git), then starts it. Open **http://localhost:8080** when it finishes.
 
 ```sh
-curl -fsSL https://github.com/msr157/rackops/releases/latest/download/install.sh | bash
+curl -fsSL https://github.com/msr157/rackops/releases/latest/download/install.sh | sudo bash
 ```
 
-Works on any **Linux** machine (x86-64 or ARM). RackOps uses **Docker** to run apps — install it first with `curl -fsSL https://get.docker.com | sh` if you don't have it (telemetry works without it).
+Works on any **Linux** machine (x86-64 or ARM). Root (`sudo`) is required — the installer sets up Docker, a system service, and a binary in `/usr/local/bin`. Re-running the same command later **updates** RackOps in place. It also discovers containers already running on the machine and adopts them, so your existing services show up in the dashboard ready to manage.
 
 <a name="windows"></a>
 ### Windows (as a server, via WSL2)
@@ -18,8 +18,7 @@ Works on any **Linux** machine (x86-64 or ARM). RackOps uses **Docker** to run a
 RackOps is a Linux program, but Windows can host it through WSL2 — a real Linux kernel built into Windows. Once set up, you reach RackOps from Windows at `http://localhost:8080`.
 
 1. **Install WSL2** — open PowerShell as Administrator and run `wsl --install`, then reboot. This gives you Ubuntu.
-2. **Install Docker Desktop** — download from docker.com, and in its Settings → Resources → **WSL integration**, enable your Ubuntu distro.
-3. **Open Ubuntu** (Start menu → "Ubuntu") and run the one-liner above.
+2. **Open Ubuntu** (Start menu → "Ubuntu") and run the one-liner above — it installs Docker inside WSL for you. (Already using Docker Desktop? That works too: enable your distro under Settings → Resources → **WSL integration**.)
 
 RackOps now runs on your Windows machine and manages Docker Desktop. It keeps running while WSL is open; to keep it up after closing the window, leave a terminal running or start WSL at login.
 
