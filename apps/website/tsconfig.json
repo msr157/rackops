@@ -1,0 +1,10 @@
+{
+  "extends": "@rackops/tsconfig/react.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/website/*"]
+    }
+  },
+  "include": ["src"]
+}

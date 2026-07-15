@@ -1,0 +1,94 @@
+.problem-tools {
+  margin-top: 48px;
+  max-width: 760px;
+  line-height: 2.1;
+}
+
+/* pain-question marquee */
+
+.problem-marquee {
+  margin: 72px 0;
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+  padding: 28px 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.problem-marquee-row {
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.problem-marquee-track {
+  display: inline-flex;
+  animation: problem-marquee 44s linear infinite;
+  will-change: transform;
+}
+
+.problem-marquee-row.reverse .problem-marquee-track {
+  animation-direction: reverse;
+}
+
+.problem-question {
+  font-family: var(--font-mono);
+  font-size: clamp(18px, 2.6vw, 28px);
+  font-weight: 500;
+  color: var(--ink-3);
+  padding-right: 24px;
+}
+
+.problem-marquee-row:not(.reverse) .problem-question:nth-child(4n + 1),
+.problem-marquee-row.reverse .problem-question:nth-child(4n + 3) {
+  color: var(--ink);
+}
+
+.problem-question-sep {
+  color: var(--signal-dim);
+  padding-left: 24px;
+}
+
+@keyframes problem-marquee {
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+/* tool-category ledger */
+
+.problem-ledger {
+  border-top: 1px solid var(--rule);
+}
+
+.problem-ledger-row {
+  display: grid;
+  grid-template-columns: minmax(200px, 320px) 1fr;
+  gap: 24px;
+  align-items: baseline;
+  padding: 22px 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.problem-ledger-row dd {
+  font-size: clamp(17px, 2vw, 22px);
+  color: var(--ink-2);
+}
+
+@media (max-width: 640px) {
+  .problem-ledger-row {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .problem-marquee {
+    margin: 48px 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .problem-marquee-track {
+    animation: none;
+  }
+}

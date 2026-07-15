@@ -1,5 +1,13 @@
+# Dependencies
 node_modules/
-backend/internal/server/dist/*
-!backend/internal/server/dist/.gitkeep
+
+# Build output
+.turbo/
+apps/website/dist/
+apps/rackops-lite/backend/internal/server/dist/*
+!apps/rackops-lite/backend/internal/server/dist/.gitkeep
+apps/rackops-lite/backend/rackops
+
+# Logs & local state
 *.log
 .rackops/

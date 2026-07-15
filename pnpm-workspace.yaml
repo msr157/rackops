@@ -1,0 +1,7 @@
+packages:
+  - "apps/website"
+  - "apps/rackops-lite/dashboard"
+  - "packages/*"
+  # Future workspaces — uncomment as they gain a package.json:
+  # - "apps/rackops-enterprise/dashboard"
+  # - "internal-apps/*"

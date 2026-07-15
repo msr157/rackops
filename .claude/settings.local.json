@@ -2,7 +2,12 @@
   "permissions": {
     "allow": [
       "Bash(go mod *)",
-      "Bash(mkdir -p cmd/rackops-server cmd/rackops-agent internal/telemetry internal/server internal/agent internal/types internal/catalog)"
+      "Bash(mkdir -p cmd/rackops-server cmd/rackops-agent internal/telemetry internal/server internal/agent internal/types internal/catalog)",
+      "Bash(git add *)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:deepwiki.com)",
+      "WebFetch(domain:raw.githubusercontent.com)"
     ]
   }
 }

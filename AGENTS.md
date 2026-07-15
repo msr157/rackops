@@ -2,17 +2,24 @@
 
 ## Project Structure & Module Organization
 
-RackOps Lite ships as one Go binary with an embedded web dashboard. Go CLI entry points are in `backend/cmd/rackops`; domain packages such as `server`, `agent`, and `telemetry` are under `backend/internal`. The React/TypeScript dashboard is in `dashboard/src`, with reusable UI in `components`, route views in `pages`, and static files in `dashboard/public` or `dashboard/src/assets`. `scripts/install.sh` is the Linux/WSL installer. Dashboard builds go to `backend/internal/server/dist`; treat it as generated output.
+This is the **RackOps monorepo**: pnpm workspaces + Turborepo for TypeScript, `go.work` for Go.
+
+- `apps/rackops-lite/` — the shipping product. Go CLI entry points are in `backend/cmd/rackops`; domain packages such as `server`, `agent`, and `telemetry` are under `backend/internal`. The React/TypeScript dashboard is in `dashboard/src`, with reusable UI in `components`, route views in `pages`, and static files in `dashboard/public` or `dashboard/src/assets`. `scripts/install.sh` is the Linux/WSL installer. Dashboard builds go to `backend/internal/server/dist`; treat it as generated output.
+- `apps/website/` — rackops.dev marketing site (React + Vite + GSAP/three.js), deployed as an nginx Docker image built from the repo root.
+- `apps/rackops-enterprise/` — future product; placeholder only, no code yet.
+- `internal-apps/` — internal tooling (CRM, etc.); placeholders until built.
+- `packages/api` (`@rackops/api`) — shared TS API types/client; `packages/tsconfig` (`@rackops/tsconfig`) — shared TS configs.
 
 ## Build, Test, and Development Commands
 
-- `cd dashboard && npm ci` installs the locked frontend dependencies.
-- `cd dashboard && npm run dev` starts Vite with HMR; `/api` is proxied to `localhost:8090`.
-- `cd dashboard && npm run lint` runs Oxlint over the dashboard.
-- `cd dashboard && npm run build` type-checks and builds embedded assets.
-- `cd backend && go test ./...` compiles and tests all Go packages.
-- `cd backend && go build -o rackops ./cmd/rackops` builds the executable; build the dashboard first for UI changes.
-- `cd backend && ./rackops server --listen :8090` runs a backend compatible with the Vite proxy.
+- `pnpm install` at the repo root installs every JS workspace (pnpm 9, `corepack enable`).
+- `pnpm build` / `pnpm lint` run the corresponding Turborepo task across all workspaces.
+- `pnpm --filter @rackops/dashboard-lite dev` starts Vite with HMR; `/api` is proxied to `localhost:8090`.
+- `pnpm --filter @rackops/dashboard-lite build` type-checks and emits into the Go embed dir.
+- `pnpm --filter @rackops/website dev|build` for the marketing site.
+- `cd apps/rackops-lite/backend && go test ./...` compiles and tests all Go packages.
+- `cd apps/rackops-lite/backend && go build -o rackops ./cmd/rackops` builds the executable; build the dashboard first for UI changes.
+- `cd apps/rackops-lite/backend && ./rackops server --listen :8090` runs a backend compatible with the Vite proxy.
 
 ## Coding Style & Naming Conventions
 
@@ -20,7 +27,7 @@ Format Go with `gofmt`; use tabs, concise package names, exported `PascalCase`, 
 
 ## Testing Guidelines
 
-Place Go tests beside their package as `*_test.go` and favor table-driven cases. There is no committed frontend test framework; if adding one, colocate `*.test.tsx` files and add its command to `dashboard/package.json`. At minimum, run Go tests, dashboard lint, and the production build. Manually exercise flows spanning server, agent, or browser processes.
+Place Go tests beside their package as `*_test.go` and favor table-driven cases. There is no committed frontend test framework; if adding one, colocate `*.test.tsx` files and add its command to the workspace's `package.json`. At minimum, run Go tests, dashboard lint, and the production build. Manually exercise flows spanning server, agent, or browser processes.
 
 ## Commit & Pull Request Guidelines
 

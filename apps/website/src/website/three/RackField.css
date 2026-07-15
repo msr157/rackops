@@ -1,0 +1,13 @@
+.rack-field {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  mask-image: linear-gradient(to bottom, black 60%, transparent);
+  -webkit-mask-image: linear-gradient(to bottom, black 60%, transparent);
+}
+
+.rack-field canvas {
+  width: 100% !important;
+  height: 100% !important;
+}

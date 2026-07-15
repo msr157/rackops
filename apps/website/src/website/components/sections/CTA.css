@@ -1,0 +1,86 @@
+.cta-section {
+  padding-bottom: 160px;
+}
+
+.cta-prompt {
+  margin-top: 56px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  background: var(--bg-1);
+  padding: 24px;
+  max-width: 640px;
+}
+
+.cta-path {
+  display: block;
+  color: var(--signal);
+  margin-bottom: 16px;
+}
+
+.cta-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.cta-form-grid input,
+.cta-form-grid textarea {
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--rule-strong);
+  padding: 12px 2px;
+  font-family: var(--font-mono);
+  font-size: 15px;
+  color: var(--ink);
+  caret-color: var(--signal);
+  outline: none;
+  border-radius: 0;
+}
+
+.cta-form-grid textarea {
+  grid-column: 1 / -1;
+  resize: vertical;
+  min-height: 48px;
+}
+
+.cta-form-grid input::placeholder,
+.cta-form-grid textarea::placeholder {
+  color: var(--ink-3);
+}
+
+.cta-form-grid input:focus,
+.cta-form-grid textarea:focus {
+  border-bottom-color: var(--signal);
+}
+
+.cta-form-grid input:disabled,
+.cta-form-grid textarea:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.cta-error {
+  grid-column: 1 / -1;
+  margin-top: 8px;
+}
+
+.cta-submit {
+  grid-column: 1 / -1;
+  justify-self: start;
+  margin-top: 8px;
+}
+
+@media (max-width: 600px) {
+  .cta-form-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.cta-confirm {
+  font-size: 13px;
+}
+
+.cta-fallback {
+  margin-top: 20px;
+}

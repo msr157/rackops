@@ -1,0 +1,19 @@
+{
+  "name": "rackops-monorepo",
+  "private": true,
+  "packageManager": "pnpm@9.15.9",
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "go:build": "go -C apps/rackops-lite/backend build ./...",
+    "go:test": "go -C apps/rackops-lite/backend test ./...",
+    "go:vet": "go -C apps/rackops-lite/backend vet ./...",
+    "dev:lite": "go -C apps/rackops-lite/backend run ./cmd/rackops server --listen :8090",
+    "dev:lite-dashboard": "pnpm --filter @rackops/dashboard-lite dev",
+    "dev:website": "pnpm --filter @rackops/website dev"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.0"
+  }
+}
