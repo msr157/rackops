@@ -95,8 +95,8 @@ func (a *API) leaderHTTP() string {
 func (a *API) clusterGuard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if a.Cluster != nil && !a.Cluster.IsLeader() && r.Method != http.MethodGet &&
-			r.URL.Path != "/api/agent/ingest" && r.URL.Path != "/api/cluster/join" &&
-			r.URL.Path != "/api/auth/login" {
+			r.URL.Path != "/api/agent/ingest" && r.URL.Path != "/api/agent/logstream" &&
+			r.URL.Path != "/api/cluster/join" && r.URL.Path != "/api/auth/login" {
 			leader := a.leaderHTTP()
 			if leader != "" {
 				http.Error(w, `{"error":"follower","leader":"`+leader+`"}`, http.StatusMisdirectedRequest)

@@ -7,12 +7,14 @@
 ```
 apps/
   rackops-lite/         RackOps Lite — the shipping product
-    backend/            Go module — single `rackops` binary (server / agent / probe)
+    backend/            Go module — single `rackops` binary (server / agent / probe / mcp)
     dashboard/          React + TypeScript + Vite (embedded into the binary at build time)
     scripts/            install.sh — Linux / WSL2 one-line installer
   rackops-enterprise/   RackOps Enterprise — future product (placeholder)
   website/              rackops.dev marketing site (React + Vite, deployed via Docker/nginx)
-internal-apps/          Internal tooling (CRM, etc.) — placeholders until built
+internal-apps/
+  crm/                  Vendor CRM — support tickets, reset-email relay, usage analytics
+                        (Go + SQLite backend, embedded React dashboard, Docker deploy)
 packages/
   api/                  @rackops/api — shared TS API types + client hooks
   tsconfig/             @rackops/tsconfig — shared TypeScript configs

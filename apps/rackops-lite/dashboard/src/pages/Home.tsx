@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { useData } from '../data';
 import { Rack } from '../components/Rack';
-import { Led, UrlChip, publicUrls, timeAgo } from '../components/ui';
+import { InfoTip, Led, UrlChip, publicUrls, timeAgo } from '../components/ui';
 
 // Home answers one question at a glance: is everything okay?
 // Anything that needs attention comes first; healthy detail follows.
@@ -47,7 +47,14 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
       {/* Needs attention: failures and alerts, each one click from its fix */}
       {(failing.length > 0 || openAlerts.length > 0 || nodesOffline.length > 0) && (
         <>
-          <div className="section-title"><Bell size={15} style={{ color: 'var(--crit)' }} /> Needs attention</div>
+          <div className="section-title">
+            <Bell size={15} style={{ color: 'var(--crit)' }} /> Needs attention
+            <InfoTip wide>
+              Only real, ongoing problems appear here: an app that is down, a machine that stopped
+              reporting, or an alert that has persisted for several readings. Each entry clears
+              itself automatically the moment the problem is fixed.
+            </InfoTip>
+          </div>
           <div className="stack" style={{ marginBottom: 8 }}>
             {failing.map((s) => (
               <div key={s.id} className="card row spread" style={{ borderColor: 'var(--crit)', padding: '12px 16px' }}>
@@ -122,7 +129,14 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
             )}
           </div>
 
-          <div className="section-title"><Radio size={15} /> Live activity <span className="badge amber" style={{ marginLeft: 'auto' }}>LIVE</span></div>
+          <div className="section-title">
+            <Radio size={15} /> Live activity
+            <InfoTip>
+              A running log of everything the fleet does — deploys, self-healing, machines joining,
+              alerts raising and resolving. It updates in real time.
+            </InfoTip>
+            <span className="badge amber" style={{ marginLeft: 'auto' }}>LIVE</span>
+          </div>
           <div className="terminal" style={{ maxHeight: 260 }}>
             {events.map((e) => (
               <div key={e.id}>
@@ -138,6 +152,10 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
         <div>
           <div className="section-title" style={{ marginTop: 12 }}>
             <HardDrive size={15} /> The rack
+            <InfoTip>
+              Every machine in this organization, drawn as rack units. The LED shows each
+              machine&rsquo;s health; click through for full hardware detail.
+            </InfoTip>
             <Link to="/machines" className="faint" style={{ marginLeft: 'auto', fontWeight: 400 }}>details →</Link>
           </div>
           <Rack nodes={nodes} services={services} />

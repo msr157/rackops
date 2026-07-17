@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { useData } from '../data';
 import { Rack } from '../components/Rack';
-import { Led, StatusBadge, UsageBar, Kpi, EmptyState, formatUptime, shortGpu } from '../components/ui';
+import { InfoTip, Led, StatusBadge, UsageBar, Kpi, EmptyState, formatUptime, shortGpu } from '../components/ui';
 
 // MachinesPage: the physical rack, plus fleet-wide capacity.
 export function MachinesPage({ onAddMachine }: { onAddMachine: () => void }) {
@@ -124,7 +124,13 @@ export function MachineDetail() {
           <UsageBar pct={m.memPct} />
         </div>
         <div className="card">
-          <div className="eyebrow"><Thermometer size={12} /> Package temp</div>
+          <div className="eyebrow">
+            <Thermometer size={12} /> Package temp
+            <InfoTip>
+              The CPU package sensor, read straight from the hardware. Above ~85°C most CPUs slow
+              themselves down to cool off — an alert opens if it stays there.
+            </InfoTip>
+          </div>
           <div className="kpi-value">{m.tempC.toFixed(0)}<span className="unit">°C</span></div>
           <div className="faint">{m.tempC > 85 ? 'throttling risk' : m.tempC > 70 ? 'warm' : 'healthy'}</div>
           <UsageBar pct={m.tempC} />
@@ -171,7 +177,13 @@ export function MachineDetail() {
         </>
       )}
 
-      <div className="section-title"><HardDrive size={15} /> Drives</div>
+      <div className="section-title">
+        <HardDrive size={15} /> Drives
+        <InfoTip>
+          Live read/write throughput and fill level per drive. The health badge warns at 85% full
+          and turns critical at 95% — full disks are the top cause of failed deploys.
+        </InfoTip>
+      </div>
       <div className="grid-2">
         {(hw.drives ?? []).map((d) => {
           const pct = d.sizeGb > 0 ? (d.usedGb / d.sizeGb) * 100 : 0;

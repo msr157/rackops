@@ -87,7 +87,7 @@ var templates = []Template{
 	{ID: "ghost", Name: "Ghost", Category: "web", Description: "Modern publishing & newsletters", Image: "ghost:5-alpine", Port: 2368, MemMB: 512, Volumes: []string{"/var/lib/ghost/content"},
 		Env: []EnvDef{{Key: "url", Label: "Public URL", Default: "http://localhost:2368", Required: true}, {Key: "database__client", Label: "DB client", Default: "sqlite3"}}},
 	{ID: "plausible", Name: "Plausible CE", Category: "web", Description: "Privacy-friendly web analytics", Port: 8000, MemMB: 1536, ComposeYML: plausibleCompose,
-		Env: []EnvDef{{Key: "SECRET_KEY_BASE", Label: "Secret key", Secret: true, Generate: true}, {Key: "DB_PASSWORD", Label: "Database password", Secret: true, Generate: true}, {Key: "BASE_URL", Label: "Public URL", Default: "http://localhost:8000", Required: true}},
+		Env:   []EnvDef{{Key: "SECRET_KEY_BASE", Label: "Secret key", Secret: true, Generate: true}, {Key: "DB_PASSWORD", Label: "Database password", Secret: true, Generate: true}, {Key: "BASE_URL", Label: "Public URL", Default: "http://localhost:8000", Required: true}},
 		Notes: "full stack (Plausible + Postgres + ClickHouse) — set Public URL to your domain once routed"},
 	{ID: "umami", Name: "Umami", Category: "web", Description: "Simple website analytics", Port: 3000, MemMB: 512, ComposeYML: umamiCompose,
 		Env:   []EnvDef{{Key: "APP_SECRET", Label: "App secret", Secret: true, Generate: true}, {Key: "DB_PASSWORD", Label: "Database password", Secret: true, Generate: true}},

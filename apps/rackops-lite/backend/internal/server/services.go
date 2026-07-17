@@ -81,12 +81,21 @@ type DeployPayload struct {
 	HostNet       bool           `json:"hostNet,omitempty"`      // run with --network host (ingress edge)
 	ExternalName  string         `json:"externalName,omitempty"` // adopted container's real name (lifecycle ops target it)
 	ContainerID   string         `json:"containerId,omitempty"`  // for stop/start/restart/remove
-	Since         string         `json:"since,omitempty"`       // logs: RFC3339 lower bound
-	Path          string         `json:"path,omitempty"`        // listdir: directory to list
+	Since         string         `json:"since,omitempty"`        // logs: RFC3339 lower bound
+	Path          string         `json:"path,omitempty"`         // listdir: directory to list
+	StreamID      string         `json:"streamId,omitempty"`     // logs-follow: correlates the live stream on the SSE hub
 }
 
 // handleCreateService creates a service and queues its first deployment.
 func (a *API) handleCreateService(w http.ResponseWriter, r *http.Request) {
+	org, member := a.requireOrg(w, r)
+	if org == nil {
+		return
+	}
+	if !orgCan(member, func(p types.OrgPermissions) bool { return p.CreateServices }) {
+		http.Error(w, "you don't have permission to deploy apps in this organization", http.StatusForbidden)
+		return
+	}
 	var req struct {
 		types.Service
 		Placement *types.PlacementRequest `json:"placement,omitempty"`
@@ -98,6 +107,30 @@ func (a *API) handleCreateService(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(req.Name) == "" {
 		http.Error(w, "name required", http.StatusBadRequest)
 		return
+	}
+	// The target project must belong to the active org (and be visible).
+	if req.ProjectID != "" {
+		ok := false
+		a.Store.View(func() {
+			p := a.Store.Projects[req.ProjectID]
+			ok = p != nil && p.OrgID == org.ID && projectVisible(member, p.ID)
+		})
+		if !ok {
+			http.Error(w, "project not found in this organization", http.StatusNotFound)
+			return
+		}
+	}
+	// An explicitly chosen machine must be the org's own hardware.
+	if req.NodeID != "" && req.NodeID != "auto" {
+		ok := false
+		a.Store.View(func() {
+			n := a.Store.Nodes[req.NodeID]
+			ok = n != nil && n.OrgID == org.ID
+		})
+		if !ok {
+			http.Error(w, "machine not found in this organization", http.StatusNotFound)
+			return
+		}
 	}
 	if req.Kind == "" {
 		req.Kind = types.KindApp
@@ -181,12 +214,13 @@ func (a *API) handleCreateService(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = gpuNeeded
 
-	// Auto-placement: score nodes and pick the winner.
+	// Auto-placement: score nodes and pick the winner (org hardware only).
 	if req.NodeID == "" || req.NodeID == "auto" {
 		pr := types.PlacementRequest{}
 		if req.Placement != nil {
 			pr = *req.Placement
 		}
+		pr.OrgID = org.ID
 		scores := a.Store.PlaceWorkload(pr)
 		picked := ""
 		for _, sc := range scores {
@@ -274,15 +308,38 @@ func (a *API) queueDeploy(svc *types.Service, trigger string) *types.Deployment 
 	return dep
 }
 
+// serviceForOrg resolves {id} to a service the caller may touch: it must
+// exist, belong to the active org, and sit in a project the member can see.
+// Writes the error response and returns nils otherwise.
+func (a *API) serviceForOrg(w http.ResponseWriter, r *http.Request) (*types.Service, *types.Organization, *types.OrgMember) {
+	org, member := a.requireOrg(w, r)
+	if org == nil {
+		return nil, nil, nil
+	}
+	var svc *types.Service
+	visible := false
+	a.Store.View(func() {
+		svc = a.Store.Services[r.PathValue("id")]
+		if svc != nil {
+			visible = a.serviceInOrg(svc, org.ID) && projectVisible(member, svc.ProjectID)
+		}
+	})
+	if svc == nil || !visible {
+		// One error for both cases: existence in another org is none of the
+		// caller's business.
+		http.Error(w, "service not found", http.StatusNotFound)
+		return nil, nil, nil
+	}
+	return svc, org, member
+}
+
 // handleServiceAction handles start/stop/restart/redeploy.
 func (a *API) handleServiceAction(w http.ResponseWriter, r *http.Request) {
-	id, action := r.PathValue("id"), r.PathValue("action")
-	var svc *types.Service
-	a.Store.View(func() { svc = a.Store.Services[id] })
+	svc, _, _ := a.serviceForOrg(w, r)
 	if svc == nil {
-		http.Error(w, "service not found", http.StatusNotFound)
 		return
 	}
+	action := r.PathValue("action")
 
 	switch action {
 	case "redeploy":
@@ -316,13 +373,15 @@ func (a *API) handleServiceAction(w http.ResponseWriter, r *http.Request) {
 
 // handleDeleteService removes the service and asks the agent to tear down.
 func (a *API) handleDeleteService(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	var svc *types.Service
-	a.Store.View(func() { svc = a.Store.Services[id] })
+	svc, _, member := a.serviceForOrg(w, r)
 	if svc == nil {
-		http.Error(w, "service not found", http.StatusNotFound)
 		return
 	}
+	if !orgCan(member, func(p types.OrgPermissions) bool { return p.DeleteServices }) {
+		http.Error(w, "you don't have permission to remove apps in this organization", http.StatusForbidden)
+		return
+	}
+	id := svc.ID
 	// Adopted apps: block re-adoption while the container is torn down.
 	if svc.Adopted {
 		suppressAdopt(svc.NodeID, svc.ExternalName)

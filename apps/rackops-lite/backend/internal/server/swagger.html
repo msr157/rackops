@@ -1,0 +1,63 @@
+<!doctype html>
+<!-- RackOps API explorer — swagger-ui served entirely from the binary (no CDN). -->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RackOps API</title>
+  <link rel="stylesheet" href="/swagger/swagger-ui.css" />
+  <style>
+    /* Operator-console dark skin over swagger-ui's light default. */
+    :root {
+      --bg: #0f1013; --bg-2: #16171c; --bg-3: #1d1f25;
+      --border: rgba(255, 255, 255, 0.09); --text: #e8e6e1;
+      --dim: #9b978e; --amber: #ffb02e;
+    }
+    html, body { background: var(--bg); margin: 0; }
+    .topbar { display: none; }
+    .swagger-ui, .swagger-ui .info .title, .swagger-ui .info li, .swagger-ui .info p,
+    .swagger-ui .opblock-tag, .swagger-ui .opblock .opblock-summary-description,
+    .swagger-ui .opblock-description-wrapper p, .swagger-ui table thead tr th,
+    .swagger-ui .parameter__name, .swagger-ui .parameter__type, .swagger-ui .response-col_status,
+    .swagger-ui .response-col_description, .swagger-ui .model, .swagger-ui .model-title,
+    .swagger-ui section.models h4, .swagger-ui .scheme-container .schemes-title,
+    .swagger-ui .opblock .opblock-section-header h4, .swagger-ui label, .swagger-ui .tab li,
+    .swagger-ui .btn, .swagger-ui select, .swagger-ui .responses-inner h4, .swagger-ui .responses-inner h5 {
+      color: var(--text) !important;
+    }
+    .swagger-ui .info .description, .swagger-ui .info .description p { color: var(--dim) !important; }
+    .swagger-ui .scheme-container { background: var(--bg-2); box-shadow: none; border-bottom: 1px solid var(--border); }
+    .swagger-ui .opblock { background: var(--bg-2); border-color: var(--border); box-shadow: none; }
+    .swagger-ui .opblock .opblock-section-header { background: var(--bg-3); }
+    .swagger-ui .opblock-tag { border-color: var(--border); }
+    .swagger-ui section.models, .swagger-ui section.models .model-container { background: var(--bg-2); border-color: var(--border); }
+    .swagger-ui input[type=text], .swagger-ui input[type=password], .swagger-ui select, .swagger-ui textarea {
+      background: var(--bg-3) !important; color: var(--text) !important; border: 1px solid var(--border) !important;
+    }
+    .swagger-ui .btn.authorize { border-color: var(--amber); color: var(--amber) !important; }
+    .swagger-ui .btn.authorize svg { fill: var(--amber); }
+    .swagger-ui .dialog-ux .modal-ux { background: var(--bg-2); border-color: var(--border); }
+    .swagger-ui .dialog-ux .modal-ux-header h3, .swagger-ui .dialog-ux .modal-ux-content h4,
+    .swagger-ui .dialog-ux .modal-ux-content p, .swagger-ui .auth-container label { color: var(--text) !important; }
+    .swagger-ui .copy-to-clipboard { background: var(--bg-3); }
+    body::before {
+      content: 'RACKOPS API'; display: block; padding: 18px 20px 4px;
+      font: 700 18px/-0.01em ui-monospace, monospace; letter-spacing: 0.12em; color: var(--amber);
+    }
+  </style>
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="/swagger/swagger-ui-bundle.js"></script>
+  <script>
+    window.ui = SwaggerUIBundle({
+      url: '/api/openapi.json',
+      dom_id: '#swagger-ui',
+      docExpansion: 'list',
+      defaultModelsExpandDepth: -1,
+      persistAuthorization: true,
+      tryItOutEnabled: true,
+    });
+  </script>
+</body>
+</html>

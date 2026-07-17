@@ -33,16 +33,26 @@ type ServiceUpdate struct {
 // container is recreated with the new config; a node change migrates the
 // workload (remove on old node, deploy on new).
 func (a *API) handleUpdateService(w http.ResponseWriter, r *http.Request) {
+	svc, org, _ := a.serviceForOrg(w, r)
+	if svc == nil {
+		return
+	}
 	var upd ServiceUpdate
 	if err := json.NewDecoder(r.Body).Decode(&upd); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	var svc *types.Service
-	a.Store.View(func() { svc = a.Store.Services[r.PathValue("id")] })
-	if svc == nil {
-		http.Error(w, "service not found", http.StatusNotFound)
-		return
+	// A migration target must be the org's own hardware.
+	if upd.NodeID != nil && *upd.NodeID != "" {
+		ok := false
+		a.Store.View(func() {
+			n := a.Store.Nodes[*upd.NodeID]
+			ok = n != nil && n.OrgID == org.ID
+		})
+		if !ok {
+			http.Error(w, "machine not found in this organization", http.StatusNotFound)
+			return
+		}
 	}
 	// Adopted apps have no deploy recipe — redeploying would spawn a duplicate,
 	// rackops-named container alongside the real one. Config edits can only be
@@ -138,10 +148,8 @@ func (a *API) handleUpdateService(w http.ResponseWriter, r *http.Request) {
 
 // handleGetService returns one service with its git token stripped.
 func (a *API) handleGetService(w http.ResponseWriter, r *http.Request) {
-	var svc *types.Service
-	a.Store.View(func() { svc = a.Store.Services[r.PathValue("id")] })
+	svc, _, _ := a.serviceForOrg(w, r)
 	if svc == nil {
-		http.Error(w, "service not found", http.StatusNotFound)
 		return
 	}
 	out := *svc

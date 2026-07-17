@@ -5,7 +5,7 @@ import { api } from '../api';
 import type { Service } from '../api';
 import { useData } from '../data';
 import { useToast, cleanError } from '../components/toast';
-import { Led, Spinner, StatusBadge, UrlChip, publicUrls } from '../components/ui';
+import { InfoTip, Led, Spinner, StatusBadge, UrlChip, publicUrls } from '../components/ui';
 
 // AppsPage: every workload, its health, and where it's reachable — with the
 // full detail one click away.
@@ -59,6 +59,11 @@ export function AppsPage() {
         {failingFirst.map((s) => {
           const urls = publicUrls(s, ingress);
           const node = nodes.find((n) => n.id === s.nodeId);
+          // Lock actions for the whole deploy window, not just our own HTTP
+          // call — svc.status arrives live over SSE, so this releases the
+          // moment the machine reports the container running (or failed).
+          const working = s.status === 'building' || s.status === 'pending';
+          const locked = busy.startsWith(`${s.id}:`) || working;
           return (
             <div key={s.id} className="card clickable" style={{ padding: '13px 16px' }} onClick={() => navigate(`/apps/${s.id}`)}>
               <div className="row spread">
@@ -69,15 +74,15 @@ export function AppsPage() {
                 </div>
                 <div className="row" onClick={(e) => e.stopPropagation()}>
                   {s.status === 'running' ? (
-                    <button className="btn sm" disabled={busy.startsWith(`${s.id}:`)} title="Stop" onClick={(e) => act(e, s, 'stop')}>
+                    <button className="btn sm" disabled={locked} title="Stop" onClick={(e) => act(e, s, 'stop')}>
                       {busy === `${s.id}:stop` ? <Spinner size={12} /> : <Square size={12} />}
                     </button>
                   ) : (
-                    <button className="btn sm" disabled={busy.startsWith(`${s.id}:`)} title="Start" onClick={(e) => act(e, s, 'start')}>
-                      {busy === `${s.id}:start` ? <Spinner size={12} /> : <Play size={12} />}
+                    <button className="btn sm" disabled={locked} title={working ? 'Working — hang tight' : 'Start'} onClick={(e) => act(e, s, 'start')}>
+                      {busy === `${s.id}:start` || working ? <Spinner size={12} /> : <Play size={12} />}
                     </button>
                   )}
-                  <button className="btn sm" disabled={busy.startsWith(`${s.id}:`)} title="Restart" onClick={(e) => act(e, s, 'restart')}>
+                  <button className="btn sm" disabled={locked} title="Restart" onClick={(e) => act(e, s, 'restart')}>
                     {busy === `${s.id}:restart` ? <Spinner size={12} /> : <RotateCw size={12} />}
                   </button>
                 </div>
@@ -124,6 +129,11 @@ export function AppsPage() {
           <span className="faint row" style={{ gap: 5 }}><Led status="building" /> working</span>
           <span className="faint row" style={{ gap: 5 }}><Led status="failed" /> down — auto-heal retries, check logs</span>
           <span className="faint row" style={{ gap: 5 }}><Led status="stopped" /> stopped</span>
+          <InfoTip wide>
+            &ldquo;Working&rdquo; means a deploy or restart is in flight — its buttons unlock when it
+            finishes. &ldquo;Down&rdquo; apps are retried automatically a few times; if they stay
+            down, the logs usually say why.
+          </InfoTip>
         </div>
       )}
     </div>

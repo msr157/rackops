@@ -1,14 +1,17 @@
 import { Link } from 'react-router-dom';
-import { ArrowRight, GitBranch, KeyRound, Network, ShieldCheck, Sparkles, Users } from 'lucide-react';
+import { ArrowRight, GitBranch, KeyRound, LifeBuoy, Network, ShieldCheck, Sparkles, Users } from 'lucide-react';
 
 const releases = [
   {
-    version: 'Unreleased', date: 'In progress', title: 'Clearer networking and release visibility',
+    version: 'v0.4.0', date: 'July 17, 2026', title: 'Organizations done right, support, and AI-tool access',
     changes: [
-      'Recognize a running edge behind a port-forwarding router as a configured public path.',
-      'Copy domain DNS values on HTTPS, localhost, and plain-HTTP LAN dashboards.',
-      'Keep release notes visible inside RackOps through this changelog.',
-      'Restart the RackOps server from Settings, then reconnect automatically.',
+      'Organizations rebuilt Dokploy-style: a sidebar switcher, invitation links, per-member permissions with project-level access, and true scoping — every org sees only its own machines, apps, domains, and settings.',
+      'Profile page with password change, API keys (expiry, last-used, shown once) that act with your role, and ready-to-paste MCP config for VS Code, Claude, and Cursor.',
+      'Password reset that works self-hosted: emailed from RackOps support, and always printed in the server log as the universal fallback.',
+      'Support tickets inside the dashboard — replies from the RackOps team land straight back in the thread.',
+      'Interactive API docs at /swagger, generated from the live route table and served fully offline.',
+      'Needs Attention now clears itself the moment an issue resolves, and action buttons stay locked for the whole deploy window.',
+      'Info tips (ⓘ) across every page explain anything non-obvious in plain language.',
     ],
   },
   {
@@ -38,9 +41,10 @@ export function ChangelogPage() {
       <div className="page-sub">Every user-visible RackOps change, with direct paths to the features that shipped.</div>
 
       <div className="release-links">
-        <Link to="/organizations" className="card clickable"><Users size={16} /> Organizations <ArrowRight size={12} /></Link>
+        <Link to="/settings?tab=org" className="card clickable"><Users size={16} /> Organizations <ArrowRight size={12} /></Link>
         <Link to="/profile" className="card clickable"><KeyRound size={16} /> API keys &amp; MCP <ArrowRight size={12} /></Link>
         <Link to="/network" className="card clickable"><Network size={16} /> Domains &amp; edge <ArrowRight size={12} /></Link>
+        <Link to="/support" className="card clickable"><LifeBuoy size={16} /> Support <ArrowRight size={12} /></Link>
         <a href="/swagger" target="_blank" rel="noreferrer" className="card clickable"><ShieldCheck size={16} /> API docs <ArrowRight size={12} /></a>
       </div>
 

@@ -31,8 +31,9 @@ type Node struct {
 	Name      string     `json:"name"`
 	Role      NodeRole   `json:"role"`
 	Status    NodeStatus `json:"status"`
-	IP        string     `json:"ip"`     // LAN/public IP
-	MeshIP    string     `json:"meshIp"` // WireGuard mesh IP (10.77.x.x)
+	OrgID     string     `json:"orgId,omitempty"` // owning organization
+	IP        string     `json:"ip"`              // LAN/public IP
+	MeshIP    string     `json:"meshIp"`          // WireGuard mesh IP (10.77.x.x)
 	PublicIP  string     `json:"publicIp,omitempty"`
 	OS        string     `json:"os"`
 	Arch      string     `json:"arch"`
@@ -115,6 +116,7 @@ type Project struct {
 	ID          string    `json:"id"`
 	Name        string    `json:"name"`
 	Description string    `json:"description"`
+	OrgID       string    `json:"orgId,omitempty"` // owning organization
 	CreatedBy   string    `json:"createdBy"`
 	CreatedAt   time.Time `json:"createdAt"`
 	SharedEnv   []EnvVar  `json:"sharedEnv"` // project-level vars inherited by all envs
@@ -265,12 +267,13 @@ type Deployment struct {
 
 // PlacementRequest asks the scheduler where a workload should run.
 type PlacementRequest struct {
-	CPUMilli   int   `json:"cpuMilli"`  // requested mCPU (0 = unknown)
-	MemMB      int64 `json:"memMb"`     // requested memory
-	StorageGB  int64 `json:"storageGb"` // persistent storage needed
-	NeedsGPU   bool  `json:"needsGpu"`
-	MinVRAMMB  int64 `json:"minVramMb,omitempty"`
-	PreferNVMe bool  `json:"preferNvme"`
+	CPUMilli   int    `json:"cpuMilli"`  // requested mCPU (0 = unknown)
+	MemMB      int64  `json:"memMb"`     // requested memory
+	StorageGB  int64  `json:"storageGb"` // persistent storage needed
+	NeedsGPU   bool   `json:"needsGpu"`
+	MinVRAMMB  int64  `json:"minVramMb,omitempty"`
+	PreferNVMe bool   `json:"preferNvme"`
+	OrgID      string `json:"-"` // server-set: restrict to one org's machines
 }
 
 // PlacementScore is one node's suitability verdict.
@@ -330,8 +333,9 @@ const (
 // probes the edge so misconfiguration surfaces instead of failing silently.
 type Domain struct {
 	ID        string    `json:"id"`
-	Name      string    `json:"name"`     // e.g. app.example.com or *.example.com
-	Wildcard  bool      `json:"wildcard"` // name starts with "*." — covers one subdomain level
+	Name      string    `json:"name"`            // e.g. app.example.com or *.example.com
+	Wildcard  bool      `json:"wildcard"`        // name starts with "*." — covers one subdomain level
+	OrgID     string    `json:"orgId,omitempty"` // owning organization
 	CreatedBy string    `json:"createdBy"`
 	CreatedAt time.Time `json:"createdAt"`
 
@@ -395,17 +399,26 @@ type User struct {
 	PasswordHash string    `json:"passwordHash,omitempty"`
 	Role         UserRole  `json:"role"`
 	CreatedAt    time.Time `json:"createdAt"`
+	// Password reset: only the SHA-256 of the reset token is stored, and it is
+	// single-use — consumed (cleared) on a successful reset or on expiry.
+	ResetTokenHash string    `json:"resetTokenHash,omitempty"`
+	ResetExpires   time.Time `json:"resetExpires,omitempty"`
 }
 
-// Sanitized returns a copy safe to send to API clients (no password hash).
+// Sanitized returns a copy safe to send to API clients (no password hash,
+// no reset-token material).
 func (u *User) Sanitized() *User {
 	c := *u
 	c.PasswordHash = ""
+	c.ResetTokenHash = ""
+	c.ResetExpires = time.Time{}
 	return &c
 }
 
 // APIToken is a bearer token for the REST API / CLI. TokenHash replicates
 // (raft state) so tokens validate cluster-wide; Sanitized() strips it for API.
+// Every token belongs to a user and acts with that user's role — a key is
+// never more powerful than the account that created it.
 type APIToken struct {
 	ID        string    `json:"id"`
 	UserID    string    `json:"userId"`
@@ -413,6 +426,8 @@ type APIToken struct {
 	TokenHash string    `json:"tokenHash,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 	LastUsed  time.Time `json:"lastUsed,omitempty"`
+	// ExpiresAt zero means the token never expires.
+	ExpiresAt time.Time `json:"expiresAt,omitempty"`
 }
 
 // Sanitized returns a copy safe for API clients (no token hash).
@@ -422,12 +437,149 @@ func (t *APIToken) Sanitized() *APIToken {
 	return &c
 }
 
+// ---- Organizations ----
+
+// OrgRole is a member's role INSIDE one organization, independent of the
+// platform role. Platform owner/admin manage the install (updates, users,
+// edge); org roles govern that org's projects, machines, and domains.
+type OrgRole string
+
+const (
+	OrgRoleOwner  OrgRole = "owner"
+	OrgRoleAdmin  OrgRole = "admin"
+	OrgRoleMember OrgRole = "member"
+)
+
+// OrgPermissions are the Dokploy-style capability switches evaluated for
+// org-role "member". Owners and admins implicitly hold every permission.
+type OrgPermissions struct {
+	CreateProjects bool `json:"createProjects"`
+	DeleteProjects bool `json:"deleteProjects"`
+	CreateServices bool `json:"createServices"`
+	DeleteServices bool `json:"deleteServices"`
+	ManageDomains  bool `json:"manageDomains"`
+	ManageMachines bool `json:"manageMachines"` // join/rename/remove nodes
+	AccessAPI      bool `json:"accessApi"`      // may create API keys
+	// AccessedProjects restricts a member to specific projects. Empty means
+	// every project in the org (Dokploy's checkbox-tree semantics).
+	AccessedProjects []string `json:"accessedProjects,omitempty"`
+}
+
+// OrgMember links a user to an organization.
+type OrgMember struct {
+	UserID      string         `json:"userId"`
+	Role        OrgRole        `json:"role"`
+	Permissions OrgPermissions `json:"permissions"`
+	AddedAt     time.Time      `json:"addedAt"`
+}
+
+// Organization is the multi-tenancy boundary: projects, machines, domains,
+// notification targets, and Copilot settings are scoped to one org.
+type Organization struct {
+	ID        string      `json:"id"`
+	Name      string      `json:"name"`
+	CreatedBy string      `json:"createdBy"`
+	CreatedAt time.Time   `json:"createdAt"`
+	Members   []OrgMember `json:"members"`
+}
+
+// Member returns the membership entry for a user, or nil.
+func (o *Organization) Member(userID string) *OrgMember {
+	for i := range o.Members {
+		if o.Members[i].UserID == userID {
+			return &o.Members[i]
+		}
+	}
+	return nil
+}
+
+// InvitationStatus tracks an invitation's lifecycle.
+type InvitationStatus string
+
+const (
+	InvitePending  InvitationStatus = "pending"
+	InviteAccepted InvitationStatus = "accepted"
+)
+
+// Invitation is a 48h single-use link that lets someone create an account
+// already enrolled in an org — the self-hosted answer to email invites.
+// Only the token's SHA-256 is stored; the raw token exists in the copy-link.
+type Invitation struct {
+	ID        string           `json:"id"`
+	OrgID     string           `json:"orgId"`
+	Email     string           `json:"email"`
+	Role      OrgRole          `json:"role"`
+	TokenHash string           `json:"tokenHash,omitempty"`
+	Status    InvitationStatus `json:"status"`
+	CreatedBy string           `json:"createdBy"`
+	CreatedAt time.Time        `json:"createdAt"`
+	ExpiresAt time.Time        `json:"expiresAt"`
+}
+
+// Sanitized strips the token hash for API responses.
+func (i *Invitation) Sanitized() *Invitation {
+	c := *i
+	c.TokenHash = ""
+	return &c
+}
+
+// ---- Support tickets ----
+
+// TicketStatus mirrors the CRM's semantics: open = needs a support agent,
+// pending = waiting on the customer, resolved = closed (manual).
+type TicketStatus string
+
+const (
+	TicketOpen     TicketStatus = "open"
+	TicketPending  TicketStatus = "pending"
+	TicketResolved TicketStatus = "resolved"
+)
+
+// TicketMessage is one entry in a ticket thread. Author is "user" (someone on
+// this install) or "agent" (RackOps support, fetched from the CRM).
+type TicketMessage struct {
+	ID     string    `json:"id"`
+	Author string    `json:"author"`
+	Name   string    `json:"name"`
+	Body   string    `json:"body"`
+	At     time.Time `json:"at"`
+}
+
+// SupportTicket is a conversation with RackOps support. It lives here and is
+// mirrored to the vendor CRM; PollSecret authenticates reply polling and must
+// never leave the server (Sanitized strips it).
+type SupportTicket struct {
+	ID        string          `json:"id"`
+	Subject   string          `json:"subject"`
+	Category  string          `json:"category"` // general|deploys|networking|updates|billing|bug
+	Severity  string          `json:"severity"` // low|normal|high|urgent
+	Status    TicketStatus    `json:"status"`
+	Email     string          `json:"email"` // reply-to for the human
+	CreatedBy string          `json:"createdBy"`
+	CreatedAt time.Time       `json:"createdAt"`
+	UpdatedAt time.Time       `json:"updatedAt"`
+	Messages  []TicketMessage `json:"messages"`
+	// PollSecret is issued by the CRM at first forward (SHA-256 stored there);
+	// it authenticates this install's reply polls for this ticket.
+	PollSecret string `json:"pollSecret,omitempty"`
+	// ForwardPending marks a forward that failed and awaits the retry loop.
+	ForwardPending bool `json:"forwardPending,omitempty"`
+}
+
+// Sanitized returns a copy safe for API clients (no poll secret).
+func (t *SupportTicket) Sanitized() *SupportTicket {
+	c := *t
+	c.PollSecret = ""
+	return &c
+}
+
 // ---- Agent protocol ----
 
 // AgentReport is what an agent pushes to the control plane each interval.
 type AgentReport struct {
 	NodeID      string            `json:"nodeId"`
 	Name        string            `json:"name"`
+	OrgID       string            `json:"orgId,omitempty"` // org this node was joined into (--org)
 	Hardware    Hardware          `json:"hardware"`
 	Metrics     Metrics           `json:"metrics"`
 	Host        HostInfo          `json:"host"`
@@ -509,6 +661,10 @@ const (
 	TaskListDir TaskKind = "listdir"
 	TaskBuild   TaskKind = "build"
 	TaskBackup  TaskKind = "backup"
+	// Log streaming: follow a service's runtime logs (docker logs -f) and push
+	// them to the control plane out-of-band until told to stop.
+	TaskLogsFollow TaskKind = "logs-follow"
+	TaskLogsStop   TaskKind = "logs-stop"
 	// Cloudflare quick tunnel (testing): run/stop a cloudflared container
 	// that exposes the service at a random trycloudflare.com URL.
 	TaskTunnelStart TaskKind = "tunnel-start"

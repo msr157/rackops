@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -12,8 +13,10 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/rackops/rackops/internal/agent"
@@ -22,7 +25,7 @@ import (
 	"github.com/rackops/rackops/internal/telemetry"
 )
 
-const version = "0.4.0-dev"
+const version = "0.4.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -38,6 +41,8 @@ func main() {
 		runProbe()
 	case "update":
 		runUpdate()
+	case "mcp":
+		runMCP(os.Args[2:])
 	case "nodes", "services", "deploy", "alerts", "ask":
 		runCLI(os.Args[1], os.Args[2:])
 	case "version":
@@ -56,6 +61,7 @@ Usage:
   rackops agent  [flags]     Run the node agent
   rackops probe              Print discovered hardware + live metrics (debug)
   rackops update             Self-update to the latest release
+  rackops mcp                Serve the Model Context Protocol over stdio (AI tools)
   rackops version            Print version
 
 CLI (uses RACKOPS_SERVER / RACKOPS_TOKEN env or --server/--token flags):
@@ -131,6 +137,8 @@ func runServer(args []string) {
 	if err != nil {
 		log.Fatalf("server: %v", err)
 	}
+	// Migrate pre-org state and guarantee a default organization exists.
+	store.EnsureDefaultOrg()
 
 	// Join token: load or create.
 	token := loadOrCreateToken(*dataDir)
@@ -153,7 +161,7 @@ func runServer(args []string) {
 		Hub:       server.NewHub(),
 		Mesh:      meshHub,
 		JoinToken: token,
-		JWTSecret: server.DeriveJWTSecret(*dataDir, token),
+		InstallID: server.LoadOrCreateInstallID(*dataDir),
 		DashFS:    server.DashboardFS(),
 	}
 
@@ -167,9 +175,10 @@ func runServer(args []string) {
 		}
 	}()
 
-
 	// Embedded local agent — the server manages its own machine.
 	if !*noLocal {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
 		go func() {
 			time.Sleep(500 * time.Millisecond) // let the listener come up
 			a, err := agent.New(agent.Config{
@@ -183,7 +192,7 @@ func runServer(args []string) {
 				log.Printf("local agent: %v", err)
 				return
 			}
-			a.Run()
+			a.Run(ctx)
 		}()
 	}
 
@@ -234,6 +243,8 @@ func runServer(args []string) {
 	// Domain DNS/edge/cert verification loop (leader-only under HA; started
 	// after cluster wiring so it sees the raft handle).
 	go api.RunDomainVerifier()
+	// Support sync: retries CRM forwards, polls for support-agent replies.
+	go api.RunSupportSync()
 
 	log.Printf("rackops server v%s listening on %s", version, *listen)
 	log.Printf("join token: %s", token)
@@ -248,7 +259,7 @@ func runServer(args []string) {
 func joinCluster(leaderHTTP, token, nodeID, raftAddr, httpAddr string) {
 	body, _ := json.Marshal(map[string]string{"nodeId": nodeID, "raftAddr": raftAddr, "httpAddr": httpAddr})
 	target := strings.TrimSuffix(leaderHTTP, "/")
-	for attempt := 0; attempt < 30; attempt++ {
+	for range 30 {
 		time.Sleep(2 * time.Second)
 		req, _ := http.NewRequest("POST", target+"/api/cluster/join", bytes.NewReader(body))
 		req.Header.Set("X-Rackops-Token", token)
@@ -293,6 +304,7 @@ func runAgent(args []string) {
 	serverURL := fs.String("server", "", "control plane URL (required)")
 	token := fs.String("token", "", "join token (required)")
 	name := fs.String("name", "", "node display name")
+	org := fs.String("org", "", "organization ID to join (default: the server's default org)")
 	dataDir := fs.String("data-dir", defaultDataDir(), "state directory")
 	_ = fs.Parse(args)
 
@@ -301,13 +313,15 @@ func runAgent(args []string) {
 		os.Exit(1)
 	}
 	a, err := agent.New(agent.Config{
-		ServerURL: *serverURL, Token: *token, Name: *name,
+		ServerURL: *serverURL, Token: *token, Name: *name, OrgID: *org,
 		DataDir: *dataDir, Version: version,
 	})
 	if err != nil {
 		log.Fatalf("agent: %v", err)
 	}
-	a.Run()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	a.Run(ctx)
 }
 
 // runProbe prints full hardware discovery and a metric sample as JSON.

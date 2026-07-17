@@ -80,11 +80,24 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         const { id } = data as { id: string };
         setServices((prev) => prev.filter((p) => p.id !== id));
       },
-      alert: (data) => setAlerts((prev) => [data as Alert, ...prev]),
+      alert: (data) => {
+        const a = data as Alert;
+        // Upsert by id — a re-broadcast must never duplicate a card.
+        setAlerts((prev) => [a, ...prev.filter((p) => p.id !== a.id)]);
+      },
+      alert_resolved: (data) => {
+        const a = data as Alert;
+        setAlerts((prev) => prev.map((p) => (p.id === a.id ? { ...p, resolved: true } : p)));
+      },
     });
 
-    // Slow poll as SSE fallback for aggregates.
-    const t = setInterval(() => api.overview().then(setOverview).catch(() => {}), 8000);
+    // Slow poll as SSE fallback for aggregates. Alerts are included so a
+    // missed alert_resolved event can never leave a stale "needs attention"
+    // card — the poll converges the UI to the server's truth.
+    const t = setInterval(() => {
+      api.overview().then(setOverview).catch(() => {});
+      api.alerts().then((a) => setAlerts(a ?? [])).catch(() => {});
+    }, 8000);
     return () => { off(); clearInterval(t); };
   }, [refresh]);
 

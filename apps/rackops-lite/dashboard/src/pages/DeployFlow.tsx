@@ -4,11 +4,11 @@ import {
   Rocket, Package, Container, GitBranch, Layers, Sparkles, Plus, Trash2, ArrowLeft, ArrowRight,
   Globe, CheckCircle2, ScrollText, Bot, Server, Home, Wrench, Gamepad2, Database,
 } from 'lucide-react';
-import { api } from '../api';
-import type { Template, EnvVar, PlacementScore, Service, Deployment } from '../api';
+import { api, subscribeLogChunks } from '../api';
+import type { Template, EnvVar, PlacementScore, Service, Deployment, LogChunk } from '../api';
 import { useData } from '../data';
 import { useToast, cleanError } from '../components/toast';
-import { Led, Spinner, UrlChip, publicUrls } from '../components/ui';
+import { InfoTip, Led, Spinner, UrlChip, publicUrls } from '../components/ui';
 
 type Source = 'template' | 'image' | 'git' | 'compose';
 
@@ -293,7 +293,14 @@ export function DeployFlow() {
           )}
 
           <div className="field">
-            <label>Machine</label>
+            <label>
+              Machine
+              <InfoTip wide>
+                &ldquo;Auto&rdquo; scores every online machine in this organization on CPU, memory,
+                thermal, and storage headroom (plus GPU when the app needs one) and picks the
+                winner — you&rsquo;ll see the choice and why before anything deploys.
+              </InfoTip>
+            </label>
             <select className="input" value={nodeId} onChange={(e) => setNodeId(e.target.value)}>
               <option value="auto">Auto — pick the best machine for me</option>
               {nodes.map((n) => <option key={n.id} value={n.id}>{n.name}{n.status !== 'online' ? ' — offline' : ''}</option>)}
@@ -355,6 +362,7 @@ function LaunchProgress({ serviceId }: { serviceId: string }) {
   const { nodes, ingress } = useData();
   const [svc, setSvc] = useState<Service | null>(null);
   const [deploys, setDeploys] = useState<Deployment[]>([]);
+  const [liveLog, setLiveLog] = useState('');
   const logRef = useRef<HTMLDivElement>(null);
   const settled = svc?.status === 'running' || svc?.status === 'failed';
 
@@ -376,10 +384,20 @@ function LaunchProgress({ serviceId }: { serviceId: string }) {
     return () => { alive = false; clearInterval(t); };
   }, [serviceId]);
 
+  // Stream the build/pull/run output live as it happens, instead of waiting for
+  // the whole deploy to finish and land in the polled deployment record.
+  useEffect(() => {
+    const unsub = subscribeLogChunks(
+      (c: LogChunk) => c.kind === 'deploy' && c.serviceId === serviceId,
+      (c: LogChunk) => { if (c.text) setLiveLog((prev) => (prev + c.text).slice(-200_000)); },
+    );
+    return unsub;
+  }, [serviceId]);
+
   // keep the live log pinned to the bottom while building
   useEffect(() => {
     if (!settled && logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
-  }, [deploys, settled]);
+  }, [liveLog, deploys, settled]);
 
   const latest = deploys[0];
   const node = nodes.find((n) => n.id === svc?.nodeId);
@@ -436,7 +454,7 @@ function LaunchProgress({ serviceId }: { serviceId: string }) {
 
       <div className="eyebrow" style={{ marginBottom: 6 }}>Deployment output</div>
       <div className="terminal" ref={logRef} style={{ maxHeight: 400 }}>
-        {latest?.log || 'waiting for the machine to pick up the job…'}
+        {liveLog || latest?.log || 'waiting for the machine to pick up the job…'}
       </div>
     </>
   );

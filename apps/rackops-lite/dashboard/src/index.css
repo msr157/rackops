@@ -130,6 +130,39 @@ body {
 .brand-name { font-family: var(--display); font-weight: 700; font-size: 15px; letter-spacing: -0.01em; }
 .brand-ver { font-size: 10px; color: var(--faint); font-family: var(--mono); }
 
+/* org switcher: the tenant selector under the brand */
+.org-switcher { position: relative; margin: 0 0 14px; }
+.org-trigger {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 7px 9px; border-radius: var(--r-md);
+  background: var(--bg-2); border: 1px solid var(--border);
+  color: var(--text); font-size: 12.5px; font-weight: 600; cursor: pointer;
+  font-family: var(--display); letter-spacing: -0.01em; text-align: left;
+}
+.org-trigger:hover { border-color: var(--border-hi); background: var(--bg-3); }
+.org-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.org-menu {
+  position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 70;
+  background: var(--bg-2); border: 1px solid var(--border-hi);
+  border-radius: var(--r-md); padding: 5px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+}
+.org-menu-label {
+  font-family: var(--mono); font-size: 9.5px; text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--faint); padding: 5px 8px 4px;
+}
+.org-item {
+  display: flex; align-items: center; gap: 7px; width: 100%;
+  padding: 7px 8px; border: none; border-radius: var(--r-sm);
+  background: none; color: var(--text); font-size: 12.5px; cursor: pointer;
+  text-align: left; text-decoration: none;
+}
+.org-item:hover { background: var(--bg-3); }
+.org-menu-sep { height: 1px; background: var(--border); margin: 5px 3px; }
+@media (max-width: 900px) {
+  .org-switcher { display: none; }
+}
+
 .nav-section {
   font-family: var(--mono); font-size: 9.5px; text-transform: uppercase;
   letter-spacing: 0.14em; color: var(--faint); padding: 16px 10px 6px;
@@ -578,7 +611,7 @@ a:hover { text-decoration: underline; text-underline-offset: 3px; }
 }
 .infotip.wide .infotip-bubble { width: 320px; }
 .infotip:hover .infotip-bubble, .infotip:focus-visible .infotip-bubble,
-.infotip:focus .infotip-bubble { opacity: 1; visibility: visible; }
+.infotip:focus .infotip-bubble, .infotip.open .infotip-bubble { opacity: 1; visibility: visible; }
 /* bubbles near the left edge shouldn't clip offscreen */
 .field .infotip-bubble { left: 0; transform: none; }
 

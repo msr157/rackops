@@ -269,14 +269,14 @@ func (a *API) handleNetworkDiagnosis(w http.ResponseWriter, r *http.Request) {
 		Reachability string `json:"reachability"`
 	}
 	var out struct {
-		EdgeEnabled  bool       `json:"edgeEnabled"`
-		EdgeStatus   string     `json:"edgeStatus,omitempty"`
-		EdgeNodeID   string     `json:"edgeNodeId,omitempty"`
-		HasDirectIP  bool       `json:"hasDirectIp"`  // some node IS publicly addressed
-		LanOnly      bool       `json:"lanOnly"`      // no node has a confirmed public path
-		Nodes        []nodeDiag `json:"nodes"`
-		JoinCommand  string     `json:"joinCommand"`
-		MeshEnabled  bool       `json:"meshEnabled"`
+		EdgeEnabled bool       `json:"edgeEnabled"`
+		EdgeStatus  string     `json:"edgeStatus,omitempty"`
+		EdgeNodeID  string     `json:"edgeNodeId,omitempty"`
+		HasDirectIP bool       `json:"hasDirectIp"` // some node IS publicly addressed
+		LanOnly     bool       `json:"lanOnly"`     // no node has a confirmed public path
+		Nodes       []nodeDiag `json:"nodes"`
+		JoinCommand string     `json:"joinCommand"`
+		MeshEnabled bool       `json:"meshEnabled"`
 	}
 	a.Store.View(func() {
 		out.EdgeEnabled = a.Store.Ingress.Enabled

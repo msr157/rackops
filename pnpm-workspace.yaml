@@ -2,6 +2,7 @@ packages:
   - "apps/website"
   - "apps/rackops-lite/dashboard"
   - "packages/*"
+  - "internal-apps/*"
+  - "internal-apps/*/dashboard"
   # Future workspaces — uncomment as they gain a package.json:
   # - "apps/rackops-enterprise/dashboard"
-  # - "internal-apps/*"

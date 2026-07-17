@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { HardDrive } from 'lucide-react';
 import { api } from '../api';
-import { Modal, CopyField } from './ui';
+import { Modal, CopyField, InfoTip } from './ui';
 
 // AddMachineModal shows the one-line join command. The machine appears in
 // the fleet on its own within seconds of running it.
@@ -18,6 +18,11 @@ export function AddMachineModal({ onClose }: { onClose: () => void }) {
         Copy the <code className="mono">rackops</code> binary to the new machine, then run this
         command on it. The machine joins the rack within seconds and its hardware is
         discovered automatically.
+        <InfoTip wide>
+          The command carries a join token (which authorizes the machine) and your organization,
+          so the new machine lands in the right place. The agent reports telemetry every 2 seconds
+          and receives work over the same connection.
+        </InfoTip>
       </p>
       <CopyField text={command} />
       <p className="faint" style={{ marginTop: 14, lineHeight: 1.6 }}>

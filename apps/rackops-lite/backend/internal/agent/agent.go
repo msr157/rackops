@@ -5,6 +5,7 @@ package agent
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -26,6 +27,7 @@ type Config struct {
 	ServerURL string // control plane base URL
 	Token     string // join token
 	Name      string // node display name (default: hostname)
+	OrgID     string // organization to join (empty: server's default org)
 	DataDir   string // where node identity is stored
 	Interval  time.Duration
 	Version   string
@@ -47,6 +49,16 @@ type Agent struct {
 	// hourly). Guarded by publicIPMu; "" until first detection completes.
 	publicIP   string
 	publicIPMu sync.Mutex
+	// follows tracks live `logs -f` streams by stream ID so a logs-stop task
+	// (or shutdown) can cancel them. Guarded by followMu.
+	follows  map[string]*follower
+	followMu sync.Mutex
+}
+
+// follower is one live `logs -f` tail. Stored by pointer so a goroutine can
+// remove only its own registration even if a newer follower took the stream ID.
+type follower struct {
+	cancel context.CancelFunc
 }
 
 // New creates an agent, loading or generating a persistent node identity.
@@ -91,6 +103,7 @@ func New(cfg Config) (*Agent, error) {
 		runtime:      rt,
 		client:       &http.Client{Timeout: 30 * time.Second},
 		servicePorts: map[string]int{},
+		follows:      map[string]*follower{},
 	}
 	if err := ag.initMeshKeys(); err != nil {
 		log.Printf("agent: mesh keys: %v (mesh disabled)", err)
@@ -98,9 +111,13 @@ func New(cfg Config) (*Agent, error) {
 	return ag, nil
 }
 
-// Run starts the report/execute loop; blocks forever.
-func (a *Agent) Run() {
+// Run starts the report/execute loop, blocking until ctx is cancelled. On
+// cancellation it tears down the mesh interface and relay listeners so a
+// restart (or the host's shutdown) doesn't leak the WireGuard device or ports.
+func (a *Agent) Run(ctx context.Context) {
 	log.Printf("agent: node %s (%s) reporting to %s every %s", a.cfg.Name, a.nodeID, a.cfg.ServerURL, a.cfg.Interval)
+	defer a.closeMesh()
+	defer a.closeFollows()
 	hw := a.collector.Hardware()
 	lastHW := time.Now()
 
@@ -112,7 +129,11 @@ func (a *Agent) Run() {
 			a.publicIPMu.Lock()
 			a.publicIP = ip
 			a.publicIPMu.Unlock()
-			time.Sleep(time.Hour)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(time.Hour):
+			}
 		}
 	}()
 
@@ -130,6 +151,7 @@ func (a *Agent) Run() {
 		report := types.AgentReport{
 			NodeID:      a.nodeID,
 			Name:        a.cfg.Name,
+			OrgID:       a.cfg.OrgID,
 			Hardware:    hw,
 			Metrics:     a.collector.Metrics(),
 			Host:        host,
@@ -146,7 +168,9 @@ func (a *Agent) Run() {
 		resp, err := a.push(report)
 		if err != nil {
 			log.Printf("agent: push failed: %v (retrying)", err)
-			time.Sleep(a.cfg.Interval)
+			if !sleepCtx(ctx, a.cfg.Interval) {
+				return
+			}
 			continue
 		}
 		a.results = nil // delivered
@@ -163,10 +187,29 @@ func (a *Agent) Run() {
 		a.syncMesh(resp.Mesh, report.Containers, ports)
 
 		for _, task := range resp.Tasks {
-			res := a.execute(task)
-			a.results = append(a.results, res)
+			res := a.execute(ctx, task)
+			// Follow tasks stream out-of-band and have no immediate result to
+			// report back; only enqueue results that carry output.
+			if res != nil {
+				a.results = append(a.results, *res)
+			}
 		}
-		time.Sleep(a.cfg.Interval)
+		if !sleepCtx(ctx, a.cfg.Interval) {
+			return
+		}
+	}
+}
+
+// sleepCtx waits for d or until ctx is cancelled. It returns false if the
+// context was cancelled (caller should stop).
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
 	}
 }
 
@@ -197,30 +240,48 @@ func (a *Agent) push(rep types.AgentReport) (*types.AgentResponse, error) {
 	return &out, nil
 }
 
-// execute runs one task and reports the outcome.
-func (a *Agent) execute(task types.AgentTask) types.TaskResult {
+// execute runs one task and returns its outcome, or nil for tasks (log
+// follows) whose output streams out-of-band and has no immediate result.
+func (a *Agent) execute(ctx context.Context, task types.AgentTask) *types.TaskResult {
 	log.Printf("agent: executing task %s (%s) for service %s", task.ID, task.Kind, task.ServiceID)
 	res := types.TaskResult{TaskID: task.ID, ServiceID: task.ServiceID}
+	var p DeployPayload
+	if task.Payload != "" {
+		if err := json.Unmarshal([]byte(task.Payload), &p); err != nil {
+			res.Log = "bad payload: " + err.Error()
+			return &res
+		}
+	}
+
+	// Log-follow/stop don't need a container runtime check up front.
+	switch task.Kind {
+	case types.TaskLogsFollow:
+		a.startFollow(ctx, p)
+		return nil
+	case types.TaskLogsStop:
+		a.stopFollow(p.StreamID)
+		return nil
+	}
+
 	if a.runtime == nil {
 		res.Log = "no container runtime available on this node"
-		return res
-	}
-	var p DeployPayload
-	if err := json.Unmarshal([]byte(task.Payload), &p); err != nil {
-		res.Log = "bad payload: " + err.Error()
-		return res
+		return &res
 	}
 
 	switch task.Kind {
 	case types.TaskDeploy:
-		cid, hostPort, logOut, err := a.runtime.Deploy(p)
-		res.Log = logOut
+		// Stream build/pull/run output live (keyed by the deployment/task ID)
+		// while still accumulating the full log for the deployment record.
+		sink := a.newLogSink(ctx, task.ID, p.ServiceID, "deploy")
+		cid, hostPort, _, err := a.runtime.Deploy(p, sink)
+		if err != nil {
+			sink.WriteString("\nERROR: " + err.Error() + "\n")
+		}
+		res.Log = sink.Close()
 		res.ContainerID = cid
 		res.HostPort = hostPort
 		res.OK = err == nil
-		if err != nil {
-			res.Log += "\nERROR: " + err.Error()
-		} else if hostPort > 0 {
+		if err == nil && hostPort > 0 {
 			a.servicePorts[p.ServiceID] = hostPort
 		}
 	case types.TaskStop:
@@ -264,7 +325,7 @@ func (a *Agent) execute(task types.AgentTask) types.TaskResult {
 	default:
 		res.Log = "unknown task kind: " + string(task.Kind)
 	}
-	return res
+	return &res
 }
 
 // quickTunnelName is the cloudflared container name for a service's tunnel.
@@ -326,6 +387,7 @@ type DeployPayload struct {
 	ContainerID   string         `json:"containerId,omitempty"`
 	Since         string         `json:"since,omitempty"`
 	Path          string         `json:"path,omitempty"`
+	StreamID      string         `json:"streamId,omitempty"`
 }
 
 func containerName(p DeployPayload) string {

@@ -1,16 +1,16 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import {
   ArrowLeft, Box, Cloud, Globe, History, KeyRound, Play, Plus, RotateCw, Save, ScrollText,
   Square, Trash2, TriangleAlert, Rocket, Folder, FolderOpen, Zap, Settings as SettingsIcon,
   ExternalLink, X,
 } from 'lucide-react';
-import { api } from '../api';
-import type { Service, ServiceUpdate, Mount, EnvVar, Deployment, Domain, DirEntry, PlacementScore } from '../api';
+import { api, subscribeLogChunks } from '../api';
+import type { Service, ServiceUpdate, Mount, EnvVar, Deployment, Domain, DirEntry, PlacementScore, LogChunk } from '../api';
 import { useData } from '../data';
 import { useToast, cleanError } from '../components/toast';
 import { useConfirm } from '../components/confirm';
-import { StatusBadge, Led, Spinner, UrlChip, publicUrls, dnsLabel, timeAgo } from '../components/ui';
+import { StatusBadge, Led, Spinner, UrlChip, publicUrls, dnsLabel, timeAgo, InfoTip } from '../components/ui';
 
 type Tab = 'overview' | 'networking' | 'logs' | 'deployments' | 'settings';
 
@@ -58,8 +58,12 @@ export function AppDetail() {
   // 'delete' | 'save') is in flight — all action buttons disable, the active
   // one spins. Empty string = idle.
   const [busyAction, setBusyAction] = useState('');
-  const busy = busyAction !== '';
   const [notFound, setNotFound] = useState(false);
+  // Actions stay locked through the whole deploy window: from the moment a
+  // request is accepted until the machine reports the container running (or
+  // failed). svc.status refreshes on a 4s poll, so the lock releases itself.
+  const working = svc?.status === 'building' || svc?.status === 'pending';
+  const busy = busyAction !== '' || working;
 
   const load = useCallback(() => {
     api.service(id).then((s) => {
@@ -324,7 +328,15 @@ function NetworkingTab({ svc, draft, setDraft, reload }: {
 
       {svc.port > 0 && (
         <div className="card" style={{ marginBottom: 14 }}>
-          <div className="eyebrow" style={{ marginBottom: 12 }}>Make it public</div>
+          <div className="eyebrow" style={{ marginBottom: 12 }}>
+            Make it public
+            <InfoTip wide>
+              Three ways out to the internet: an instant nip.io URL through your own edge proxy
+              (needs the edge running on the Network page), a temporary Cloudflare tunnel that
+              works behind any router (the URL changes on restart — best for demos), or your own
+              domain (permanent, needs one DNS record — RackOps shows you exactly which).
+            </InfoTip>
+          </div>
           <div className="stack" style={{ gap: 10 }}>
 
             {/* Option 1: instant URL */}
@@ -401,7 +413,15 @@ function NetworkingTab({ svc, draft, setDraft, reload }: {
 
       {/* Ports */}
       <div className="card">
-        <div className="eyebrow" style={{ marginBottom: 12 }}>Ports</div>
+        <div className="eyebrow" style={{ marginBottom: 12 }}>
+          Ports
+          <InfoTip wide>
+            Two different ports: the one your app listens on <em>inside</em> its container, and
+            the host port it&rsquo;s published on (what URLs and routing use). If your preferred
+            host port is taken, RackOps bumps to the next free one. Changes apply on
+            Save &amp; redeploy.
+          </InfoTip>
+        </div>
         <div className="grid-3">
           <div className="field" style={{ marginBottom: 0 }}>
             <label>App listens on (container)</label>
@@ -429,54 +449,112 @@ function NetworkingTab({ svc, draft, setDraft, reload }: {
 
 /* ---------- Logs ---------- */
 
+// A short random stream id correlating our follow request with its SSE chunks.
+function newStreamId() {
+  return Math.random().toString(36).slice(2) + Date.now().toString(36);
+}
+
 function LogsTab({ svc }: { svc: Service }) {
   const toast = useToast();
   const [logs, setLogs] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [live, setLive] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [follow, setFollow] = useState(true);
+  const termRef = useRef<HTMLDivElement>(null);
+  const pinnedRef = useRef(true); // keep scrolling to the bottom unless the user scrolled up
 
-  const fetchLogs = useCallback(async (silent = false) => {
-    if (!silent) setLoading(true);
-    try { setLogs((await api.serviceLogs(svc.id)).logs || '(no output yet)'); }
-    catch (e) { setLogs(cleanError(e)); }
-    setLoading(false);
-  }, [svc.id]);
-
-  useEffect(() => { fetchLogs(); }, [fetchLogs]);
-  // Follow mode: live tail every 5s while the tab is open.
+  // Live tail: start a server-side `docker logs -f` follow and append chunks as
+  // they arrive over SSE. The agent caps a follow at 15 min, so we re-arm well
+  // before that to keep a long-open tab streaming.
   useEffect(() => {
     if (!follow) return;
-    const t = setInterval(() => fetchLogs(true), 5000);
-    return () => clearInterval(t);
-  }, [follow, fetchLogs]);
+    let stopped = false;
+    let streamId = '';
+    let rearm: ReturnType<typeof setTimeout> | undefined;
+
+    const unsub = subscribeLogChunks(
+      (c: LogChunk) => c.stream === streamId,
+      (c: LogChunk) => {
+        if (c.text) setLogs((prev) => (prev + c.text).slice(-200_000));
+        if (c.end) setLive(false);
+      },
+    );
+
+    const arm = async () => {
+      if (stopped) return;
+      streamId = newStreamId();
+      try {
+        await api.startLogStream(svc.id, streamId);
+        if (!stopped) setLive(true);
+      } catch (e) {
+        if (!stopped) { setLogs((p) => p + `\n(couldn't start live logs: ${cleanError(e)})\n`); setLive(false); }
+      }
+      rearm = setTimeout(arm, 10 * 60 * 1000);
+    };
+    setLogs('');
+    arm();
+
+    return () => {
+      stopped = true;
+      if (rearm) clearTimeout(rearm);
+      unsub();
+      if (streamId) api.stopLogStream(svc.id, streamId).catch(() => {});
+    };
+  }, [follow, svc.id]);
+
+  // One-shot fetch when not following (snapshot of recent logs).
+  const fetchOnce = useCallback(async () => {
+    try { setLogs((await api.serviceLogs(svc.id)).logs || '(no output yet)'); }
+    catch (e) { setLogs(cleanError(e)); }
+  }, [svc.id]);
+  useEffect(() => { if (!follow) fetchOnce(); }, [follow, fetchOnce]);
+
+  // Auto-scroll to the newest line while pinned to the bottom.
+  useEffect(() => {
+    const el = termRef.current;
+    if (el && pinnedRef.current) el.scrollTop = el.scrollHeight;
+  }, [logs]);
+
+  const onScroll = () => {
+    const el = termRef.current;
+    if (!el) return;
+    pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+  };
 
   return (
     <div className="card">
       <div className="row spread" style={{ marginBottom: 10 }}>
         <div className="row">
           <strong>Runtime logs</strong>
-          {follow && <span className="badge amber">following</span>}
+          <InfoTip wide>
+            Live tail streams new output as it happens (like <code>docker logs -f</code>).
+            Untick it for a one-shot snapshot. &ldquo;Clear old&rdquo; only hides output before
+            this moment in the dashboard — nothing is deleted from the machine.
+          </InfoTip>
+          {follow && live && <span className="badge amber">live</span>}
+          {follow && !live && <span className="badge">connecting…</span>}
         </div>
         <div className="row">
           <label className="check">
-            <input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> auto-refresh
+            <input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> live tail
           </label>
-          <button className="btn sm" disabled={loading} onClick={() => fetchLogs()}>
-            {loading ? <Spinner size={12} /> : <RotateCw size={12} />} Refresh
-          </button>
+          {!follow && (
+            <button className="btn sm" onClick={() => fetchOnce()}>
+              <RotateCw size={12} /> Refresh
+            </button>
+          )}
           <button className="btn sm danger" disabled={clearing} onClick={async () => {
             setClearing(true);
             await api.clearServiceLogs(svc.id).catch((e) => toast.err(cleanError(e)));
-            await fetchLogs();
+            if (follow) { setFollow(false); setTimeout(() => setFollow(true), 50); } else { await fetchOnce(); }
             setClearing(false);
           }}>
             {clearing ? <Spinner size={12} /> : <Trash2 size={12} />} Clear old
           </button>
         </div>
       </div>
-      <div className="terminal" style={{ maxHeight: 520 }}>
-        {loading && !logs ? 'fetching from the machine…' : logs}
+      <div className="terminal" ref={termRef} onScroll={onScroll} style={{ maxHeight: 520 }}>
+        {logs || (follow ? 'streaming from the machine…' : 'fetching from the machine…')}
       </div>
     </div>
   );
@@ -487,34 +565,59 @@ function LogsTab({ svc }: { svc: Service }) {
 function DeploymentsTab({ serviceId }: { serviceId: string }) {
   const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [open, setOpen] = useState('');
+  // Live build output per deployment id, streamed while a deploy is in flight.
+  const [liveLogs, setLiveLogs] = useState<Record<string, string>>({});
 
   const fetch = useCallback(() => {
     api.serviceDeployments(serviceId).then((d) => setDeployments(d ?? [])).catch(() => {});
   }, [serviceId]);
   useEffect(fetch, [fetch]);
 
+  // Append deploy build output as it streams (stream id == deployment id).
+  useEffect(() => {
+    const unsub = subscribeLogChunks(
+      (c: LogChunk) => c.kind === 'deploy' && c.serviceId === serviceId,
+      (c: LogChunk) => {
+        if (c.text) setLiveLogs((prev) => ({ ...prev, [c.stream]: (prev[c.stream] || '') + c.text }));
+        if (c.end) fetch(); // pull the finalized record + status
+      },
+    );
+    return unsub;
+  }, [serviceId, fetch]);
+
   return (
     <div className="card">
       <div className="row spread" style={{ marginBottom: 10 }}>
         <strong>Deployment history</strong>
+        <InfoTip>
+          Every build and deploy of this app, newest first, with its full output. A deploy in
+          progress streams its log live — click any row to expand it.
+        </InfoTip>
         <button className="btn sm" onClick={fetch}><RotateCw size={12} /></button>
       </div>
-      {deployments.map((d) => (
-        <div key={d.id} style={{ borderTop: '1px solid var(--border)', padding: '9px 0' }}>
-          <div className="row spread" style={{ cursor: 'pointer' }} onClick={() => setOpen(open === d.id ? '' : d.id)}>
-            <div className="row">
-              <Led status={d.status} />
-              <span className="mono">v{d.version}</span>
-              <span className="tag">{d.trigger}</span>
-              <span className="dim">{d.status}</span>
+      {deployments.map((d) => {
+        const live = liveLogs[d.id];
+        const building = d.status === 'building' || d.status === 'pending';
+        return (
+          <div key={d.id} style={{ borderTop: '1px solid var(--border)', padding: '9px 0' }}>
+            <div className="row spread" style={{ cursor: 'pointer' }} onClick={() => setOpen(open === d.id ? '' : d.id)}>
+              <div className="row">
+                <Led status={d.status} />
+                <span className="mono">v{d.version}</span>
+                <span className="tag">{d.trigger}</span>
+                <span className="dim">{d.status}</span>
+                {building && live && <span className="badge amber">live</span>}
+              </div>
+              <span className="faint">{new Date(d.startedAt).toLocaleString()} · {(d.durationMs / 1000).toFixed(1)}s</span>
             </div>
-            <span className="faint">{new Date(d.startedAt).toLocaleString()} · {(d.durationMs / 1000).toFixed(1)}s</span>
+            {(open === d.id || building) && (
+              <div className="terminal" style={{ marginTop: 8, maxHeight: 420 }}>
+                {live || d.log || (building ? 'waiting for the machine to pick up the job…' : '(no build log)')}
+              </div>
+            )}
           </div>
-          {open === d.id && (
-            <div className="terminal" style={{ marginTop: 8, maxHeight: 420 }}>{d.log || '(no build log)'}</div>
-          )}
-        </div>
-      ))}
+        );
+      })}
       {deployments.length === 0 && <div className="faint">No deployments recorded yet.</div>}
     </div>
   );
@@ -559,7 +662,13 @@ function SettingsTab({ svc, draft, setDraft, nodes, busy, onDelete }: {
       </div>
 
       <div className="card">
-        <div className="eyebrow" style={{ marginBottom: 12 }}>Environment variables</div>
+        <div className="eyebrow" style={{ marginBottom: 12 }}>
+          Environment variables
+          <InfoTip wide>
+            Passed to the container at start. The key icon marks a value as a secret — masked
+            here and redacted from API and AI-tool output. Changes apply on Save &amp; redeploy.
+          </InfoTip>
+        </div>
         {draft.env.map((v, i) => (
           <div className="row" key={i} style={{ marginBottom: 8 }}>
             <input className="input mono" placeholder="KEY" value={v.key}
@@ -640,7 +749,14 @@ function SettingsTab({ svc, draft, setDraft, nodes, busy, onDelete }: {
       </div>
 
       <div className="card">
-        <div className="eyebrow" style={{ marginBottom: 12 }}>Resources & machine</div>
+        <div className="eyebrow" style={{ marginBottom: 12 }}>
+          Resources &amp; machine
+          <InfoTip wide>
+            Limits cap what the container may use — 0 means unlimited. Choosing a different
+            machine migrates the app on Save &amp; redeploy: the container moves, but data in
+            managed volumes stays on the old machine&rsquo;s disk.
+          </InfoTip>
+        </div>
         <div className="grid-3">
           <div className="field"><label>Memory limit (MB, 0 = none)</label>
             <input className="input mono" value={draft.memLimitMb}

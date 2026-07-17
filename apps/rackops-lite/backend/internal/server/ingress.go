@@ -35,16 +35,30 @@ func (a *API) userEmail(r *http.Request) string {
 // ---- Domains CRUD ----
 
 func (a *API) handleListDomains(w http.ResponseWriter, r *http.Request) {
+	org, _ := a.requireOrg(w, r)
+	if org == nil {
+		return
+	}
 	var out []*types.Domain
 	a.Store.View(func() {
 		for _, d := range a.Store.Domains {
-			out = append(out, d)
+			if d.OrgID == org.ID {
+				out = append(out, d)
+			}
 		}
 	})
 	writeJSON(w, out)
 }
 
 func (a *API) handleCreateDomain(w http.ResponseWriter, r *http.Request) {
+	org, member := a.requireOrg(w, r)
+	if org == nil {
+		return
+	}
+	if !orgCan(member, func(p types.OrgPermissions) bool { return p.ManageDomains }) {
+		http.Error(w, "you don't have permission to manage domains in this organization", http.StatusForbidden)
+		return
+	}
 	var req struct {
 		Name string `json:"name"`
 	}
@@ -62,7 +76,8 @@ func (a *API) handleCreateDomain(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "wildcard needs a base domain, e.g. *.example.com", http.StatusBadRequest)
 		return
 	}
-	// Reject duplicates.
+	// Reject duplicates install-wide: one hostname routes to one org's edge
+	// config, whichever org added it first.
 	var dup bool
 	a.Store.View(func() {
 		for _, d := range a.Store.Domains {
@@ -76,7 +91,7 @@ func (a *API) handleCreateDomain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d := &types.Domain{
-		ID: NewID(), Name: name, Wildcard: wildcard,
+		ID: NewID(), Name: name, Wildcard: wildcard, OrgID: org.ID,
 		Status: types.DomainPending, CreatedBy: a.userEmail(r), CreatedAt: time.Now(),
 	}
 	a.Store.Mutate(func() { a.Store.Domains[d.ID] = d })
@@ -87,12 +102,24 @@ func (a *API) handleCreateDomain(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) handleDeleteDomain(w http.ResponseWriter, r *http.Request) {
+	org, member := a.requireOrg(w, r)
+	if org == nil {
+		return
+	}
+	if !orgCan(member, func(p types.OrgPermissions) bool { return p.ManageDomains }) {
+		http.Error(w, "you don't have permission to manage domains in this organization", http.StatusForbidden)
+		return
+	}
 	id := r.PathValue("id")
+	notFound := false
 	var name string
 	a.Store.Mutate(func() {
-		if d := a.Store.Domains[id]; d != nil {
-			name = d.Name
+		d := a.Store.Domains[id]
+		if d == nil || d.OrgID != org.ID {
+			notFound = true
+			return
 		}
+		name = d.Name
 		delete(a.Store.Domains, id)
 		// Detach any service still pointing at this domain so we don't leave
 		// dangling routers in the Traefik config.
@@ -105,6 +132,10 @@ func (a *API) handleDeleteDomain(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	})
+	if notFound {
+		http.Error(w, "domain not found", http.StatusNotFound)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

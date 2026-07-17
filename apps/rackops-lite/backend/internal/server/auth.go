@@ -10,8 +10,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -63,25 +61,6 @@ func parseJWT(secret []byte, token string) (*jwtClaims, error) {
 	return &c, nil
 }
 
-// DeriveJWTSecret derives the signing secret from the cluster join token so
-// every server in an HA cluster agrees on it — sessions survive leader
-// failover — and it stays stable across restarts. Falls back to a persisted
-// random secret only if no join token is available.
-func DeriveJWTSecret(dataDir, joinToken string) []byte {
-	if joinToken != "" {
-		sum := sha256.Sum256([]byte("rackops-jwt-v1:" + joinToken))
-		return sum[:]
-	}
-	path := filepath.Join(dataDir, "jwt-secret")
-	if data, err := os.ReadFile(path); err == nil && len(data) >= 32 {
-		return data
-	}
-	b := make([]byte, 32)
-	_, _ = rand.Read(b)
-	_ = os.WriteFile(path, b, 0o600)
-	return b
-}
-
 // ---- Handlers ----
 
 // handleAuthStatus tells the UI whether setup is needed.
@@ -130,7 +109,7 @@ func (a *API) handleSignup(w http.ResponseWriter, r *http.Request) {
 		claims := claimsFrom(r)
 		if claims == nil {
 			if tok := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "); tok != "" {
-				claims, _ = parseJWT(a.JWTSecret, tok)
+				claims, _ = parseJWT(a.Store.SessionSecret(), tok)
 			}
 		}
 		if claims == nil || (claims.Role != string(types.RoleOwner) && claims.Role != string(types.RoleAdmin)) {
@@ -154,10 +133,34 @@ func (a *API) handleSignup(w http.ResponseWriter, r *http.Request) {
 		ID: NewID(), Email: req.Email, FullName: strings.TrimSpace(req.FullName),
 		PasswordHash: string(hash), Role: role, CreatedAt: time.Now(),
 	}
-	a.Store.Mutate(func() { a.Store.Users[u.ID] = u })
+	a.Store.Mutate(func() {
+		a.Store.Users[u.ID] = u
+		// Enroll into the default org so the account has a seat somewhere
+		// (invitation signups enroll into their invited org instead — see
+		// handleAcceptInvitation). Platform owner/admin hold the org.
+		var def *types.Organization
+		for _, o := range a.Store.Orgs {
+			if def == nil || o.CreatedAt.Before(def.CreatedAt) {
+				def = o
+			}
+		}
+		if def != nil && def.Member(u.ID) == nil {
+			orgRole := types.OrgRoleMember
+			switch role {
+			case types.RoleOwner:
+				orgRole = types.OrgRoleOwner
+			case types.RoleAdmin:
+				orgRole = types.OrgRoleAdmin
+			}
+			def.Members = append(def.Members, types.OrgMember{
+				UserID: u.ID, Role: orgRole, AddedAt: time.Now(),
+				Permissions: defaultMemberPermissions(),
+			})
+		}
+	})
 	a.Store.AddEvent("auth", "User created: "+u.Email+" ("+string(role)+")", "", "")
 
-	token := signJWT(a.JWTSecret, jwtClaims{Sub: u.ID, Role: string(u.Role), Exp: time.Now().Add(7 * 24 * time.Hour).Unix()})
+	token := signJWT(a.Store.SessionSecret(), jwtClaims{Sub: u.ID, Role: string(u.Role), Exp: time.Now().Add(7 * 24 * time.Hour).Unix()})
 	writeJSON(w, map[string]any{"token": token, "user": u.Sanitized()})
 }
 
@@ -184,12 +187,21 @@ func (a *API) handleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid credentials", http.StatusUnauthorized)
 		return
 	}
-	token := signJWT(a.JWTSecret, jwtClaims{Sub: user.ID, Role: string(user.Role), Exp: time.Now().Add(7 * 24 * time.Hour).Unix()})
+	token := signJWT(a.Store.SessionSecret(), jwtClaims{Sub: user.ID, Role: string(user.Role), Exp: time.Now().Add(7 * 24 * time.Hour).Unix()})
+	// Remember where operators actually reach the dashboard — reset links are
+	// built on this (see dashboardURL).
+	a.recordDashboardURL(r)
 	writeJSON(w, map[string]any{"token": token, "user": user.Sanitized()})
 }
 
-// handleListUsers returns all accounts (admin+).
+// handleListUsers returns all accounts (admin+ only: the account list is a
+// reconnaissance goldmine and none of a member's business).
 func (a *API) handleListUsers(w http.ResponseWriter, r *http.Request) {
+	claims := claimsFrom(r)
+	if claims == nil || (claims.Role != string(types.RoleOwner) && claims.Role != string(types.RoleAdmin)) {
+		http.Error(w, "admin access required", http.StatusForbidden)
+		return
+	}
 	var out []*types.User
 	a.Store.View(func() {
 		for _, u := range a.Store.Users {
@@ -203,19 +215,39 @@ func (a *API) handleListUsers(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name string `json:"name"`
+		Name      string `json:"name"`
+		ExpiresIn string `json:"expiresIn"` // "", "7d", "30d", "90d", "1y"
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	claims := claimsFrom(r)
+	if claims == nil {
+		// Keys act as their creating user; a key created by nobody would be
+		// unattributable power. (Also blocks keys minting further keys.)
+		http.Error(w, "sign in with your account to create API keys", http.StatusForbidden)
+		return
+	}
+	var expires time.Time
+	switch req.ExpiresIn {
+	case "", "never":
+	case "7d":
+		expires = time.Now().AddDate(0, 0, 7)
+	case "30d":
+		expires = time.Now().AddDate(0, 0, 30)
+	case "90d":
+		expires = time.Now().AddDate(0, 0, 90)
+	case "1y":
+		expires = time.Now().AddDate(1, 0, 0)
+	default:
+		http.Error(w, "expiresIn must be one of: never, 7d, 30d, 90d, 1y", http.StatusBadRequest)
+		return
+	}
 	raw := make([]byte, 24)
 	_, _ = rand.Read(raw)
 	secret := "rk_" + hex.EncodeToString(raw)
 	sum := sha256.Sum256([]byte(secret))
 	t := &types.APIToken{
-		ID: NewID(), Name: req.Name, TokenHash: hex.EncodeToString(sum[:]), CreatedAt: time.Now(),
-	}
-	if claims != nil {
-		t.UserID = claims.Sub
+		ID: NewID(), Name: req.Name, TokenHash: hex.EncodeToString(sum[:]),
+		CreatedAt: time.Now(), UserID: claims.Sub, ExpiresAt: expires,
 	}
 	a.Store.Mutate(func() {
 		if a.Store.Tokens == nil {
@@ -224,21 +256,48 @@ func (a *API) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 		a.Store.Tokens[t.ID] = t
 	})
 	// The secret is shown exactly once.
-	writeJSON(w, map[string]any{"id": t.ID, "name": t.Name, "token": secret})
+	writeJSON(w, map[string]any{"id": t.ID, "name": t.Name, "token": secret, "expiresAt": t.ExpiresAt})
 }
 
 func (a *API) handleListTokens(w http.ResponseWriter, r *http.Request) {
+	claims := claimsFrom(r)
+	admin := claims != nil && (claims.Role == string(types.RoleOwner) || claims.Role == string(types.RoleAdmin))
 	var out []*types.APIToken
 	a.Store.View(func() {
 		for _, t := range a.Store.Tokens {
-			out = append(out, t.Sanitized())
+			// Everyone sees their own keys; admins see the whole install's.
+			if admin || (claims != nil && t.UserID == claims.Sub) {
+				out = append(out, t.Sanitized())
+			}
 		}
 	})
 	writeJSON(w, out)
 }
 
 func (a *API) handleDeleteToken(w http.ResponseWriter, r *http.Request) {
-	a.Store.Mutate(func() { delete(a.Store.Tokens, r.PathValue("id")) })
+	claims := claimsFrom(r)
+	if claims == nil {
+		http.Error(w, "authentication required", http.StatusUnauthorized)
+		return
+	}
+	admin := claims.Role == string(types.RoleOwner) || claims.Role == string(types.RoleAdmin)
+	id := r.PathValue("id")
+	forbidden := false
+	a.Store.Mutate(func() {
+		t := a.Store.Tokens[id]
+		if t == nil {
+			return // deleting a gone token is fine
+		}
+		if !admin && t.UserID != claims.Sub {
+			forbidden = true
+			return
+		}
+		delete(a.Store.Tokens, id)
+	})
+	if forbidden {
+		http.Error(w, "you can only revoke your own API keys", http.StatusForbidden)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -262,10 +321,15 @@ func (a *API) authMiddleware(next http.Handler) http.Handler {
 		return !strings.HasPrefix(p, "/api/") ||
 			strings.HasPrefix(p, "/api/auth/") ||
 			p == "/api/agent/ingest" ||
+			p == "/api/agent/logstream" ||
 			p == "/api/traefik/config" ||
 			p == "/api/edge-probe" ||
 			p == "/api/cluster" ||
-			p == "/api/cluster/join"
+			p == "/api/cluster/join" ||
+			// The API *description* is public docs; every operation in it
+			// still authenticates individually. Swagger's first fetch happens
+			// before the user clicks Authorize.
+			p == "/api/openapi.json"
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if open(r.URL.Path) {
@@ -282,44 +346,76 @@ func (a *API) authMiddleware(next http.Handler) http.Handler {
 
 		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		if token == "" {
+			token = r.Header.Get("X-Api-Key") // Dokploy-style header, same keys
+		}
+		if token == "" {
 			token = r.URL.Query().Get("token") // SSE can't set headers
 		}
 		if token == "" {
 			http.Error(w, "authentication required", http.StatusUnauthorized)
 			return
 		}
-		// API tokens (rk_...) or JWT.
+
+		var claims *jwtClaims
 		if strings.HasPrefix(token, "rk_") {
-			sum := sha256.Sum256([]byte(token))
-			hash := hex.EncodeToString(sum[:])
-			ok := false
-			a.Store.View(func() {
-				for _, t := range a.Store.Tokens {
-					if t.TokenHash == hash {
-						ok = true
-					}
-				}
-			})
-			if !ok {
-				http.Error(w, "invalid API token", http.StatusUnauthorized)
+			// API keys act as the user who created them — identical RBAC to a
+			// session, never an anonymous super-credential.
+			claims = a.claimsForAPIKey(token)
+			if claims == nil {
+				http.Error(w, "invalid or expired API key", http.StatusUnauthorized)
 				return
 			}
-			next.ServeHTTP(w, r)
-			return
+		} else {
+			var err error
+			claims, err = parseJWT(a.Store.SessionSecret(), token)
+			if err != nil {
+				http.Error(w, "invalid token: "+err.Error(), http.StatusUnauthorized)
+				return
+			}
 		}
-		claims, err := parseJWT(a.JWTSecret, token)
-		if err != nil {
-			http.Error(w, "invalid token: "+err.Error(), http.StatusUnauthorized)
-			return
-		}
-		// Coarse RBAC: viewers are read-only.
-		if claims.Role == string(types.RoleViewer) && r.Method != http.MethodGet {
+		// Coarse RBAC: viewers are read-only on fleet state. Managing their
+		// OWN API keys is account-scoped, not a fleet mutation — the token
+		// handlers enforce ownership, and a viewer's key is itself read-only.
+		if claims.Role == string(types.RoleViewer) && r.Method != http.MethodGet &&
+			!strings.HasPrefix(r.URL.Path, "/api/tokens") {
 			http.Error(w, "viewers have read-only access", http.StatusForbidden)
 			return
 		}
-		ctx := contextWithClaims(r, claims)
-		next.ServeHTTP(w, ctx)
+		next.ServeHTTP(w, contextWithClaims(r, claims))
 	})
+}
+
+// claimsForAPIKey resolves an rk_ secret to claims for its owning user.
+// Returns nil for unknown/expired keys and keys whose user no longer exists —
+// deleting an account instantly kills its keys.
+func (a *API) claimsForAPIKey(secret string) *jwtClaims {
+	sum := sha256.Sum256([]byte(secret))
+	hash := hex.EncodeToString(sum[:])
+	var tok *types.APIToken
+	var user *types.User
+	a.Store.View(func() {
+		for _, t := range a.Store.Tokens {
+			if hmac.Equal([]byte(t.TokenHash), []byte(hash)) {
+				tok = t
+				break
+			}
+		}
+		if tok != nil {
+			user = a.Store.Users[tok.UserID]
+		}
+	})
+	if tok == nil || user == nil {
+		return nil
+	}
+	if !tok.ExpiresAt.IsZero() && time.Now().After(tok.ExpiresAt) {
+		return nil
+	}
+	// Throttled last-used stamp: at most one write per minute per key, so
+	// polling clients don't turn every request into a raft proposal.
+	if time.Since(tok.LastUsed) > time.Minute {
+		a.Store.Mutate(func() { tok.LastUsed = time.Now() })
+	}
+	return &jwtClaims{Sub: user.ID, Role: string(user.Role), Exp: time.Now().Add(time.Minute).Unix()}
 }
 
 func contextWithClaims(r *http.Request, c *jwtClaims) *http.Request {

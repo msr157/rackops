@@ -26,8 +26,11 @@ func (a *API) handleAssistant(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctxJSON := a.fleetContext()
-	var s Settings
-	a.Store.View(func() { s = a.Store.Settings })
+	org, _ := a.requireOrg(w, r)
+	if org == nil {
+		return
+	}
+	s := a.Store.SettingsFor(org.ID)
 
 	provider := s.AIProvider
 	if provider == "" || provider == "auto" {
@@ -71,8 +74,11 @@ func (a *API) handleAssistant(w http.ResponseWriter, r *http.Request) {
 // handleAssistantTest sends a trivial prompt through the configured provider
 // so users can validate keys from Settings without a chat round-trip.
 func (a *API) handleAssistantTest(w http.ResponseWriter, r *http.Request) {
-	var s Settings
-	a.Store.View(func() { s = a.Store.Settings })
+	org, _ := a.requireOrg(w, r)
+	if org == nil {
+		return
+	}
+	s := a.Store.SettingsFor(org.ID)
 	provider := s.AIProvider
 	if provider == "" || provider == "auto" {
 		switch {

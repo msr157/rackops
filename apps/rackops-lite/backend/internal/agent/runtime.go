@@ -1,11 +1,15 @@
 package agent
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -172,20 +176,21 @@ func parseMemMB(s string) int64 {
 // Deploy builds (git) or pulls (image) and runs the container for a service.
 // hostPort is the host port the container was actually published on (may differ
 // from the requested one if it was taken); 0 for compose stacks / host-network.
-func (r *Runtime) Deploy(p DeployPayload) (containerID string, hostPort int, logOut string, err error) {
-	var logs strings.Builder
+// Deploy pulls/builds and runs a service, streaming command output into sink as
+// it happens (sink also accumulates the full log for the deployment record).
+func (r *Runtime) Deploy(p DeployPayload, logs *logSink) (containerID string, hostPort int, logOut string, err error) {
 	name := containerName(p)
 
 	// Compose stacks take a separate path (they publish their own ports).
 	if p.ComposeYML != "" {
-		cid, out, e := r.deployCompose(p, &logs)
+		cid, out, e := r.deployCompose(p, logs)
 		return cid, 0, out, e
 	}
 
 	switch {
 	case p.GitRepo != "":
 		// Build an image from the repo, then run it.
-		image, buildErr := r.buildFromGit(p, &logs)
+		image, buildErr := r.buildFromGit(p, logs)
 		if buildErr != nil {
 			return "", 0, logs.String(), buildErr
 		}
@@ -193,11 +198,11 @@ func (r *Runtime) Deploy(p DeployPayload) (containerID string, hostPort int, log
 	case p.Image == "":
 		return "", 0, "", fmt.Errorf("service has neither an image nor a git repo")
 	default:
-		// Pull the image.
+		// Pull the image, streaming progress live.
 		logs.WriteString("$ " + r.Bin + " pull " + p.Image + "\n")
-		out, pullErr := exec.Command(r.Bin, "pull", p.Image).CombinedOutput()
-		logs.Write(out)
-		if pullErr != nil {
+		pull := exec.Command(r.Bin, "pull", p.Image)
+		pull.Stdout, pull.Stderr = logs, logs
+		if pullErr := pull.Run(); pullErr != nil {
 			return "", 0, logs.String(), fmt.Errorf("pull failed: %w", pullErr)
 		}
 	}
@@ -278,11 +283,15 @@ func (r *Runtime) Deploy(p DeployPayload) (containerID string, hostPort int, log
 	}
 
 	logs.WriteString("$ " + r.Bin + " " + strings.Join(args, " ") + "\n")
-	out, err := exec.Command(r.Bin, args...).CombinedOutput()
-	logs.Write(out)
-	if err != nil {
+	// Stream the run output live while also capturing it to parse the ID.
+	var runBuf bytes.Buffer
+	run := exec.Command(r.Bin, args...)
+	run.Stdout = io.MultiWriter(logs, &runBuf)
+	run.Stderr = run.Stdout
+	if err := run.Run(); err != nil {
 		return "", hostPort, logs.String(), fmt.Errorf("run failed: %w", err)
 	}
+	out := runBuf.Bytes()
 	// The container ID is the last non-empty output line (podman-docker's
 	// "Emulate Docker CLI" banner and pull progress may precede it).
 	cid := ""
@@ -371,6 +380,36 @@ func (r *Runtime) LogsSince(container string, tail int, since string) (string, e
 	args = append(args, container)
 	out, err := exec.Command(r.Bin, args...).CombinedOutput()
 	return string(out), err
+}
+
+// FollowLogs streams a container's logs (docker logs -f) into w until ctx is
+// cancelled or the container stops. tail seeds the recent history; since bounds
+// it to output after a UI-level clear.
+func (r *Runtime) FollowLogs(ctx context.Context, container string, tail int, since string, w io.Writer) error {
+	args := []string{"logs", "-f", "--tail", strconv.Itoa(tail)}
+	if since != "" {
+		args = append(args, "--since", since)
+	}
+	args = append(args, container)
+	cmd := exec.CommandContext(ctx, r.Bin, args...)
+	cmd.Stdout, cmd.Stderr = w, w
+	return cmd.Run()
+}
+
+// FollowComposeLogs streams a compose stack's aggregated logs into w until ctx
+// is cancelled.
+func (r *Runtime) FollowComposeLogs(ctx context.Context, p DeployPayload, tail int, since string, w io.Writer) error {
+	home, _ := os.UserHomeDir()
+	dir := filepath.Join(home, ".rackops", "stacks", sanitize(p.Name)+"-"+p.ServiceID)
+	project := "rackops-" + sanitize(p.Name)
+	args := []string{"compose", "-p", project, "logs", "-f", "--tail", strconv.Itoa(tail)}
+	if since != "" {
+		args = append(args, "--since", since)
+	}
+	cmd := exec.CommandContext(ctx, r.Bin, args...)
+	cmd.Dir = dir
+	cmd.Stdout, cmd.Stderr = w, w
+	return cmd.Run()
 }
 
 // mountSpec renders one -v argument for a user mount. Volume mounts with a

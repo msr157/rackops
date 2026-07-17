@@ -23,8 +23,9 @@ type API struct {
 	DashFS fs.FS
 	// JoinToken authorizes agents to register.
 	JoinToken string
-	// JWTSecret signs session tokens.
-	JWTSecret []byte
+	// InstallID anonymously identifies this install to the vendor CRM
+	// (support tickets, reset-email relay). Random UUID, minted once.
+	InstallID string
 	// Cluster is the raft layer (nil = single-server).
 	Cluster *raftstore.Cluster
 	// applyGuard applies replicated state on followers only.
@@ -35,83 +36,29 @@ type API struct {
 func (a *API) Router() http.Handler {
 	mux := http.NewServeMux()
 
-	// ---- Agent protocol ----
-	mux.HandleFunc("POST /api/agent/ingest", a.handleIngest)
+	// Every documented endpoint registers from apiRoutes — the same table
+	// /api/openapi.json is generated from, so code and docs cannot drift.
+	for _, rt := range a.apiRoutes() {
+		mux.HandleFunc(rt.method+" "+rt.path, rt.handler)
+	}
 
-	// ---- Fleet ----
-	mux.HandleFunc("GET /api/nodes", a.handleListNodes)
-	mux.HandleFunc("GET /api/nodes/{id}", a.handleGetNode)
-	mux.HandleFunc("GET /api/overview", a.handleOverview)
-	mux.HandleFunc("GET /api/events", a.handleEvents)
-	mux.HandleFunc("GET /api/alerts", a.handleAlerts)
-	mux.HandleFunc("GET /api/join-command", a.handleJoinCommand)
+	// Non-REST surfaces (streams, proxies, docs UI) register directly.
+	// ---- Live stream (SSE, org-scoped) ----
+	mux.HandleFunc("GET /api/stream", func(w http.ResponseWriter, r *http.Request) {
+		org, _ := a.requireOrg(w, r)
+		if org == nil {
+			return
+		}
+		a.Hub.Serve(w, r, org.ID)
+	})
 
-	// ---- Projects / envs / services ----
-	mux.HandleFunc("GET /api/projects", a.handleListProjects)
-	mux.HandleFunc("POST /api/projects", a.handleCreateProject)
-	mux.HandleFunc("GET /api/projects/{id}/envs", a.handleListEnvs)
-	mux.HandleFunc("POST /api/projects/{id}/envs", a.handleCreateEnv)
-	mux.HandleFunc("GET /api/services", a.handleListServices)
-	mux.HandleFunc("POST /api/services", a.handleCreateService)
-	mux.HandleFunc("GET /api/services/{id}", a.handleGetService)
-	mux.HandleFunc("PATCH /api/services/{id}", a.handleUpdateService)
-	mux.HandleFunc("POST /api/services/{id}/clear-logs", a.handleClearLogs)
-	mux.HandleFunc("POST /api/services/{id}/{action}", a.handleServiceAction)
-	mux.HandleFunc("DELETE /api/services/{id}", a.handleDeleteService)
-	mux.HandleFunc("GET /api/nodes/{id}/fs", a.handleNodeFS)
-
-	// ---- Placement ----
-	mux.HandleFunc("POST /api/placement", a.handlePlacement)
-	mux.HandleFunc("GET /api/suggest-port", a.handleSuggestPort)
-
-	// ---- Templates & logs ----
-	mux.HandleFunc("GET /api/templates", a.handleTemplates)
-	mux.HandleFunc("GET /api/services/{id}/logs", a.handleServiceLogs)
-	mux.HandleFunc("GET /api/services/{id}/deployments", a.handleServiceDeployments)
-
-	// ---- Mesh & relay ----
-	mux.HandleFunc("GET /api/mesh", a.handleMeshStatus)
-	mux.HandleFunc("GET /api/mesh/dial", a.handleMeshDial)
+	// ---- Mesh relay proxy ----
 	mux.HandleFunc("/relay/{id}/{rest...}", a.handleRelay)
 
-	// ---- Domains & ingress ----
-	mux.HandleFunc("GET /api/domains", a.handleListDomains)
-	mux.HandleFunc("POST /api/domains", a.handleCreateDomain)
-	mux.HandleFunc("DELETE /api/domains/{id}", a.handleDeleteDomain)
-	mux.HandleFunc("POST /api/domains/{id}/verify", a.handleVerifyDomain)
-	mux.HandleFunc("GET /api/edge-probe", a.handleEdgeProbe)
-	mux.HandleFunc("GET /api/network/diagnosis", a.handleNetworkDiagnosis)
-	mux.HandleFunc("GET /api/ingress", a.handleGetIngress)
-	mux.HandleFunc("POST /api/ingress", a.handleSetIngress)
-	mux.HandleFunc("GET /api/traefik/config", a.handleTraefikConfig)
-	mux.HandleFunc("POST /api/services/{id}/domain", a.handleSetServiceDomain)
-	mux.HandleFunc("POST /api/services/{id}/expose", a.handleExposeService)
-	mux.HandleFunc("POST /api/services/{id}/quick-tunnel", a.handleStartQuickTunnel)
-	mux.HandleFunc("DELETE /api/services/{id}/quick-tunnel", a.handleStopQuickTunnel)
-
-	// ---- Live stream ----
-	mux.Handle("GET /api/stream", a.Hub)
-
-	// ---- Auth & platform ----
-	mux.HandleFunc("GET /api/auth/status", a.handleAuthStatus)
-	mux.HandleFunc("POST /api/auth/signup", a.handleSignup)
-	mux.HandleFunc("POST /api/auth/login", a.handleLogin)
-	mux.HandleFunc("GET /api/users", a.handleListUsers)
-	mux.HandleFunc("POST /api/tokens", a.handleCreateToken)
-	mux.HandleFunc("GET /api/tokens", a.handleListTokens)
-	mux.HandleFunc("DELETE /api/tokens/{id}", a.handleDeleteToken)
-	mux.HandleFunc("GET /api/settings", a.handleGetSettings)
-	mux.HandleFunc("POST /api/settings", a.handleSetSettings)
-	mux.HandleFunc("POST /api/assistant", a.handleAssistant)
-	mux.HandleFunc("POST /api/assistant/test", a.handleAssistantTest)
-
-	// ---- Updates ----
-	mux.HandleFunc("GET /api/version-check", a.handleVersionCheck)
-	mux.HandleFunc("POST /api/update", a.handleApplyUpdate)
-
-	// ---- Cluster (HA) ----
-	mux.HandleFunc("GET /api/cluster", a.handleClusterStatus)
-	mux.HandleFunc("POST /api/cluster/join", a.handleClusterJoin)
+	// ---- API docs ----
+	mux.HandleFunc("GET /api/openapi.json", a.handleOpenAPI)
+	mux.HandleFunc("GET /swagger", a.handleSwagger)
+	mux.HandleFunc("GET /swagger/{asset}", a.handleSwaggerAsset)
 
 	// ---- Dashboard ----
 	if a.DashFS != nil {
@@ -145,6 +92,22 @@ func (a *API) handleIngest(w http.ResponseWriter, r *http.Request) {
 				JoinedAt: time.Now(),
 			}
 			a.Store.Nodes[rep.NodeID] = node
+		}
+		// Org routing: honor the org the agent was joined with on first sight
+		// (join-command carries --org); everything else lands in the default
+		// org. Membership never changes on later reports — moving a machine
+		// between orgs is an explicit admin action, not an agent restart.
+		if node.OrgID == "" {
+			if rep.OrgID != "" && a.Store.Orgs[rep.OrgID] != nil {
+				node.OrgID = rep.OrgID
+			} else {
+				// Inline default-org lookup (we already hold the store lock).
+				for id, o := range a.Store.Orgs {
+					if node.OrgID == "" || o.CreatedAt.Before(a.Store.Orgs[node.OrgID].CreatedAt) {
+						node.OrgID = id
+					}
+				}
+			}
 		}
 		node.Name = rep.Name
 		node.Status = types.NodeOnline
@@ -215,7 +178,7 @@ func (a *API) handleIngest(w http.ResponseWriter, r *http.Request) {
 
 	if isNew {
 		a.Store.AddEvent("node_joined", fmt.Sprintf("Node %s joined the fleet (%s)", node.Name, node.Hardware.CPUModel), node.ID, "")
-		a.Hub.Broadcast("node_joined", node)
+		a.Hub.BroadcastOrg(node.OrgID, "node_joined", node)
 	}
 
 	// Alerts: broadcast new ones AND resolutions — the UI drops a resolved
@@ -223,15 +186,15 @@ func (a *API) handleIngest(w http.ResponseWriter, r *http.Request) {
 	raised, resolved := a.Store.EvaluateAlerts(node)
 	for _, alert := range raised {
 		a.Store.AddEvent("alert", alert.Message, node.ID, "")
-		a.Hub.Broadcast("alert", alert)
+		a.Hub.BroadcastOrg(node.OrgID, "alert", alert)
 		a.NotifyAlert(alert)
 	}
 	for _, alert := range resolved {
 		a.Store.AddEvent("alert", "Resolved: "+alert.Message, node.ID, "")
-		a.Hub.Broadcast("alert_resolved", alert)
+		a.Hub.BroadcastOrg(node.OrgID, "alert_resolved", alert)
 	}
 
-	a.Hub.Broadcast("node_metrics", node)
+	a.Hub.BroadcastOrg(node.OrgID, "node_metrics", node)
 
 	resp := types.AgentResponse{Tasks: a.Store.DrainTasks(rep.NodeID)}
 	if a.Mesh != nil {
@@ -536,7 +499,13 @@ func (a *API) applyTaskResult(nodeID string, res types.TaskResult) {
 			svc = a.Store.Services[dep.ServiceID]
 			dep.FinishedAt = time.Now()
 			dep.DurationMS = time.Since(dep.StartedAt).Milliseconds()
-			dep.Log = res.Log
+			// The authoritative final log; trim huge build output for storage
+			// (the live stream already showed it all in real time).
+			finalLog := res.Log
+			if len(finalLog) > 20_000 {
+				finalLog = "…(earlier output truncated — it streamed live during the build)…\n" + finalLog[len(finalLog)-20_000:]
+			}
+			dep.Log = finalLog
 			if res.OK {
 				dep.Status = types.StatusRunning
 			} else {
@@ -572,22 +541,53 @@ func (a *API) applyTaskResult(nodeID string, res types.TaskResult) {
 
 // ---- Fleet handlers ----
 
+// serviceInOrg reports whether a service belongs to an org, resolved through
+// its project (services carry no OrgID of their own). Orphaned services
+// (project deleted) fall back to their node's org. Callers hold Store.View.
+func (a *API) serviceInOrg(s *types.Service, orgID string) bool {
+	if p := a.Store.Projects[s.ProjectID]; p != nil {
+		return p.OrgID == orgID
+	}
+	if n := a.Store.Nodes[s.NodeID]; n != nil {
+		return n.OrgID == orgID
+	}
+	return false
+}
+
 func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, a.Store.SortedNodes())
+	org, _ := a.requireOrg(w, r)
+	if org == nil {
+		return
+	}
+	var out []*types.Node
+	for _, n := range a.Store.SortedNodes() {
+		if n.OrgID == org.ID {
+			out = append(out, n)
+		}
+	}
+	writeJSON(w, out)
 }
 
 func (a *API) handleGetNode(w http.ResponseWriter, r *http.Request) {
+	org, _ := a.requireOrg(w, r)
+	if org == nil {
+		return
+	}
 	var node *types.Node
 	a.Store.View(func() { node = a.Store.Nodes[r.PathValue("id")] })
-	if node == nil {
+	if node == nil || node.OrgID != org.ID {
 		http.Error(w, "node not found", http.StatusNotFound)
 		return
 	}
 	writeJSON(w, node)
 }
 
-// handleOverview aggregates cluster-wide KPIs.
+// handleOverview aggregates the active org's KPIs.
 func (a *API) handleOverview(w http.ResponseWriter, r *http.Request) {
+	org, _ := a.requireOrg(w, r)
+	if org == nil {
+		return
+	}
 	type overview struct {
 		NodesOnline   int     `json:"nodesOnline"`
 		NodesTotal    int     `json:"nodesTotal"`
@@ -604,6 +604,9 @@ func (a *API) handleOverview(w http.ResponseWriter, r *http.Request) {
 	a.Store.View(func() {
 		var cpuSum float64
 		for _, n := range a.Store.Nodes {
+			if n.OrgID != org.ID {
+				continue
+			}
 			o.NodesTotal++
 			if n.Status == types.NodeOnline {
 				o.NodesOnline++
@@ -620,13 +623,16 @@ func (a *API) handleOverview(w http.ResponseWriter, r *http.Request) {
 			o.AvgCPUPct = round1(cpuSum / float64(o.NodesOnline))
 		}
 		for _, s := range a.Store.Services {
+			if !a.serviceInOrg(s, org.ID) {
+				continue
+			}
 			o.ServicesTotal++
 			if s.Status == types.StatusRunning {
 				o.ServicesUp++
 			}
 		}
 		for _, al := range a.Store.Alerts {
-			if !al.Resolved {
+			if !al.Resolved && a.alertInOrg(al, org.ID) {
 				o.OpenAlerts++
 			}
 		}
@@ -634,10 +640,49 @@ func (a *API) handleOverview(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, o)
 }
 
+// alertInOrg resolves an alert's org through its node or service. Alerts with
+// neither (install-wide) show everywhere. Callers hold Store.View.
+func (a *API) alertInOrg(al *types.Alert, orgID string) bool {
+	if al.NodeID != "" {
+		if n := a.Store.Nodes[al.NodeID]; n != nil {
+			return n.OrgID == orgID
+		}
+	}
+	if al.ServiceID != "" {
+		if s := a.Store.Services[al.ServiceID]; s != nil {
+			return a.serviceInOrg(s, orgID)
+		}
+	}
+	return true
+}
+
+// eventInOrg mirrors alertInOrg for feed events.
+func (a *API) eventInOrg(ev *types.Event, orgID string) bool {
+	if ev.NodeID != "" {
+		if n := a.Store.Nodes[ev.NodeID]; n != nil {
+			return n.OrgID == orgID
+		}
+	}
+	if ev.ServiceID != "" {
+		if s := a.Store.Services[ev.ServiceID]; s != nil {
+			return a.serviceInOrg(s, orgID)
+		}
+	}
+	return true
+}
+
 func (a *API) handleEvents(w http.ResponseWriter, r *http.Request) {
+	org, _ := a.requireOrg(w, r)
+	if org == nil {
+		return
+	}
 	var evs []*types.Event
 	a.Store.View(func() {
-		evs = append(evs, a.Store.Events...)
+		for _, ev := range a.Store.Events {
+			if a.eventInOrg(ev, org.ID) {
+				evs = append(evs, ev)
+			}
+		}
 	})
 	// newest first
 	for i, j := 0, len(evs)-1; i < j; i, j = i+1, j-1 {
@@ -647,10 +692,14 @@ func (a *API) handleEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) handleAlerts(w http.ResponseWriter, r *http.Request) {
+	org, _ := a.requireOrg(w, r)
+	if org == nil {
+		return
+	}
 	var alerts []*types.Alert
 	a.Store.View(func() {
 		for _, al := range a.Store.Alerts {
-			if !al.Resolved || r.URL.Query().Get("all") == "true" {
+			if (!al.Resolved || r.URL.Query().Get("all") == "true") && a.alertInOrg(al, org.ID) {
 				alerts = append(alerts, al)
 			}
 		}
@@ -659,9 +708,18 @@ func (a *API) handleAlerts(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) handleJoinCommand(w http.ResponseWriter, r *http.Request) {
+	org, member := a.requireOrg(w, r)
+	if org == nil {
+		return
+	}
+	if !orgCan(member, func(p types.OrgPermissions) bool { return p.ManageMachines }) {
+		http.Error(w, "you don't have permission to add machines to this organization", http.StatusForbidden)
+		return
+	}
 	host := r.Host
+	// --org routes the new machine into the active org at first ingest.
 	writeJSON(w, map[string]string{
-		"command": fmt.Sprintf("rackops agent --server http://%s --token %s", host, a.JoinToken),
+		"command": fmt.Sprintf("rackops agent --server http://%s --token %s --org %s", host, a.JoinToken, org.ID),
 		"token":   a.JoinToken,
 	})
 }
@@ -669,16 +727,30 @@ func (a *API) handleJoinCommand(w http.ResponseWriter, r *http.Request) {
 // ---- Project / env / service handlers ----
 
 func (a *API) handleListProjects(w http.ResponseWriter, r *http.Request) {
+	org, member := a.requireOrg(w, r)
+	if org == nil {
+		return
+	}
 	var out []*types.Project
 	a.Store.View(func() {
 		for _, p := range a.Store.Projects {
-			out = append(out, p)
+			if p.OrgID == org.ID && projectVisible(member, p.ID) {
+				out = append(out, p)
+			}
 		}
 	})
 	writeJSON(w, out)
 }
 
 func (a *API) handleCreateProject(w http.ResponseWriter, r *http.Request) {
+	org, member := a.requireOrg(w, r)
+	if org == nil {
+		return
+	}
+	if !orgCan(member, func(p types.OrgPermissions) bool { return p.CreateProjects }) {
+		http.Error(w, "you don't have permission to create projects in this organization", http.StatusForbidden)
+		return
+	}
 	var req struct {
 		Name        string `json:"name"`
 		Description string `json:"description"`
@@ -687,7 +759,7 @@ func (a *API) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "name required", http.StatusBadRequest)
 		return
 	}
-	p := &types.Project{ID: NewID(), Name: req.Name, Description: req.Description, CreatedAt: time.Now()}
+	p := &types.Project{ID: NewID(), Name: req.Name, Description: req.Description, OrgID: org.ID, CreatedBy: member.UserID, CreatedAt: time.Now()}
 	a.Store.Mutate(func() {
 		a.Store.Projects[p.ID] = p
 		for _, env := range []string{"production", "staging", "development"} {
@@ -700,9 +772,17 @@ func (a *API) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) handleListEnvs(w http.ResponseWriter, r *http.Request) {
+	org, member := a.requireOrg(w, r)
+	if org == nil {
+		return
+	}
 	pid := r.PathValue("id")
 	var out []*types.Environment
 	a.Store.View(func() {
+		p := a.Store.Projects[pid]
+		if p == nil || p.OrgID != org.ID || !projectVisible(member, pid) {
+			return
+		}
 		for _, e := range a.Store.Envs {
 			if e.ProjectID == pid {
 				out = append(out, e)
@@ -713,6 +793,20 @@ func (a *API) handleListEnvs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) handleCreateEnv(w http.ResponseWriter, r *http.Request) {
+	org, member := a.requireOrg(w, r)
+	if org == nil {
+		return
+	}
+	pid := r.PathValue("id")
+	ok := false
+	a.Store.View(func() {
+		p := a.Store.Projects[pid]
+		ok = p != nil && p.OrgID == org.ID && projectVisible(member, pid)
+	})
+	if !ok {
+		http.Error(w, "project not found", http.StatusNotFound)
+		return
+	}
 	var req struct {
 		Name string `json:"name"`
 	}
@@ -720,12 +814,16 @@ func (a *API) handleCreateEnv(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "name required", http.StatusBadRequest)
 		return
 	}
-	e := &types.Environment{ID: NewID(), ProjectID: r.PathValue("id"), Name: req.Name, CreatedAt: time.Now()}
+	e := &types.Environment{ID: NewID(), ProjectID: pid, Name: req.Name, CreatedAt: time.Now()}
 	a.Store.Mutate(func() { a.Store.Envs[e.ID] = e })
 	writeJSON(w, e)
 }
 
 func (a *API) handleListServices(w http.ResponseWriter, r *http.Request) {
+	org, member := a.requireOrg(w, r)
+	if org == nil {
+		return
+	}
 	var out []*types.Service
 	proj, env := r.URL.Query().Get("project"), r.URL.Query().Get("env")
 	a.Store.View(func() {
@@ -736,6 +834,9 @@ func (a *API) handleListServices(w http.ResponseWriter, r *http.Request) {
 			if env != "" && s.EnvID != env {
 				continue
 			}
+			if !a.serviceInOrg(s, org.ID) || !projectVisible(member, s.ProjectID) {
+				continue
+			}
 			out = append(out, s)
 		}
 	})
@@ -743,11 +844,16 @@ func (a *API) handleListServices(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) handlePlacement(w http.ResponseWriter, r *http.Request) {
+	org, _ := a.requireOrg(w, r)
+	if org == nil {
+		return
+	}
 	var req types.PlacementRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	req.OrgID = org.ID // never rank another tenant's hardware
 	writeJSON(w, a.Store.PlaceWorkload(req))
 }
 

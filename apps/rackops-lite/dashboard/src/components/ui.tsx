@@ -1,6 +1,49 @@
 import { useState } from 'react';
-import { Copy, Check, X, ExternalLink, Loader } from 'lucide-react';
+import { Copy, Check, X, ExternalLink, Loader, Info, Eye, EyeOff } from 'lucide-react';
 import type { Service, IngressConfig } from '../api';
+
+/* ---- InfoTip: the ⓘ that explains anything non-obvious ---- */
+
+// Hover or keyboard-focus reveals the bubble (CSS); click/tap toggles it so
+// touch users aren't left out. Content is plain language, never jargon.
+export function InfoTip({ children, wide }: { children: React.ReactNode; wide?: boolean }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span
+      className={`infotip ${wide ? 'wide' : ''} ${open ? 'open' : ''}`}
+      tabIndex={0}
+      aria-label="More information"
+      onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+      onBlur={() => setOpen(false)}
+      onKeyDown={(e) => { if (e.key === 'Escape') setOpen(false); }}
+    >
+      <Info size={12} aria-hidden />
+      <span className="infotip-bubble" role="tooltip">{children}</span>
+    </span>
+  );
+}
+
+/* ---- PasswordInput: input with a show/hide eye toggle ---- */
+
+export function PasswordInput({ value, onChange, placeholder, autoComplete, onEnter }: {
+  value: string; onChange: (v: string) => void;
+  placeholder?: string; autoComplete?: string; onEnter?: () => void;
+}) {
+  const [show, setShow] = useState(false);
+  return (
+    <div className="pw-wrap">
+      <input className="input" type={show ? 'text' : 'password'} value={value}
+        placeholder={placeholder} autoComplete={autoComplete}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => e.key === 'Enter' && onEnter?.()} />
+      <button type="button" className="pw-eye" tabIndex={-1}
+        aria-label={show ? 'Hide password' : 'Show password'}
+        onClick={() => setShow((v) => !v)}>
+        {show ? <EyeOff size={14} /> : <Eye size={14} />}
+      </button>
+    </div>
+  );
+}
 
 /* ---- LED: the system-wide status language ---- */
 

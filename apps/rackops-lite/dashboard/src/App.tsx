@@ -2,18 +2,20 @@ import { useEffect, useState } from 'react';
 import { Routes, Route, NavLink, Navigate, useNavigate } from 'react-router-dom';
 import {
   LayoutGrid, Boxes, HardDrive, Network as NetworkIcon, Settings, LogOut, Rocket, Bot, Search, Plus,
-  ArrowUpCircle, X,
+  ArrowUpCircle, X, UserRound, LifeBuoy,
 } from 'lucide-react';
-import { api, getToken, clearToken } from './api';
-import type { VersionInfo } from './api';
+import { api, getToken, clearToken, getActiveOrg } from './api';
+import type { VersionInfo, User } from './api';
 import { DataProvider, useData } from './data';
 import { ToastProvider, useToast, cleanError } from './components/toast';
 import { ConfirmProvider, useConfirm } from './components/confirm';
 import { CopilotProvider, useCopilot } from './components/CopilotDrawer';
 import { CommandPalette } from './components/CommandPalette';
 import { AddMachineModal } from './components/AddMachineModal';
+import { OrgSwitcher } from './components/OrgSwitcher';
 import { Led, Spinner } from './components/ui';
 import { AuthScreen } from './pages/Auth';
+import { InvitationPage } from './pages/Invitation';
 import { HomePage } from './pages/Home';
 import { AppsPage } from './pages/Apps';
 import { AppDetail } from './pages/AppDetail';
@@ -21,19 +23,35 @@ import { DeployFlow } from './pages/DeployFlow';
 import { MachinesPage, MachineDetail } from './pages/Machines';
 import { NetworkPage } from './pages/Network';
 import { SettingsPage } from './pages/SettingsPage';
+import { ProfilePage } from './pages/Profile';
+import { SupportPage } from './pages/Support';
+import { ChangelogPage } from './pages/Changelog';
 
 export default function App() {
   const [authed, setAuthed] = useState<boolean | null>(null);
+  // Remount the whole authed shell when the active org changes: every provider
+  // refetches through the new X-Rackops-Org header — no stale cross-org state.
+  const [orgKey, setOrgKey] = useState(() => getActiveOrg());
 
   // Auth gate: first-run setup or an existing session decides the screen.
   useEffect(() => {
     const onLogout = () => setAuthed(false);
+    const onOrg = () => setOrgKey(getActiveOrg());
     window.addEventListener('rackops-logout', onLogout);
+    window.addEventListener('rackops-org-changed', onOrg);
     api.authStatus()
       .then((s) => setAuthed(s.needsSetup ? false : !!getToken()))
       .catch(() => setAuthed(!!getToken()));
-    return () => window.removeEventListener('rackops-logout', onLogout);
+    return () => {
+      window.removeEventListener('rackops-logout', onLogout);
+      window.removeEventListener('rackops-org-changed', onOrg);
+    };
   }, []);
+
+  // Invitation links work signed-out or signed-in — before the auth gate.
+  if (window.location.pathname === '/invitation') {
+    return <ToastProvider><InvitationPage /></ToastProvider>;
+  }
 
   if (authed === null) return null;
   if (!authed) return <AuthScreen onAuthed={() => setAuthed(true)} />;
@@ -41,7 +59,7 @@ export default function App() {
   return (
     <ToastProvider>
       <ConfirmProvider>
-        <DataProvider>
+        <DataProvider key={orgKey}>
           <CopilotProvider>
             <Shell onLogout={() => { clearToken(); setAuthed(false); }} />
           </CopilotProvider>
@@ -58,9 +76,11 @@ function Shell({ onLogout }: { onLogout: () => void }) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [addMachine, setAddMachine] = useState(false);
   const [serverVersion, setServerVersion] = useState('');
+  const [me, setMe] = useState<User | null>(null);
 
   useEffect(() => {
     api.versionCheck().then((v) => setServerVersion(v.current)).catch(() => {});
+    api.me().then(setMe).catch(() => {});
   }, []);
 
   // ⌘K / Ctrl+K opens the palette from anywhere.
@@ -95,9 +115,13 @@ function Shell({ onLogout }: { onLogout: () => void }) {
           <div className="brand-unit"><Led status={fleetStatus} /></div>
           <div>
             <div className="brand-name">RackOps</div>
-            <div className="brand-ver">LITE{serverVersion ? ` · v${serverVersion}` : ''}</div>
+            <NavLink to="/changelog" className="brand-ver" title="What's new" style={{ textDecoration: 'none', color: 'inherit' }}>
+              LITE{serverVersion ? ` · v${serverVersion}` : ''}
+            </NavLink>
           </div>
         </NavLink>
+
+        <OrgSwitcher me={me} />
 
         <div className="nav-section">Your rack</div>
         {nav.map((n) => (
@@ -117,6 +141,12 @@ function Shell({ onLogout }: { onLogout: () => void }) {
             <Plus size={14} /> <span className="nav-label">Add machine</span>
           </button>
           <div className="row">
+            <NavLink to="/profile" className="btn sm" style={{ flex: 1 }} title="Profile">
+              <UserRound size={13} />
+            </NavLink>
+            <NavLink to="/support" className="btn sm" style={{ flex: 1 }} title="Support">
+              <LifeBuoy size={13} />
+            </NavLink>
             <NavLink to="/settings" className="btn sm" style={{ flex: 1 }} title="Settings">
               <Settings size={13} />
             </NavLink>
@@ -154,6 +184,9 @@ function Shell({ onLogout }: { onLogout: () => void }) {
             <Route path="/machines/:id" element={<MachineDetail />} />
             <Route path="/network" element={<NetworkPage />} />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/profile" element={<ProfilePage />} />
+            <Route path="/support" element={<SupportPage />} />
+            <Route path="/changelog" element={<ChangelogPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>

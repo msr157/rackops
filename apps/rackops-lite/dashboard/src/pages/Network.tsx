@@ -9,7 +9,7 @@ import type { Domain, IngressConfig, MeshStatus, ClusterStatus, NetworkDiagnosis
 import { useData } from '../data';
 import { useToast, cleanError } from '../components/toast';
 import { useConfirm } from '../components/confirm';
-import { Led, CopyBtn, CopyField, Modal, Spinner, UrlChip, publicUrls } from '../components/ui';
+import { InfoTip, Led, CopyBtn, CopyField, Modal, Spinner, UrlChip, publicUrls } from '../components/ui';
 
 // recordHost: what goes in the registrar's "Host/Name" field.
 function recordHost(domain: string): string {
@@ -173,6 +173,11 @@ export function NetworkPage() {
           </div>
           <div className="dim" style={{ marginBottom: 12 }}>
             One Traefik instance routes every domain and instant URL to the right app — across machines, over the mesh.
+            <InfoTip wide>
+              Pick the machine the internet can reach (a public IP or a forwarded port). Apps on
+              other machines are still reachable through it — traffic rides the encrypted mesh.
+              Adding a Let&rsquo;s Encrypt email turns on automatic HTTPS certificates.
+            </InfoTip>
           </div>
           {ingress?.status === 'failed' && ingress.statusMsg && (
             <div className="card inset" style={{ borderColor: 'var(--crit)', marginBottom: 12, whiteSpace: 'pre-wrap', fontSize: 12.5, lineHeight: 1.6 }}>
@@ -209,7 +214,7 @@ export function NetworkPage() {
               {edgeDeploying ? ' Deploying…' : ingress?.enabled ? 'Update edge' : 'Enable edge'}
             </button>
             {ingress?.enabled && (
-              <button className="btn danger" disabled={busy} onClick={() => applyIngress(false)}>Disable</button>
+              <button className="btn danger" disabled={busy || edgeDeploying} onClick={() => applyIngress(false)}>Disable</button>
             )}
           </div>
         </div>
@@ -218,6 +223,11 @@ export function NetworkPage() {
         <div className="card">
           <div className="section-title" style={{ margin: '0 0 12px' }}>
             <Waypoints size={15} /> WireGuard mesh
+            <InfoTip wide>
+              An encrypted private network between your machines. Each machine dials out to the
+              server, so it works behind CGNAT with zero port forwarding — the edge proxy uses it
+              to reach apps on other machines.
+            </InfoTip>
             {meshStatus?.enabled
               ? <span className="badge green" style={{ marginLeft: 'auto' }}>active</span>
               : <span className="badge gray" style={{ marginLeft: 'auto' }}>disabled</span>}
@@ -253,7 +263,14 @@ export function NetworkPage() {
       </div>
 
       {/* Domains */}
-      <div className="section-title"><Globe size={15} /> Your domains</div>
+      <div className="section-title">
+        <Globe size={15} /> Your domains
+        <InfoTip wide>
+          Add a domain you own and RackOps shows the exact DNS record to create at your registrar,
+          then keeps verifying DNS, routing, and the HTTPS certificate. A wildcard
+          (<code>*.example.com</code>) gives every app its own subdomain from one record.
+        </InfoTip>
+      </div>
       <div className="card">
         <div className="row" style={{ marginBottom: 12 }}>
           <input className="input" placeholder="app.example.com — or *.example.com to give every app its own subdomain"

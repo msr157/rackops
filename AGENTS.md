@@ -7,7 +7,7 @@ This is the **RackOps monorepo**: pnpm workspaces + Turborepo for TypeScript, `g
 - `apps/rackops-lite/` — the shipping product. Go CLI entry points are in `backend/cmd/rackops`; domain packages such as `server`, `agent`, and `telemetry` are under `backend/internal`. The React/TypeScript dashboard is in `dashboard/src`, with reusable UI in `components`, route views in `pages`, and static files in `dashboard/public` or `dashboard/src/assets`. `scripts/install.sh` is the Linux/WSL installer. Dashboard builds go to `backend/internal/server/dist`; treat it as generated output.
 - `apps/website/` — rackops.dev marketing site (React + Vite + GSAP/three.js), deployed as an nginx Docker image built from the repo root.
 - `apps/rackops-enterprise/` — future product; placeholder only, no code yet.
-- `internal-apps/` — internal tooling (CRM, etc.); placeholders until built.
+- `internal-apps/crm/` — the vendor-side CRM (Go + SQLite backend in `backend/`, React dashboard in `dashboard/`). Receives support tickets, usage snapshots, and password-reset relays from customer installs over its `/ingest/v1/*` API; support agents answer tickets from its admin dashboard. Module `github.com/rackops/crm`; dashboard workspace `@rackops/crm-dashboard`.
 - `packages/api` (`@rackops/api`) — shared TS API types/client; `packages/tsconfig` (`@rackops/tsconfig`) — shared TS configs.
 
 ## Build, Test, and Development Commands

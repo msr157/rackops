@@ -20,24 +20,50 @@ import (
 type Store struct {
 	mu sync.RWMutex
 
-	Nodes       map[string]*types.Node        `json:"nodes"`
-	Projects    map[string]*types.Project     `json:"projects"`
-	Envs        map[string]*types.Environment `json:"envs"`
-	Services    map[string]*types.Service     `json:"services"`
-	Deployments map[string]*types.Deployment  `json:"deployments"`
-	Users       map[string]*types.User        `json:"users"`
-	Tokens      map[string]*types.APIToken    `json:"tokens"`
-	Alerts      map[string]*types.Alert       `json:"alerts"`
-	Domains     map[string]*types.Domain      `json:"domains"`
-	Ingress     types.IngressConfig           `json:"ingress"`
-	Settings    Settings                      `json:"settings"`
-	Events      []*types.Event                `json:"events"`
+	Nodes       map[string]*types.Node          `json:"nodes"`
+	Projects    map[string]*types.Project       `json:"projects"`
+	Envs        map[string]*types.Environment   `json:"envs"`
+	Services    map[string]*types.Service       `json:"services"`
+	Deployments map[string]*types.Deployment    `json:"deployments"`
+	Users       map[string]*types.User          `json:"users"`
+	Tokens      map[string]*types.APIToken      `json:"tokens"`
+	Alerts      map[string]*types.Alert         `json:"alerts"`
+	Domains     map[string]*types.Domain        `json:"domains"`
+	Orgs        map[string]*types.Organization  `json:"orgs"`
+	Invitations map[string]*types.Invitation    `json:"invitations"`
+	Tickets     map[string]*types.SupportTicket `json:"tickets"`
+	Ingress     types.IngressConfig             `json:"ingress"`
+	// Settings is the pre-org legacy blob; EnsureDefaultOrg moves it into
+	// OrgSettings under the default org. Kept only so old state files load.
+	Settings Settings `json:"settings"`
+	// OrgSettings holds each organization's notification targets and Copilot
+	// provider config — tenants must not share webhooks or AI keys.
+	OrgSettings map[string]*Settings `json:"orgSettings,omitempty"`
+	Events      []*types.Event       `json:"events"`
 
-	// taskQueue maps nodeID -> pending agent tasks (not persisted; re-derived).
-	taskQueue map[string][]types.AgentTask
+	// TaskQueue maps nodeID -> pending agent tasks. Persisted so queued
+	// deploys/actions survive a control-plane restart; it is NOT applied from
+	// replicated snapshots — each leader owns task delivery to the agents it
+	// serves (see ImportJSON).
+	TaskQueue map[string][]types.AgentTask `json:"taskQueue,omitempty"`
+
+	// JWTSecret signs user session tokens. A random per-cluster secret,
+	// generated once and then persisted and replicated so every HA peer agrees
+	// and sessions survive leader failover. It is deliberately independent of
+	// the agent join token — enrollment credentials must not be able to mint
+	// user sessions.
+	JWTSecret []byte `json:"jwtSecret,omitempty"`
 
 	// ClusterHTTP maps server nodeID -> HTTP address (replicated for redirects).
 	ClusterHTTP map[string]string `json:"clusterHttp,omitempty"`
+
+	// DashboardURL is the scheme+host operators actually reach the dashboard
+	// on, recorded at each successful login. Password-reset links are built on
+	// it so an unauthenticated Host header can't poison emailed links.
+	DashboardURL string `json:"dashboardUrl,omitempty"`
+	// InstanceName is a friendly label for this install, shown in support
+	// tickets and reset emails ("request came from <name>").
+	InstanceName string `json:"instanceName,omitempty"`
 
 	dataDir string
 	dirty   bool
@@ -81,7 +107,10 @@ func NewStore(dataDir string) (*Store, error) {
 		Tokens:      map[string]*types.APIToken{},
 		Alerts:      map[string]*types.Alert{},
 		Domains:     map[string]*types.Domain{},
-		taskQueue:   map[string][]types.AgentTask{},
+		Orgs:        map[string]*types.Organization{},
+		Invitations: map[string]*types.Invitation{},
+		Tickets:     map[string]*types.SupportTicket{},
+		TaskQueue:   map[string][]types.AgentTask{},
 		dataDir:     dataDir,
 	}
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
@@ -92,6 +121,18 @@ func NewStore(dataDir string) (*Store, error) {
 		if err := json.Unmarshal(data, s); err != nil {
 			return nil, err
 		}
+	}
+	if s.TaskQueue == nil {
+		s.TaskQueue = map[string][]types.AgentTask{}
+	}
+	// Generate the session-signing secret once, then persist + replicate it.
+	if len(s.JWTSecret) < 32 {
+		secret := make([]byte, 32)
+		if _, err := rand.Read(secret); err != nil {
+			return nil, err
+		}
+		s.JWTSecret = secret
+		s.dirty = true
 	}
 	// Ensure a default project + environments exist.
 	if len(s.Projects) == 0 {
@@ -137,7 +178,8 @@ func (s *Store) persistLoop() {
 }
 
 // ImportJSON replaces replicated state (nodes/services/etc) from a snapshot.
-// Runtime-only fields (task queue) are preserved.
+// The task queue is runtime-local delivery state — each server hands tasks to
+// the agents reporting to it — so it is preserved, never imported.
 func (s *Store) ImportJSON(data []byte) error {
 	var in Store
 	if err := json.Unmarshal(data, &in); err != nil {
@@ -159,6 +201,11 @@ func (s *Store) ImportJSON(data []byte) error {
 	s.Settings = in.Settings
 	s.Events = in.Events
 	s.ClusterHTTP = in.ClusterHTTP
+	// The session-signing secret is cluster-wide: adopt the leader's so tokens
+	// issued anywhere in the cluster validate here after failover.
+	if len(in.JWTSecret) >= 32 {
+		s.JWTSecret = in.JWTSecret
+	}
 	s.dirty = true // persist locally
 	s.importing = false
 	return nil
@@ -179,6 +226,14 @@ func (s *Store) View(fn func()) {
 	fn()
 }
 
+// SessionSecret returns the cluster's JWT signing secret. Read under the lock
+// because followers adopt the leader's secret on snapshot import.
+func (s *Store) SessionSecret() []byte {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.JWTSecret
+}
+
 // AddEvent appends to the event feed (capped at 500 entries).
 func (s *Store) AddEvent(kind, msg, nodeID, serviceID string) *types.Event {
 	ev := &types.Event{
@@ -194,19 +249,25 @@ func (s *Store) AddEvent(kind, msg, nodeID, serviceID string) *types.Event {
 	return ev
 }
 
-// EnqueueTask queues a task for a node's agent.
+// EnqueueTask queues a task for a node's agent. Marked dirty so the queue is
+// persisted — a task queued just before a restart is still delivered after it.
 func (s *Store) EnqueueTask(nodeID string, task types.AgentTask) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.taskQueue[nodeID] = append(s.taskQueue[nodeID], task)
+	s.TaskQueue[nodeID] = append(s.TaskQueue[nodeID], task)
+	s.dirty = true
 }
 
 // DrainTasks pops all pending tasks for a node.
 func (s *Store) DrainTasks(nodeID string) []types.AgentTask {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	tasks := s.taskQueue[nodeID]
-	s.taskQueue[nodeID] = nil
+	tasks := s.TaskQueue[nodeID]
+	if len(tasks) == 0 {
+		return nil
+	}
+	delete(s.TaskQueue, nodeID)
+	s.dirty = true
 	return tasks
 }
 

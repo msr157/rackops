@@ -140,6 +140,20 @@ func (a *Agent) acceptRelay(ln net.Listener, target string) {
 	}
 }
 
+// closeMesh tears down relay listeners and the mesh interface. Safe to call
+// when the mesh never came up (all fields nil).
+func (a *Agent) closeMesh() {
+	for port, ln := range a.mesh.relays {
+		_ = ln.Close()
+		delete(a.mesh.relays, port)
+	}
+	if a.mesh.net != nil {
+		a.mesh.net.Close()
+		a.mesh.net = nil
+		log.Printf("mesh: interface torn down")
+	}
+}
+
 func localhostPort(p int) string {
 	return "127.0.0.1:" + itoa(p)
 }

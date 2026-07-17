@@ -39,22 +39,26 @@ cd apps/rackops-lite/backend && go build -o rackops ./cmd/rackops
 ./rackops probe
 ```
 
-## What works today (Milestone 1)
+## What works today
 
 - **Hardware telemetry** — CPU, memory, load, thermals (hwmon), NVMe temps, drive usage & live R/W throughput, NIC throughput, NVIDIA GPUs (nvidia-smi) and AMD GPUs (sysfs), all read directly from /proc and /sys
 - **Fleet control plane** — agents push reports every 2s over outbound HTTP (CGNAT-friendly), node-down watchdog, JSON-persisted state
-- **Intelligent placement** — multi-constraint scorer (CPU/memory/storage/thermal headroom + NVMe/GPU capability) ranks nodes; `nodeId: "auto"` deploys to the winner
-- **Deployments** — image-based deploys via Docker/podman with env vars, port mapping, restart policy, and per-service container labels; start/stop/restart/redeploy/remove
+- **Organizations** — Dokploy-style multi-tenancy: an org switcher, invitation links, per-member roles and granular permissions (down to per-project access), with machines, apps, domains, and settings scoped per organization
+- **Intelligent placement** — multi-constraint scorer (CPU/memory/storage/thermal headroom + NVMe/GPU capability) ranks the org's nodes; `nodeId: "auto"` deploys to the winner
+- **Deployments** — image, git (Dockerfile/nixpacks/auto), and compose-stack deploys via Docker/podman with env vars, port mapping, restart policy; start/stop/restart/redeploy/remove; adoption of containers that already exist on a machine
 - **Projects → Environments → Services** hierarchy (Dokploy-style)
-- **Alert engine** — CPU >90%, memory >90%, package temp >85°C, disk >92%, node down
-- **Live dashboard** — dark console UI embedded in the binary; SSE-streamed metrics, fleet overview, per-node hardware pages, storage visualization, deploy modal with placement recommendation, alerts
+- **Networking** — Traefik edge with Let's Encrypt, domain verification wizard, WireGuard mesh with relays for CGNAT nodes, zero-DNS nip.io URLs, Cloudflare quick tunnels
+- **Auth & API** — owner/admin/member/viewer roles, password reset (emailed + always in the server log), API keys that act with their owner's role, interactive Swagger docs at `/swagger`, and `rackops mcp` for AI tools (VS Code/Claude/Cursor)
+- **Support** — in-dashboard tickets answered by RackOps support, with replies landing back in the thread
+- **Alert engine** — sustained-condition alerts (CPU/memory/thermal/disk/node-down) that auto-resolve the moment the condition clears
+- **Live dashboard** — dark console UI embedded in the binary; SSE-streamed metrics, org-scoped fleet views, deploy wizard with placement recommendation, one-click self-update
 
 ## Roadmap (in flight)
 
-- M3: Git + Nixpacks builds, Docker Compose, managed databases, web terminal, backups, template catalog (infra / homelab / AI / web / game servers)
-- M4: WireGuard mesh, Traefik + Let's Encrypt, self-hosted relay ingress for CGNAT users
-- M5: Auth + RBAC, API tokens, CLI, notifications (Discord/Telegram/Slack/webhook), AI assistant (pluggable providers)
-- M6: HA control plane — embedded Raft, 3-node clusters, automatic leader failover
+- Web terminal into containers and machines
+- Backups (volumes + databases) with schedules
+- Managed database lifecycle (upgrades, credentials rotation)
+- Prometheus-compatible metrics endpoint
 
 ## Layout
 

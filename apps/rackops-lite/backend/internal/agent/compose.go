@@ -10,7 +10,7 @@ import (
 
 // deployCompose writes the stack's compose file to a managed directory and
 // brings it up with `<runtime> compose up -d`.
-func (r *Runtime) deployCompose(p DeployPayload, logs *strings.Builder) (string, string, error) {
+func (r *Runtime) deployCompose(p DeployPayload, logs *logSink) (string, string, error) {
 	home, _ := os.UserHomeDir()
 	dir := filepath.Join(home, ".rackops", "stacks", sanitize(p.Name)+"-"+p.ServiceID)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -36,9 +36,8 @@ func (r *Runtime) deployCompose(p DeployPayload, logs *strings.Builder) (string,
 	logs.WriteString("$ " + r.Bin + " " + strings.Join(args, " ") + "\n")
 	cmd := exec.Command(r.Bin, args...)
 	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
-	logs.Write(out)
-	if err != nil {
+	cmd.Stdout, cmd.Stderr = logs, logs // stream image pulls + container creation live
+	if err := cmd.Run(); err != nil {
 		return "", logs.String(), fmt.Errorf("compose up failed: %w", err)
 	}
 

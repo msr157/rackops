@@ -11,7 +11,9 @@ import (
 
 // PlaceWorkload is the multi-constraint scheduler: it scores every online
 // node against the request across CPU, memory, storage, thermal headroom,
-// and hardware capability, and returns a ranked list.
+// and hardware capability, and returns a ranked list. An OrgID in the request
+// restricts scoring to that organization's machines — workloads never land on
+// another tenant's hardware.
 //
 // Score = weighted sum of headroom factors; hard constraints zero-out a node.
 func (s *Store) PlaceWorkload(req types.PlacementRequest) []types.PlacementScore {
@@ -19,6 +21,9 @@ func (s *Store) PlaceWorkload(req types.PlacementRequest) []types.PlacementScore
 	scores := make([]types.PlacementScore, 0, len(nodes))
 
 	for _, n := range nodes {
+		if req.OrgID != "" && n.OrgID != req.OrgID {
+			continue
+		}
 		sc := types.PlacementScore{NodeID: n.ID, Viable: true}
 
 		if n.Status != types.NodeOnline {

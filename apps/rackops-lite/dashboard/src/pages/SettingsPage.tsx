@@ -1,28 +1,26 @@
 import { useEffect, useState } from 'react';
-import { Key, Bell, Trash2, Plus, Zap } from 'lucide-react';
+import { Key, Bell, Zap, KeyRound, ArrowRight, Building2 } from 'lucide-react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
-import type { Settings, APIToken } from '../api';
+import type { Settings } from '../api';
 import { useToast, cleanError } from '../components/toast';
-import { useConfirm } from '../components/confirm';
-import { CopyField, Spinner } from '../components/ui';
+import { OrgPanel } from '../components/OrgPanel';
+import { InfoTip, Spinner } from '../components/ui';
 
-type Tab = 'ai' | 'notify' | 'tokens';
+type Tab = 'org' | 'ai' | 'notify' | 'tokens';
 
 export function SettingsPage() {
   const toast = useToast();
-  const confirm = useConfirm();
-  const [tab, setTab] = useState<Tab>('ai');
+  const [params, setParams] = useSearchParams();
+  const tab = (['org', 'ai', 'notify', 'tokens'].includes(params.get('tab') ?? '') ? params.get('tab') : 'org') as Tab;
+  const setTab = (t: Tab) => setParams({ tab: t }, { replace: true });
   const [s, setS] = useState<Settings>({ notifyDeploys: true, notifyAlerts: true });
-  const [tokens, setTokens] = useState<APIToken[]>([]);
-  const [newTokenName, setNewTokenName] = useState('');
-  const [freshToken, setFreshToken] = useState('');
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; provider: string; error?: string } | null>(null);
 
   useEffect(() => {
     api.settings().then(setS).catch(() => {});
-    api.tokens().then((t) => setTokens(t ?? [])).catch(() => {});
   }, []);
 
   const save = async () => {
@@ -41,27 +39,6 @@ export function SettingsPage() {
     setTesting(false);
   };
 
-  const mkToken = async () => {
-    if (!newTokenName.trim()) return;
-    try {
-      const r = await api.createApiToken(newTokenName.trim());
-      setFreshToken(r.token);
-      setNewTokenName('');
-      api.tokens().then((t) => setTokens(t ?? [])).catch(() => {});
-    } catch (e) { toast.err(cleanError(e)); }
-  };
-
-  const rmToken = async (t: APIToken) => {
-    const yes = await confirm({
-      title: `Revoke "${t.name || 'unnamed token'}"?`,
-      body: 'Anything using this token loses access immediately.',
-      confirmLabel: 'Revoke', danger: true,
-    });
-    if (!yes) return;
-    await api.deleteApiToken(t.id).catch((e) => toast.err(cleanError(e)));
-    api.tokens().then((x) => setTokens(x ?? [])).catch(() => {});
-  };
-
   const set = (patch: Partial<Settings>) => setS({ ...s, ...patch });
   const prov = s.aiProvider ?? 'auto';
   const show = (p: string) => prov === 'auto' || prov === p;
@@ -69,10 +46,11 @@ export function SettingsPage() {
   return (
     <div className="page" style={{ maxWidth: 720 }}>
       <div className="page-title">Settings</div>
-      <div className="page-sub">Copilot providers, notifications, and API access</div>
+      <div className="page-sub">Organization, Copilot providers, notifications, and API access</div>
 
       <div className="tabs">
         {([
+          ['org', <Building2 size={14} key="o" />, 'Organization'],
           ['ai', <Key size={14} key="a" />, 'Copilot AI'],
           ['notify', <Bell size={14} key="n" />, 'Notifications'],
           ['tokens', <Key size={14} key="t" />, 'API tokens'],
@@ -83,8 +61,18 @@ export function SettingsPage() {
         ))}
       </div>
 
+      {tab === 'org' && <OrgPanel />}
+
       {tab === 'ai' && (
         <div className="card">
+          <div className="dim" style={{ marginBottom: 14 }}>
+            The Copilot answers questions about your fleet using live telemetry.
+            <InfoTip wide>
+              Keys are stored on your own server (per organization) and sent only to the provider
+              you pick. Without a key, the built-in rule engine still answers placement, thermal,
+              and failure questions from telemetry — no data leaves your machines.
+            </InfoTip>
+          </div>
           <div className="field">
             <label>Provider</label>
             <select className="input" value={prov} onChange={(e) => set({ aiProvider: e.target.value })}>
@@ -180,6 +168,13 @@ export function SettingsPage() {
 
       {tab === 'notify' && (
         <div className="card">
+          <div className="dim" style={{ marginBottom: 14 }}>
+            Get pinged when deploys finish or alerts fire — per organization.
+            <InfoTip>
+              Fill in any channel you use; empty ones are ignored. Notifications fire for this
+              organization&rsquo;s machines and apps only.
+            </InfoTip>
+          </div>
           <div className="field">
             <label>Discord webhook URL</label>
             <input className="input" placeholder="https://discord.com/api/webhooks/…" value={s.discordWebhook ?? ''} onChange={(e) => set({ discordWebhook: e.target.value })} />
@@ -216,28 +211,17 @@ export function SettingsPage() {
 
       {tab === 'tokens' && (
         <div className="card">
-          <div className="row" style={{ marginBottom: 14 }}>
-            <input className="input" placeholder="Token name (e.g. ci-pipeline)" value={newTokenName}
-              onChange={(e) => setNewTokenName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && mkToken()} />
-            <button className="btn primary" onClick={mkToken}><Plus size={13} /> Create</button>
+          <div className="row" style={{ gap: 10, marginBottom: 8 }}>
+            <KeyRound size={15} style={{ color: 'var(--amber)' }} />
+            <strong>API keys moved to your profile</strong>
           </div>
-          {freshToken && (
-            <div className="card inset" style={{ borderColor: 'var(--amber)', marginBottom: 14 }}>
-              <div className="dim" style={{ marginBottom: 8 }}>Copy now — shown only once:</div>
-              <CopyField text={freshToken} />
-            </div>
-          )}
-          {tokens.map((t) => (
-            <div className="row spread" key={t.id} style={{ padding: '7px 0', borderTop: '1px solid var(--border)' }}>
-              <span>{t.name || '(unnamed)'} <span className="faint">{new Date(t.createdAt).toLocaleDateString()}</span></span>
-              <button className="btn sm danger" aria-label={`Revoke ${t.name}`} onClick={() => rmToken(t)}>
-                <Trash2 size={12} />
-              </button>
-            </div>
-          ))}
-          {tokens.length === 0 && (
-            <div className="faint">No API tokens. Use them with the CLI: <code className="mono">RACKOPS_TOKEN=rk_… rackops nodes</code></div>
-          )}
+          <div className="dim" style={{ marginBottom: 14, lineHeight: 1.6 }}>
+            Keys belong to the person who creates them — they act with your role and are
+            managed alongside your account and password.
+          </div>
+          <Link to="/profile" className="btn primary" style={{ width: 'fit-content' }}>
+            Open profile <ArrowRight size={13} />
+          </Link>
         </div>
       )}
     </div>

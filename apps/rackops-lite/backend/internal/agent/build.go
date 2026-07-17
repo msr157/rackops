@@ -11,7 +11,7 @@ import (
 // buildFromGit clones a repository and builds a container image.
 // Priority: existing Dockerfile > nixpacks (if installed) > auto-generated
 // Dockerfile from stack detection (Node/Python/Go/static).
-func (r *Runtime) buildFromGit(p DeployPayload, logs *strings.Builder) (image string, err error) {
+func (r *Runtime) buildFromGit(p DeployPayload, logs *logSink) (image string, err error) {
 	workDir, err := os.MkdirTemp("", "rackops-build-*")
 	if err != nil {
 		return "", err
@@ -50,9 +50,9 @@ func (r *Runtime) buildFromGit(p DeployPayload, logs *strings.Builder) (image st
 	// 2. Nixpacks if available.
 	if nix, lookErr := exec.LookPath("nixpacks"); lookErr == nil {
 		logs.WriteString("building with nixpacks\n")
-		out, err := exec.Command(nix, "build", workDir, "--name", image).CombinedOutput()
-		logs.Write(out)
-		if err == nil {
+		nixCmd := exec.Command(nix, "build", workDir, "--name", image)
+		nixCmd.Stdout, nixCmd.Stderr = logs, logs
+		if err := nixCmd.Run(); err == nil {
 			return image, nil
 		}
 		logs.WriteString("nixpacks failed, falling back to stack detection\n")
@@ -70,18 +70,14 @@ func (r *Runtime) buildFromGit(p DeployPayload, logs *strings.Builder) (image st
 	return image, r.dockerBuild(workDir, image, logs)
 }
 
-func (r *Runtime) dockerBuild(dir, image string, logs *strings.Builder) error {
+func (r *Runtime) dockerBuild(dir, image string, logs *logSink) error {
 	logs.WriteString("$ " + r.Bin + " build -t " + image + " .\n")
 	cmd := exec.Command(r.Bin, "build", "-t", image, ".")
 	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
-	// Keep the tail — build logs can be huge.
-	s := string(out)
-	if len(s) > 8000 {
-		s = "…(truncated)…\n" + s[len(s)-8000:]
-	}
-	logs.WriteString(s)
-	if err != nil {
+	// Stream build output live; the sink accumulates the full text (the
+	// deployment record trims it if huge — see applyTaskResult).
+	cmd.Stdout, cmd.Stderr = logs, logs
+	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("build failed: %w", err)
 	}
 	return nil
