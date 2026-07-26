@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
-  Boxes, HardDrive, Radio, Bell, Rocket, Globe, ArrowRight, Check, ScrollText, Server,
+  Boxes, HardDrive, Radio, Bell, Rocket, Globe, Check, ScrollText,
 } from 'lucide-react';
 import { useData } from '../data';
 import { Rack } from '../components/Rack';
@@ -16,7 +16,7 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
   const failing = services.filter((s) => s.status === 'failed');
   const openAlerts = alerts.filter((a) => !a.resolved);
   const nodesOffline = nodes.filter((n) => n.status === 'offline');
-  // An offline machine counts toward the headline — the banner must never
+  // An offline machine counts toward the headline: the banner must never
   // say "all systems operational" over a red attention list.
   const attention = failing.length + openAlerts.length + nodesOffline.length;
   const troubled = loaded && attention > 0;
@@ -26,8 +26,9 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
   return (
     <div className="page">
       {/* Status banner: the one-glance answer. It must never claim an empty
-          rack while the fleet is still loading or the server is unreachable —
-          that reads as data loss at the exact moment it would panic someone. */}
+          rack while the fleet is still loading or the server is unreachable,
+          because that reads as data loss at the exact moment it would panic
+          someone. */}
       <div className={`status-banner ${troubled ? 'crit' : ''}`}>
         <Led lg label
           status={!loaded ? 'pending'
@@ -44,21 +45,25 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
             {!loaded
               ? (reachable ? 'connecting…' : 'the control plane is not answering yet')
               : overview
-                ? `${overview.nodesOnline}/${overview.nodesTotal} machines online · ${running}/${services.length} apps running · fleet CPU ${overview.avgCpuPct}%`
+                ? `${overview.nodesOnline}/${overview.nodesTotal} machines online, ${running}/${services.length} apps running · fleet CPU ${overview.avgCpuPct}%`
                 : 'connecting…'}
           </div>
         </div>
-        {services.length > 0 && (
-          <Link to="/apps" className="btn">Open apps <ArrowRight size={13} /></Link>
+        {/* The banner action follows the state it announces: incidents jump
+            to the attention list, an empty rack starts onboarding, and
+            all-clear needs no button at all. */}
+        {troubled && (
+          <a href="#attention" className="btn">Review {attention} issue{attention > 1 ? 's' : ''}</a>
+        )}
+        {loaded && !troubled && nodes.length === 0 && (
+          <button className="btn primary" onClick={onAddMachine}>Add machine</button>
         )}
       </div>
-
-      <SetupChecklist onAddMachine={onAddMachine} />
 
       {/* Needs attention: failures and alerts, each one click from its fix */}
       {(failing.length > 0 || openAlerts.length > 0 || nodesOffline.length > 0) && (
         <>
-          <div className="section-title">
+          <div className="section-title" id="attention">
             <Bell size={15} style={{ color: 'var(--crit)' }} aria-hidden /> Needs attention
             <InfoTip wide>
               Only real, ongoing problems appear here: an app that is down, a machine that stopped
@@ -72,12 +77,11 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
                 <div className="row">
                   <Led status="failed" />
                   <strong>{s.name}</strong>
-                  <span className="dim">app is down — auto-heal is retrying</span>
+                  <span className="dim">app is down, auto-heal is retrying</span>
                 </div>
-                <div className="row">
-                  <button className="btn sm" onClick={() => navigate(`/apps/${s.id}/logs`)}><ScrollText size={12} /> View logs</button>
-                  <button className="btn sm" onClick={() => navigate(`/apps/${s.id}/deployments`)}>Deployments</button>
-                </div>
+                <button className="btn sm primary" onClick={() => navigate(`/apps/${s.id}/logs`)}>
+                  <ScrollText size={12} /> View logs
+                </button>
               </div>
             ))}
             {nodesOffline.map((n) => (
@@ -85,9 +89,9 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
                 <div className="row">
                   <Led status="offline" />
                   <strong>{n.name}</strong>
-                  <span className="dim">machine stopped reporting — check power and network, or restart its agent</span>
+                  <span className="dim">machine stopped reporting: check power and network, or restart its agent</span>
                 </div>
-                <button className="btn sm" onClick={() => navigate(`/machines/${n.id}`)}>Inspect</button>
+                <button className="btn sm" onClick={() => navigate(`/machines/${n.id}`)}>View machine</button>
               </div>
             ))}
             {openAlerts.map((a) => (
@@ -96,19 +100,26 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
                 <div className="row">
                   <Led status={a.level === 'critical' ? 'failed' : 'pending'} />
                   <span>{a.message}</span>
+                  <span className="faint">{timeAgo(a.createdAt)}</span>
                 </div>
-                <span className="faint">{timeAgo(a.createdAt)}</span>
+                {a.nodeId && (
+                  <button className="btn sm" onClick={() => navigate(`/machines/${a.nodeId}`)}>View machine</button>
+                )}
               </div>
             ))}
           </div>
         </>
       )}
 
+      {/* Onboarding never interrupts incidents: the checklist waits below the
+          attention list and only renders when nothing needs attention. */}
+      {attention === 0 && <SetupChecklist onAddMachine={onAddMachine} />}
+
       <div className="grid-2" style={{ alignItems: 'start', marginTop: 10 }}>
         <div>
           <div className="section-title" style={{ marginTop: 12 }}>
             <Boxes size={15} aria-hidden /> Your apps
-            {services.length > 0 && <Link to="/apps" className="faint" style={{ marginLeft: 'auto', fontWeight: 400 }}>all {services.length} →</Link>}
+            {services.length > 0 && <Link to="/apps" className="faint" style={{ marginLeft: 'auto', fontWeight: 400 }}>View all →</Link>}
           </div>
           <div className="stack" style={{ gap: 8 }}>
             {services.slice(0, 6).map((s) => {
@@ -132,13 +143,8 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
             {!loaded && services.length === 0 && <SkeletonRows count={3} height={44} />}
             {loaded && services.length === 0 && nodes.length > 0 && (
               <EmptyState icon={<Rocket size={18} />} title="No apps yet">
-                <div style={{ marginBottom: 14 }}>Deploy anything — Jellyfin, Postgres, your own code — in under a minute.</div>
+                <div style={{ marginBottom: 14 }}>Deploy anything: Jellyfin, Postgres, your own code, in under a minute.</div>
                 <button className="btn primary" onClick={() => navigate('/apps/new')}><Rocket size={13} /> Deploy your first app</button>
-              </EmptyState>
-            )}
-            {loaded && nodes.length === 0 && (
-              <EmptyState icon={<Server size={18} />} title="Apps run on machines">
-                <div>Add a machine first — then deploy onto it.</div>
               </EmptyState>
             )}
           </div>
@@ -146,10 +152,10 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
           <div className="section-title">
             <Radio size={15} aria-hidden /> Live activity
             <InfoTip>
-              A running log of everything the fleet does — deploys, self-healing, machines joining,
+              A running log of everything the fleet does: deploys, self-healing, machines joining,
               alerts raising and resolving. It updates in real time.
             </InfoTip>
-            {/* The badge tracks the stream, not the section — claiming LIVE
+            {/* The badge tracks the stream, not the section: claiming LIVE
                 while the server is unreachable is the same lie in miniature. */}
             <span className={`badge ${reachable ? 'accent' : 'neutral'}`} style={{ marginLeft: 'auto' }}>
               {reachable ? 'live' : 'stalled'}
@@ -166,7 +172,7 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
             {events.length === 0 && (
               <span className="faint">
                 {loaded
-                  ? 'quiet so far — activity from deploys, heals, and machines appears here'
+                  ? 'quiet so far: activity from deploys, heals, and machines appears here'
                   : 'waiting for the server…'}
               </span>
             )}
@@ -180,8 +186,10 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
               Every machine in this organization, one slot per machine. The dot shows each
               machine&rsquo;s health; click through for full hardware detail.
             </InfoTip>
-            <Link to="/machines" className="faint" style={{ marginLeft: 'auto', fontWeight: 400 }}>details →</Link>
+            <Link to="/machines" className="faint" style={{ marginLeft: 'auto', fontWeight: 400 }}>View all →</Link>
           </div>
+          {/* No onAdd here: the status banner already carries the page's
+              Add-machine primary; the rack panel stays quiet. */}
           <Rack nodes={nodes} services={services} loading={!loaded} />
 
           {overview && nodes.length > 0 && (
@@ -202,8 +210,8 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
   );
 }
 
-// SetupChecklist guides the first-run journey: machine → app → public URL.
-// It ticks off live via SSE updates and disappears once complete (or skipped).
+// SetupChecklist guides the first-run journey: machine, then app, then public
+// URL. It ticks off live via SSE updates and disappears once complete (or skipped).
 function SetupChecklist({ onAddMachine }: { onAddMachine: () => void }) {
   const { nodes, services, ingress, loaded } = useData();
   const navigate = useNavigate();
@@ -222,7 +230,7 @@ function SetupChecklist({ onAddMachine }: { onAddMachine: () => void }) {
   const steps = [
     {
       done: hasMachine, title: 'Add a machine',
-      desc: 'Run one command on any Linux box — an old PC, a Pi, a VPS.',
+      desc: 'Run one command on any Linux box: an old PC, a Pi, a VPS.',
       action: 'Show command', run: onAddMachine,
     },
     {
@@ -232,7 +240,7 @@ function SetupChecklist({ onAddMachine }: { onAddMachine: () => void }) {
     },
     {
       done: hasPublic, title: 'Make it public',
-      desc: 'Get a URL you can open from anywhere — instant, tunnel, or your own domain.',
+      desc: 'Get a URL you can open from anywhere: instant, tunnel, or your own domain.',
       action: firstApp ? 'Choose a URL' : undefined,
       run: firstApp ? () => navigate(`/apps/${firstApp.id}/networking`) : undefined,
     },

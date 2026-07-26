@@ -99,9 +99,9 @@ gone — hardware facts wear neutral `.tag`s.
 - **Overlays**: shared `useDialogBehavior` (Esc/trap/restore) is mandatory.
   Modal 560 default; drawer 420 right; palette 560 top-centered. Overlay
   scrim `rgba(5,8,12,0.65)`.
-- **Toasts**: neutral raised surface, status icon in status ink, NO colored
-  side-stripe. Errors persist until dismissed (`role="alert"`); info/ok
-  auto-dismiss with pause-on-hover.
+- **Toasts**: BOTTOM-right (never over the topbar primary), neutral raised
+  surface, status icon in status ink, NO colored side-stripe. Errors persist
+  until dismissed (`role="alert"`); info/ok auto-dismiss with pause-on-hover.
 - **Banners** (offline, update, dirty-config): full tinted border + `*-dim`
   fill, icon, one-line message, actions right (`.offline-banner`,
   `.update-banner`, `.dirty-banner`). Offline outranks everything (crit);
@@ -113,6 +113,28 @@ gone — hardware facts wear neutral `.tag`s.
   `--bg-2` circle, title + one sentence + one primary action.
 - **Skeletons**: `--bg-2` blocks with 1.4s sweep; every async list shows
   skeletons until `loaded`, never a false empty.
+
+## Interaction grammar (post-audit, 2026-07-26)
+
+- **Account menu**: Profile/Support/Log out live in the sidebar's bottom
+  account row (`.account-trigger` + `.org-menu.up`) — logout is always a
+  two-step. Settings is a main-nav destination.
+- **Nav badges mean attention only** (`.count.attn`, crit ink). Inventory
+  totals are never badged.
+- **Save bars ride the bottom**: draft-based forms use `.dirty-banner.pinned`
+  after the content so Save is always in reach of the edited field.
+- **Selected filter chips** wear `.btn.chip-on`, never `.btn.primary` —
+  solid azure means "the one action" and nothing else.
+- **Radio-cards** compose from `.card.clickable` + `.card.accent` selected
+  state, `role=radio`/`aria-checked`.
+- **Instant vs draft actions never share a card stack**: a control that fires
+  an API on change gets an explicit Apply button or lives on an
+  instant-action-only surface.
+- **Update signal** is the sidebar `.update-chip`; the Changelog page hosts
+  the update action. No global banners except the offline banner.
+- **Copy bans**: zero em-dashes in visible strings; max one middot (·) per
+  metadata line; one label per intent per surface; `<option>` labels carry
+  names only (descriptions go in Field hints).
 
 ## Hard rules
 

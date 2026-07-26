@@ -19,7 +19,7 @@ export function InvitationPage() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (!token) { setInvalid('This invitation link is incomplete — ask for a new one.'); return; }
+    if (!token) { setInvalid('This invitation link is incomplete. Ask for a new one.'); return; }
     api.invitationInfo(token)
       .then(setInfo)
       .catch((e) => setInvalid(cleanError(e)));

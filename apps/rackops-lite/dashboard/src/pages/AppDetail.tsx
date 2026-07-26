@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import {
-  ArrowLeft, Box, Cloud, Globe, History, Info, KeyRound, Play, Plus, RotateCw, Save, ScrollText,
+  ArrowLeft, Box, Cloud, Globe, History, KeyRound, Play, Plus, RotateCw, Save, ScrollText,
   Square, Trash2, TriangleAlert, Rocket, Folder, FolderOpen, Zap, Settings as SettingsIcon,
   ExternalLink,
 } from 'lucide-react';
@@ -82,7 +82,7 @@ function validateDraft(d: Draft): DraftErrors {
     // A fully blank row is dropped harmlessly on save; a valued row with no
     // key would lose data, so it blocks the save instead of vanishing.
     if (!row.key.trim() && row.value !== '') {
-      errs.env[row.rid] = 'This value has no name — add a KEY or remove the row.';
+      errs.env[row.rid] = 'This value has no name. Add a KEY or remove the row.';
     }
   }
   return errs;
@@ -163,11 +163,7 @@ export function AppDetail() {
     if (!draft || !svc) return;
     if (hasDraftErrors(draftErrors)) {
       setShowErrors(true);
-      const where = [
-        Object.keys(draftErrors.env).length > 0 && 'environment variables (Settings tab)',
-        (draftErrors.port || draftErrors.containerPort || draftErrors.ports) && 'ports (Networking tab)',
-      ].filter(Boolean).join(' and ');
-      toast.err(`Nothing was saved — fix the ${where} first.`);
+      toast.err('Nothing was saved. Fix the highlighted fields on the Settings tab first.');
       return;
     }
     setBusyAction(redeploy ? 'saveRedeploy' : 'save');
@@ -189,7 +185,7 @@ export function AppDetail() {
       hydrate(s);
       setShowErrors(false);
       refresh();
-      toast.ok(redeploy ? 'Saved — redeploying now.' : 'Saved. Changes apply on the next redeploy.');
+      toast.ok(redeploy ? 'Saved. Redeploying now.' : 'Saved. Changes apply on the next redeploy.');
     } catch (e) { toast.err(cleanError(e)); }
     setBusyAction('');
   };
@@ -231,7 +227,7 @@ export function AppDetail() {
       return (
         <div className="page">
           <EmptyState icon={<Box size={18} />} title="This app doesn't exist anymore">
-            <div style={{ marginBottom: 14 }}>It was removed — from another session, or by someone else in this org.</div>
+            <div style={{ marginBottom: 14 }}>It was removed in another session, or by someone else in this org.</div>
             <Link to="/apps" className="btn">Back to apps</Link>
           </EmptyState>
         </div>
@@ -244,8 +240,9 @@ export function AppDetail() {
             <TriangleAlert size={15} style={{ color: 'var(--crit)' }} aria-hidden />
             <strong>Couldn&rsquo;t load this app</strong>
           </div>
+          <div className="dim" style={{ marginBottom: 6 }}>{cleanError(loadFailed)}</div>
           <div className="dim" style={{ marginBottom: 14 }}>
-            {cleanError(loadFailed)} — the app itself is probably fine; this page just couldn&rsquo;t read its record.
+            The app itself is probably fine; this page just couldn&rsquo;t read its record.
             It also retries on its own every few seconds.
           </div>
           <div className="row">
@@ -282,8 +279,8 @@ export function AppDetail() {
             <span className="tag">
               adopted
               <InfoTip wide>
-                This container was already running on the machine — RackOps adopted it so you can
-                manage it here. Start, stop, and remove work; its build configuration stays read-only.
+                This container was already running on the machine, so RackOps adopted it for you to
+                manage here. Start, stop, and remove work; its build configuration stays read-only.
               </InfoTip>
             </span>
           )}
@@ -299,8 +296,13 @@ export function AppDetail() {
             {busyAction === 'restart' ? <Spinner size={12} /> : <RotateCw size={12} />} Restart
           </button>
           {!svc.adopted && (
-            <button className="btn sm" disabled={busy} onClick={() => act('redeploy')}>
-              {busyAction === 'redeploy' ? <Spinner size={12} /> : <Rocket size={12} />} Redeploy
+            // While edits are unsaved, Redeploy must not silently ship the old
+            // config: Save & redeploy in the bottom bar is the one redeploy
+            // verb for that state.
+            <button className="btn sm" disabled={busy || !!dirty}
+              title={dirty ? 'You have unsaved changes. Use Save & redeploy below.' : undefined}
+              onClick={() => act('redeploy')}>
+              {busyAction === 'redeploy' ? <Spinner size={12} /> : <Rocket size={12} aria-hidden />} Redeploy
             </button>
           )}
         </div>
@@ -309,32 +311,6 @@ export function AppDetail() {
         <span className="dim mono">{svc.image || svc.gitRepo || svc.kind} · {nodeName(svc.nodeId)}</span>
         {urls.map((u) => <UrlChip key={u.url} url={u.url} />)}
       </div>
-
-      {dirty && (
-        <div className="dirty-banner" role="status">
-          <span className="row" style={{ flex: 1, minWidth: 220, gap: 8 }}>
-            <TriangleAlert size={14} style={{ color: 'var(--warn)', flex: 'none' }} aria-hidden />
-            <span>
-              {svc.adopted
-                ? 'Adopted apps can’t be rebuilt from here — config edits won’t take effect. Manage this container where it was created.'
-                : 'Unsaved changes — the app keeps running until you apply them.'}
-            </span>
-          </span>
-          <div className="row">
-            <button className="btn sm" disabled={busy} onClick={() => setDraft(JSON.parse(baseline))}>Discard</button>
-            {!svc.adopted && (
-              <button className="btn sm" disabled={busy} onClick={() => save(false)}>
-                {busyAction === 'save' ? <Spinner size={12} /> : <Save size={12} />} Save only
-              </button>
-            )}
-            {!svc.adopted && (
-              <button className="btn sm primary" disabled={busy} onClick={() => save(true)}>
-                {busyAction === 'saveRedeploy' ? <Spinner size={12} /> : <Rocket size={12} />} Save &amp; redeploy
-              </button>
-            )}
-          </div>
-        </div>
-      )}
 
       <div className="tabs">
         {TABS.map((t) => (
@@ -345,12 +321,34 @@ export function AppDetail() {
       </div>
 
       {tab === 'overview' && <OverviewTab svc={svc} nodeLabel={node?.name ?? svc.nodeId} urls={urls.map((u) => u.url)} />}
-      {tab === 'networking' && <NetworkingTab svc={svc} draft={draft} setDraft={setDraft} reload={load} errors={visibleErrors} />}
+      {tab === 'networking' && <NetworkingTab svc={svc} reload={load} />}
       {tab === 'logs' && <LogsTab svc={svc} />}
       {tab === 'deployments' && <DeploymentsTab serviceId={svc.id} />}
       {tab === 'settings' && (
         <SettingsTab svc={svc} draft={draft} setDraft={setDraft} nodes={nodes} busy={busy}
-          deleting={busyAction === 'delete'} envErrors={visibleErrors.env} onDelete={() => act('delete')} />
+          deleting={busyAction === 'delete'} errors={visibleErrors} onDelete={() => act('delete')} />
+      )}
+
+      {/* Pinned save bar: rides the bottom of the viewport while the draft is
+          dirty, so the actions stay in reach of whichever field is being
+          edited. Adopted apps are read-only everywhere, so they never get
+          dirty and never see this bar. */}
+      {dirty && !svc.adopted && (
+        <div className="dirty-banner pinned" role="status">
+          <span className="row" style={{ flex: 1, minWidth: 220, gap: 8 }}>
+            <TriangleAlert size={14} style={{ color: 'var(--warn)', flex: 'none' }} aria-hidden />
+            <span>Unsaved changes. The app keeps running until you apply them.</span>
+          </span>
+          <div className="row">
+            <button className="btn sm" disabled={busy} onClick={() => setDraft(JSON.parse(baseline))}>Discard</button>
+            <button className="btn sm" disabled={busy} onClick={() => save(false)}>
+              {busyAction === 'save' ? <Spinner size={12} /> : <Save size={12} aria-hidden />} Save
+            </button>
+            <button className="btn sm primary" disabled={busy} onClick={() => save(true)}>
+              {busyAction === 'saveRedeploy' ? <Spinner size={12} /> : <Rocket size={12} aria-hidden />} Save &amp; redeploy
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -364,7 +362,7 @@ function OverviewTab({ svc, nodeLabel, urls }: { svc: Service; nodeLabel: string
       <div className="kpi-row">
         <Kpi label="CPU" value={svc.cpuPct.toFixed(1)} unit="%" />
         <Kpi label="Memory" value={svc.memUsedMb} unit={`MB${svc.memLimitMb ? ` / ${svc.memLimitMb}` : ''}`} />
-        <Kpi label="Port" value={svc.port || '—'} />
+        <Kpi label="Port" value={svc.port || 'none'} />
         <Kpi label="Machine" value={nodeLabel} />
       </div>
 
@@ -374,7 +372,7 @@ function OverviewTab({ svc, nodeLabel, urls }: { svc: Service; nodeLabel: string
           <dt>Source</dt>
           <dd>{svc.image || svc.gitRepo || `${svc.kind} stack`}</dd>
           <dt>Public URLs</dt>
-          <dd>{urls.length ? urls.join(' · ') : 'none yet — set one up in Networking'}</dd>
+          <dd>{urls.length ? urls.join(' · ') : 'none yet. Set one up in Networking.'}</dd>
           <dt>Container</dt>
           <dd>{svc.containerId || 'not created yet'}</dd>
           <dt>Restart policy</dt>
@@ -387,20 +385,21 @@ function OverviewTab({ svc, nodeLabel, urls }: { svc: Service; nodeLabel: string
   );
 }
 
-/* ---------- Networking: the make-it-public journey ---------- */
+/* ---------- Networking: the make-it-public journey, all instant actions ---------- */
 
-function NetworkingTab({ svc, draft, setDraft, reload, errors }: {
-  svc: Service; draft: Draft; setDraft: (d: Draft) => void; reload: () => void;
-  errors: DraftErrors;
-}) {
+function NetworkingTab({ svc, reload }: { svc: Service; reload: () => void }) {
   const toast = useToast();
   const { nodes, ingress, refresh } = useData();
   const [domains, setDomains] = useState<Domain[]>([]);
   const [domainsLoaded, setDomainsLoaded] = useState(false);
   const [tunnelBusy, setTunnelBusy] = useState(false);
   const [exposeBusy, setExposeBusy] = useState(false);
+  // Which route call is in flight. Picking in the select is local-only;
+  // nothing touches the API until Apply route or Remove route.
+  const [routeBusy, setRouteBusy] = useState<'' | 'apply' | 'remove'>('');
+  // null = nothing staged; a string is a staged select choice awaiting Apply.
+  const [routeChoice, setRouteChoice] = useState<string | null>(null);
   const node = nodes.find((n) => n.id === svc.nodeId);
-  const readOnly = !!svc.adopted;
 
   useEffect(() => {
     api.domains().then((d) => { setDomains(d ?? []); setDomainsLoaded(true); }).catch(() => {});
@@ -409,12 +408,20 @@ function NetworkingTab({ svc, draft, setDraft, reload, errors }: {
   // While a tunnel is starting, its URL lands via the 4s status refresh.
   useEffect(() => { if (svc.quickTunnelUrl) setTunnelBusy(false); }, [svc.quickTunnelUrl]);
 
-  const setRoute = async (host: string) => {
+  // A staged choice only means something against the route it was staged
+  // over: when the live route changes (applied here, or from another
+  // session), the stage resets to reality.
+  useEffect(() => { setRouteChoice(null); }, [svc.domain]);
+
+  const setRoute = async (host: string, op: 'apply' | 'remove') => {
+    setRouteBusy(op);
     try {
       await api.setServiceDomain(svc.id, host, !host ? 'none' : 'static');
       toast.ok(host ? `Routing ${host} to ${svc.name}.` : 'Public route removed.');
+      setRouteChoice(null);
       reload(); refresh();
     } catch (e) { toast.err(cleanError(e)); }
+    setRouteBusy('');
   };
 
   const expose = async () => {
@@ -431,7 +438,7 @@ function NetworkingTab({ svc, draft, setDraft, reload, errors }: {
     setTunnelBusy(true);
     try {
       await api.startQuickTunnel(svc.id);
-      toast.info('Tunnel starting — the URL appears here in ~15s (first run pulls cloudflared).');
+      toast.info('Tunnel starting. The URL appears here in ~15s (first run pulls cloudflared).');
     } catch (e) { toast.err(cleanError(e)); setTunnelBusy(false); }
   };
 
@@ -444,11 +451,22 @@ function NetworkingTab({ svc, draft, setDraft, reload, errors }: {
   };
 
   const edgeReady = ingress?.enabled && ingress.status === 'running';
+  // The select speaks in bare hostnames. A wildcard route is represented by
+  // its wildcard parent so re-selecting the current route stays a no-op.
   const currentIsWildcard = domains.find((d) => d.wildcard && (svc.domain || '').endsWith('.' + d.name.slice(2)));
-  // The domain the select currently points at (wildcard parent or exact
-  // match), so an unverified pick gets a visible warning instead of a route
-  // that silently never works.
-  const selectedDomain = currentIsWildcard ?? domains.find((d) => d.name === svc.domain);
+  const currentValue = currentIsWildcard?.name ?? (svc.domain || '');
+  const selectValue = routeChoice ?? currentValue;
+  const routeChanged = selectValue !== currentValue;
+  // The domain the select points at right now (staged or applied), so an
+  // unverified pick gets a visible warning instead of a route that silently
+  // never works.
+  const chosen = domains.find((d) => d.name === selectValue);
+
+  const applyRoute = () => {
+    let host = selectValue;
+    if (host.startsWith('*.')) host = `${dnsLabel(svc.name)}.${host.slice(2)}`;
+    setRoute(host, 'apply');
+  };
 
   return (
     <>
@@ -458,46 +476,56 @@ function NetworkingTab({ svc, draft, setDraft, reload, errors }: {
         <div className="row wrap">
           {publicUrls(svc, ingress).map((u) => <UrlChip key={u.url} url={u.url} />)}
           {node && svc.port > 0 && <UrlChip url={`http://${node.ip}:${svc.port}`} />}
-          {(!svc.port || !node) && <span className="faint">this app publishes no port{svc.kind === 'compose' ? ' — ports come from the compose file' : ''}</span>}
+          {(!svc.port || !node) && <span className="faint">this app publishes no port{svc.kind === 'compose' ? ' (ports come from the compose file)' : ''}</span>}
         </div>
       </div>
 
       {svc.port > 0 && (
-        <div className="card" style={{ marginBottom: 14 }}>
-          <div className="eyebrow" style={{ marginBottom: 12 }}>
-            Make it public
-            <InfoTip wide>
-              Three ways out to the internet: an instant nip.io URL through your own edge proxy
-              (needs the edge running on the Network page), a temporary Cloudflare tunnel that
-              works behind any router (the URL changes on restart — best for demos), or your own
-              domain (permanent, needs one DNS record — RackOps shows you exactly which).
-            </InfoTip>
-          </div>
+        <div className="card">
+          <div className="eyebrow" style={{ marginBottom: 12 }}>Make it public</div>
           <div className="stack" style={{ gap: 10 }}>
 
             {/* Option 1: instant URL */}
-            <div className="row spread" style={{ alignItems: 'flex-start' }}>
-              <div>
-                <div className="row" style={{ gap: 7 }}><Zap size={13} style={{ color: 'var(--accent)' }} aria-hidden /><strong>Instant URL</strong></div>
-                <div className="dim" style={{ marginTop: 3 }}>
-                  A free {`<app>.<ip>.nip.io`} address through your own edge — no DNS setup.
-                  {!edgeReady && ' Needs the edge proxy running (Network page).'}
+            <div className="row spread" style={{ alignItems: 'flex-start', gap: 14 }}>
+              <div style={{ minWidth: 0 }}>
+                <div className="row" style={{ gap: 7 }}>
+                  <Zap size={13} style={{ color: 'var(--accent)' }} aria-hidden />
+                  <strong>Instant URL</strong>
+                  <span className="badge accent">Recommended</span>
+                  <InfoTip wide>
+                    Publishes this app at a free {`<app>.<ip>.nip.io`} address through your own
+                    edge proxy. No DNS setup and no third party; the address keeps working for
+                    as long as the edge runs.
+                  </InfoTip>
                 </div>
+                <div className="dim" style={{ marginTop: 3 }}>Free nip.io address through your own edge.</div>
               </div>
-              <button className="btn sm" disabled={exposeBusy || !edgeReady} onClick={expose}>
-                {exposeBusy ? <Spinner size={12} /> : <Zap size={12} />} Get instant URL
-              </button>
+              <div style={{ flex: 'none', textAlign: 'right' }}>
+                <button className="btn sm" disabled={exposeBusy || !edgeReady} onClick={expose}>
+                  {exposeBusy ? <Spinner size={12} /> : <Zap size={12} aria-hidden />} Get instant URL
+                </button>
+                {!edgeReady && (
+                  <div className="faint" style={{ marginTop: 5, maxWidth: 220 }}>
+                    Needs the edge proxy running. <Link to="/network">Start it on the Network page</Link>.
+                  </div>
+                )}
+              </div>
             </div>
             <hr className="divider" style={{ margin: '2px 0' }} />
 
             {/* Option 2: quick tunnel */}
-            <div className="row spread" style={{ alignItems: 'flex-start' }}>
-              <div>
-                <div className="row" style={{ gap: 7 }}><Cloud size={13} style={{ color: 'var(--accent)' }} aria-hidden /><strong>Quick tunnel</strong></div>
-                <div className="dim" style={{ marginTop: 3 }}>
-                  Public HTTPS URL that works behind any router — no account, no port forwarding.
-                  For demos and testing: the URL changes when it restarts.
+            <div className="row spread" style={{ alignItems: 'flex-start', gap: 14 }}>
+              <div style={{ minWidth: 0 }}>
+                <div className="row" style={{ gap: 7 }}>
+                  <Cloud size={13} style={{ color: 'var(--accent)' }} aria-hidden />
+                  <strong>Quick tunnel</strong>
+                  <InfoTip wide>
+                    A Cloudflare tunnel with a public HTTPS URL. No account, no port forwarding,
+                    works behind any router. The URL changes when the tunnel restarts, so treat
+                    it as disposable (best for demos and testing).
+                  </InfoTip>
                 </div>
+                <div className="dim" style={{ marginTop: 3 }}>Temporary public HTTPS URL, works behind any router.</div>
                 {svc.quickTunnelUrl && (
                   <a className="mono" style={{ fontSize: 12, marginTop: 6, display: 'inline-block' }}
                     href={svc.quickTunnelUrl} target="_blank" rel="noreferrer">
@@ -506,46 +534,61 @@ function NetworkingTab({ svc, draft, setDraft, reload, errors }: {
                 )}
               </div>
               {svc.quickTunnelUrl ? (
-                <button className="btn sm danger" onClick={stopTunnel}>Stop tunnel</button>
+                <button className="btn sm danger" style={{ flex: 'none' }} onClick={stopTunnel}>Stop tunnel</button>
               ) : (
-                <button className="btn sm" disabled={tunnelBusy} onClick={startTunnel}>
-                  {tunnelBusy ? <Spinner size={12} /> : <Cloud size={12} />} {tunnelBusy ? 'Starting…' : 'Start tunnel'}
+                <button className="btn sm" style={{ flex: 'none' }} disabled={tunnelBusy} onClick={startTunnel}>
+                  {tunnelBusy ? <Spinner size={12} /> : <Cloud size={12} aria-hidden />} {tunnelBusy ? 'Starting…' : 'Start tunnel'}
                 </button>
               )}
             </div>
             <hr className="divider" style={{ margin: '2px 0' }} />
 
-            {/* Option 3: own domain */}
+            {/* Option 3: own domain. Selecting only stages the choice; Apply
+                route is the single commit point. */}
             <div>
-              <div className="row" style={{ gap: 7 }}><Globe size={13} style={{ color: 'var(--accent)' }} aria-hidden /><strong>Your own domain</strong></div>
+              <div className="row" style={{ gap: 7 }}>
+                <Globe size={13} style={{ color: 'var(--accent)' }} aria-hidden />
+                <strong>Your own domain</strong>
+                <InfoTip wide>
+                  Routes a domain you own to this app through the edge proxy. Needs one DNS
+                  record; RackOps shows you exactly which on the Network page. Picking a domain
+                  here changes nothing until you apply it.
+                </InfoTip>
+              </div>
               <div className="dim" style={{ margin: '3px 0 10px' }}>
-                Route a domain you own to this app.
+                Permanent address on a domain you own.
                 {domainsLoaded && domains.length === 0 && <> First <Link to="/network">add the domain</Link> so RackOps can give you the DNS record.</>}
               </div>
               <div className="row wrap">
                 <select className="input" style={{ flex: '1 1 240px', maxWidth: 380 }}
                   aria-label={`Domain route for ${svc.name}`}
-                  value={currentIsWildcard?.name ?? (svc.domain || '')}
-                  onChange={(e) => {
-                    let host = e.target.value;
-                    if (host.startsWith('*.')) host = `${dnsLabel(svc.name)}.${host.slice(2)}`;
-                    setRoute(host);
-                  }}>
-                  <option value="">— no domain route —</option>
+                  value={selectValue} disabled={routeBusy !== ''}
+                  onChange={(e) => setRouteChoice(e.target.value)}>
+                  <option value="" disabled>Choose a domain…</option>
                   {svc.domain && !domains.some((d) => d.name === svc.domain || (d.wildcard && svc.domain.endsWith('.' + d.name.slice(2)))) &&
-                    <option value={svc.domain}>{svc.domain} (instant)</option>}
+                    <option value={svc.domain}>{svc.domain}</option>}
                   {domains.map((d) => (
                     <option key={d.id} value={d.name}>
-                      {d.wildcard ? `${dnsLabel(svc.name)}.${d.name.slice(2)} (via ${d.name})` : d.name}
-                      {d.status !== 'verified' ? ' — unverified' : ''}
+                      {d.wildcard ? `${dnsLabel(svc.name)}.${d.name.slice(2)}` : d.name}
                     </option>
                   ))}
                 </select>
-                {svc.domain && <span className="dim mono">current: {svc.domain}</span>}
+                {chosen && chosen.status !== 'verified' && <span className="badge warn">unverified</span>}
+                <button className="btn sm primary" disabled={!routeChanged || routeBusy !== ''} onClick={applyRoute}
+                  aria-label={`Apply domain route for ${svc.name}`}>
+                  {routeBusy === 'apply' && <Spinner size={12} />} Apply route
+                </button>
+                {svc.domain && (
+                  <button className="btn sm" disabled={routeBusy !== ''} onClick={() => setRoute('', 'remove')}
+                    aria-label={`Remove domain route for ${svc.name}`}>
+                    {routeBusy === 'remove' && <Spinner size={12} />} Remove route
+                  </button>
+                )}
+                {svc.domain && routeChanged && <span className="dim mono">current: {svc.domain}</span>}
               </div>
-              {selectedDomain && selectedDomain.status !== 'verified' && (
+              {chosen && chosen.status !== 'verified' && (
                 <div style={{ color: 'var(--warn)', fontSize: 12, marginTop: 6 }}>
-                  This domain hasn&rsquo;t verified yet — routing won&rsquo;t work until it does.{' '}
+                  This domain hasn&rsquo;t verified yet, so routing won&rsquo;t work until it does.{' '}
                   <Link to="/network">Check its DNS on the Network page</Link>.
                 </div>
               )}
@@ -553,48 +596,6 @@ function NetworkingTab({ svc, draft, setDraft, reload, errors }: {
           </div>
         </div>
       )}
-
-      {/* Ports */}
-      <div className="card">
-        <div className="eyebrow" style={{ marginBottom: 12 }}>
-          Ports
-          <InfoTip wide>
-            Two different ports: the one your app listens on <em>inside</em> its container, and
-            the host port it&rsquo;s published on (what URLs and routing use). If your preferred
-            host port is taken, RackOps bumps to the next free one. Changes apply on
-            Save &amp; redeploy.
-          </InfoTip>
-        </div>
-        {readOnly && (
-          <div className="dim" style={{ marginBottom: 12 }}>
-            Adopted app — ports are managed where this container was created, so these fields are read-only.
-          </div>
-        )}
-        <div className="grid-3">
-          <Field label="App listens on (container)" style={{ marginBottom: 0 }} error={errors.containerPort}>
-            {(p) => (
-              <input className="input mono" {...p} inputMode="numeric" placeholder="e.g. 3000"
-                value={draft.containerPort} readOnly={readOnly}
-                onChange={(e) => setDraft({ ...draft, containerPort: e.target.value.replace(/\D/g, '') })} />
-            )}
-          </Field>
-          <Field label="Reachable on host port" style={{ marginBottom: 0 }} error={errors.port}>
-            {(p) => (
-              <input className="input mono" {...p} inputMode="numeric" value={draft.port} readOnly={readOnly}
-                onChange={(e) => setDraft({ ...draft, port: e.target.value.replace(/\D/g, '') })} />
-            )}
-          </Field>
-          <Field label="Extra ports (comma-separated)" style={{ marginBottom: 0 }} error={errors.ports}>
-            {(p) => (
-              <input className="input mono" {...p} placeholder="9000, 5432" value={draft.ports} readOnly={readOnly}
-                onChange={(e) => setDraft({ ...draft, ports: e.target.value })} />
-            )}
-          </Field>
-        </div>
-        {draft.containerPort && draft.port && draft.containerPort !== draft.port && (
-          <div className="faint" style={{ marginTop: 8 }}>Publishes host <span className="mono">{draft.port}</span> → container <span className="mono">{draft.containerPort}</span>.</div>
-        )}
-      </div>
     </>
   );
 }
@@ -681,7 +682,7 @@ function LogsTab({ svc }: { svc: Service }) {
           <InfoTip wide>
             Live tail streams new output as it happens (like <code>docker logs -f</code>).
             Untick it for a one-shot snapshot. &ldquo;Clear old&rdquo; only hides output before
-            this moment in the dashboard — nothing is deleted from the machine.
+            this moment in the dashboard; nothing is deleted from the machine.
           </InfoTip>
           {follow && live && <span className="badge accent">live</span>}
           {follow && !live && <span className="badge neutral">connecting…</span>}
@@ -762,7 +763,7 @@ function DeploymentsTab({ serviceId }: { serviceId: string }) {
           <strong>Deployment history</strong>
           <InfoTip>
             Every build and deploy of this app, newest first, with its full output. A deploy in
-            progress streams its log live — click any row to expand it.
+            progress streams its log live. Click any row to expand it.
           </InfoTip>
         </div>
         <button className="btn sm" disabled={refreshing} onClick={onRefresh}
@@ -813,10 +814,10 @@ function DeploymentsTab({ serviceId }: { serviceId: string }) {
 
 /* ---------- Settings (all editable config + danger zone) ---------- */
 
-function SettingsTab({ svc, draft, setDraft, nodes, busy, deleting, envErrors, onDelete }: {
+function SettingsTab({ svc, draft, setDraft, nodes, busy, deleting, errors, onDelete }: {
   svc: Service; draft: Draft; setDraft: (d: Draft) => void;
   nodes: ReturnType<typeof useData>['nodes']; busy: boolean; deleting: boolean;
-  envErrors: Record<string, string>; onDelete: () => void;
+  errors: DraftErrors; onDelete: () => void;
 }) {
   const toast = useToast();
   const [scores, setScores] = useState<PlacementScore[]>([]);
@@ -845,10 +846,10 @@ function SettingsTab({ svc, draft, setDraft, nodes, busy, deleting, envErrors, o
   return (
     <div className="stack">
       {readOnly && (
-        <div className="card inset row" style={{ gap: 10, padding: '10px 14px' }}>
-          <Info size={14} style={{ color: 'var(--accent)', flex: 'none' }} aria-hidden />
+        <div className="card warn row" style={{ gap: 10, padding: '10px 14px' }}>
+          <TriangleAlert size={14} style={{ color: 'var(--warn)', flex: 'none' }} aria-hidden />
           <span className="dim">
-            This container was adopted — it already existed on the machine. Start, stop, and remove
+            This container was adopted: it already existed on the machine. Start, stop, and remove
             work here, but its configuration lives where it was created, so these settings are read-only.
           </span>
         </div>
@@ -874,11 +875,50 @@ function SettingsTab({ svc, draft, setDraft, nodes, busy, deleting, envErrors, o
         {svc.gitRepo && <div className="dim mono">{svc.gitRepo} @ {svc.gitBranch || 'main'}</div>}
       </div>
 
+      {/* Ports are draft-based like everything else on this tab: they save
+          and apply with the rest of the config, so they live here rather than
+          among Networking's instant actions. */}
+      <div className="card">
+        <div className="eyebrow" style={{ marginBottom: 12 }}>
+          Ports
+          <InfoTip wide>
+            Two different ports: the one your app listens on <em>inside</em> its container, and
+            the host port it&rsquo;s published on (what URLs and routing use). If your preferred
+            host port is taken, RackOps bumps to the next free one. Changes apply on
+            Save &amp; redeploy.
+          </InfoTip>
+        </div>
+        <div className="grid-3">
+          <Field label="App listens on (container)" style={{ marginBottom: 0 }} error={errors.containerPort}>
+            {(p) => (
+              <input className="input mono" {...p} inputMode="numeric" placeholder="e.g. 3000"
+                value={draft.containerPort} readOnly={readOnly}
+                onChange={(e) => setDraft({ ...draft, containerPort: e.target.value.replace(/\D/g, '') })} />
+            )}
+          </Field>
+          <Field label="Reachable on host port" style={{ marginBottom: 0 }} error={errors.port}>
+            {(p) => (
+              <input className="input mono" {...p} inputMode="numeric" value={draft.port} readOnly={readOnly}
+                onChange={(e) => setDraft({ ...draft, port: e.target.value.replace(/\D/g, '') })} />
+            )}
+          </Field>
+          <Field label="Extra ports (comma-separated)" style={{ marginBottom: 0 }} error={errors.ports}>
+            {(p) => (
+              <input className="input mono" {...p} placeholder="9000, 5432" value={draft.ports} readOnly={readOnly}
+                onChange={(e) => setDraft({ ...draft, ports: e.target.value })} />
+            )}
+          </Field>
+        </div>
+        {draft.containerPort && draft.port && draft.containerPort !== draft.port && (
+          <div className="faint" style={{ marginTop: 8 }}>Publishes host <span className="mono">{draft.port}</span> → container <span className="mono">{draft.containerPort}</span>.</div>
+        )}
+      </div>
+
       <div className="card">
         <div className="eyebrow" style={{ marginBottom: 12 }}>
           Environment variables
           <InfoTip wide>
-            Passed to the container at start. The key icon marks a value as a secret — masked
+            Passed to the container at start. The key icon marks a value as a secret: masked
             here and redacted from API and AI-tool output. Changes apply on Save &amp; redeploy.
           </InfoTip>
         </div>
@@ -887,8 +927,8 @@ function SettingsTab({ svc, draft, setDraft, nodes, busy, deleting, envErrors, o
             <div className="row">
               <input className="input mono" placeholder="KEY" value={v.key} readOnly={readOnly}
                 aria-label={`Variable ${i + 1} name`}
-                aria-invalid={!!envErrors[v.rid]}
-                aria-describedby={envErrors[v.rid] ? `env-err-${v.rid}` : undefined}
+                aria-invalid={!!errors.env[v.rid]}
+                aria-describedby={errors.env[v.rid] ? `env-err-${v.rid}` : undefined}
                 onChange={(e) => setEnv(v.rid, { key: e.target.value })} />
               <input className="input mono" placeholder="value" type={v.secret ? 'password' : 'text'}
                 value={v.value} readOnly={readOnly}
@@ -904,8 +944,8 @@ function SettingsTab({ svc, draft, setDraft, nodes, busy, deleting, envErrors, o
                 aria-label={`Remove ${v.key || `variable ${i + 1}`}`}
                 onClick={() => setDraft({ ...draft, env: draft.env.filter((x) => x.rid !== v.rid) })}><Trash2 size={12} /></button>
             </div>
-            {envErrors[v.rid] && (
-              <div className="field-error" id={`env-err-${v.rid}`} style={{ marginTop: 4 }}>{envErrors[v.rid]}</div>
+            {errors.env[v.rid] && (
+              <div className="field-error" id={`env-err-${v.rid}`} style={{ marginTop: 4 }}>{errors.env[v.rid]}</div>
             )}
           </div>
         ))}
@@ -951,7 +991,7 @@ function SettingsTab({ svc, draft, setDraft, nodes, busy, deleting, envErrors, o
                     <option value="">Default docker storage</option>
                     {drives.map((d) => (
                       <option key={d.device} value={d.mountPoint}>
-                        {d.device} ({d.type.toUpperCase()}, {(d.sizeGb - d.usedGb).toFixed(0)} GB free) — {d.mountPoint}
+                        {d.device} ({d.type.toUpperCase()}, {(d.sizeGb - d.usedGb).toFixed(0)} GB free) at {d.mountPoint}
                       </option>
                     ))}
                   </select>
@@ -987,7 +1027,7 @@ function SettingsTab({ svc, draft, setDraft, nodes, busy, deleting, envErrors, o
         <div className="eyebrow" style={{ marginBottom: 12 }}>
           Resources &amp; machine
           <InfoTip wide>
-            Limits cap what the container may use — 0 means unlimited. Choosing a different
+            Limits cap what the container may use; 0 means unlimited. Choosing a different
             machine migrates the app on Save &amp; redeploy: the container moves, but data in
             managed volumes stays on the old machine&rsquo;s disk.
           </InfoTip>

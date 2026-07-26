@@ -21,13 +21,15 @@ export function ProfilePage() {
   return (
     <div className="page">
       <div className="page-title">Profile</div>
-      <div className="page-sub">Your account, password, API keys, and AI-tool access</div>
+      <div className="page-sub">Your API keys, AI-tool access, account, and password</div>
 
+      {/* API keys lead: they are what operators come here for. Identity and
+          password housekeeping follow. */}
       <div className="stack">
-        <AccountCard />
-        <ChangePasswordCard />
         <ApiKeysCard fresh={fresh} onFresh={setFresh} />
         <McpCard freshToken={fresh?.token} />
+        <AccountCard />
+        <ChangePasswordCard />
       </div>
     </div>
   );
@@ -55,7 +57,7 @@ function CopyGuard({ text }: { text: string }) {
       setDone(true);
       window.setTimeout(() => setDone(false), 1400);
     } catch {
-      toast.err('Copy failed — copy it manually');
+      toast.err('Copy failed. Copy it manually.');
     }
   };
   return (
@@ -80,7 +82,7 @@ function AccountCard() {
       <div className="eyebrow" style={{ marginBottom: 12 }}><UserRound size={12} /> Account</div>
       {me ? (
         <dl className="kv">
-          <dt>Name</dt><dd>{me.fullName || '—'}</dd>
+          <dt>Name</dt><dd>{me.fullName || '(not set)'}</dd>
           <dt>Email</dt><dd>{me.email}</dd>
           <dt>Role</dt><dd>{me.role}</dd>
           <dt>Member since</dt><dd>{new Date(me.createdAt).toLocaleDateString()}</dd>
@@ -88,7 +90,7 @@ function AccountCard() {
       ) : failed ? (
         <div className="row">
           <AlertTriangle size={14} style={{ color: 'var(--crit)' }} aria-hidden />
-          <span className="dim" style={{ flex: 1 }}>Couldn&rsquo;t load your account — the server didn&rsquo;t answer.</span>
+          <span className="dim" style={{ flex: 1 }}>Couldn&rsquo;t load your account. The server didn&rsquo;t answer.</span>
           <button className="btn sm" onClick={load}><RotateCw size={12} /> Retry</button>
         </div>
       ) : (
@@ -199,14 +201,14 @@ function ApiKeysCard({ fresh, onFresh }: {
       <div className="eyebrow" style={{ marginBottom: 6 }}>
         <KeyRound size={12} /> API keys
         <InfoTip wide>
-          API keys let tools call the RackOps API as you — the CLI, scripts, VS Code via MCP,
+          API keys let tools call the RackOps API as you: the CLI, scripts, VS Code via MCP,
           or anything speaking HTTP. A key has exactly your permissions, and revoking it here
           shuts that tool out instantly. Send it as <code>Authorization: Bearer</code> or
           <code> X-Api-Key</code>.
         </InfoTip>
       </div>
       <div className="dim" style={{ marginBottom: 14 }}>
-        Keys act with your role and are shown once at creation — store them somewhere safe.
+        Keys act with your role and are shown once at creation. Store them somewhere safe.
       </div>
 
       <div className="row wrap" style={{ alignItems: 'flex-end', marginBottom: 14 }}>
@@ -233,7 +235,7 @@ function ApiKeysCard({ fresh, onFresh }: {
           <div className="row spread" style={{ marginBottom: 8, alignItems: 'flex-start' }}>
             <div>
               <strong>{fresh.name}</strong>
-              <span className="dim"> — copy it now, it won&rsquo;t be shown again.</span>
+              <span className="dim">: copy it now, it won&rsquo;t be shown again.</span>
             </div>
             <button className="btn sm ghost" onClick={() => onFresh(null)}>Dismiss</button>
           </div>
@@ -248,12 +250,12 @@ function ApiKeysCard({ fresh, onFresh }: {
       {!loaded && loadFailed && (
         <div className="row" style={{ padding: '4px 0' }}>
           <AlertTriangle size={14} style={{ color: 'var(--crit)' }} aria-hidden />
-          <span className="dim" style={{ flex: 1 }}>Couldn&rsquo;t load your keys — the server didn&rsquo;t answer.</span>
+          <span className="dim" style={{ flex: 1 }}>Couldn&rsquo;t load your keys. The server didn&rsquo;t answer.</span>
           <button className="btn sm" onClick={load}><RotateCw size={12} /> Retry</button>
         </div>
       )}
       {loaded && tokens.length === 0 && !fresh && (
-        <div className="faint">No API keys yet — create one above.</div>
+        <div className="faint">No API keys yet. Create one above.</div>
       )}
       {loaded && tokens.length > 0 && (
         <div className="list">
@@ -312,7 +314,7 @@ function McpCard({ freshToken }: { freshToken?: string }) {
         <InfoTip wide>
           The RackOps binary doubles as an MCP server: <code>rackops mcp</code> speaks the Model
           Context Protocol over stdio, so AI assistants can list machines, deploy apps, read logs,
-          and check alerts — using an API key with exactly your permissions.
+          and check alerts, using an API key with exactly your permissions.
         </InfoTip>
       </div>
       <div className="dim" style={{ marginBottom: 12 }}>
@@ -328,7 +330,7 @@ function McpCard({ freshToken }: { freshToken?: string }) {
       </div>
       {freshToken && (
         <div className="faint" style={{ marginTop: 10 }}>
-          Your new key is filled in above — paste the snippet as-is. It disappears from here when
+          Your new key is filled in above; paste the snippet as-is. It disappears from here when
           you dismiss the key card.
         </div>
       )}

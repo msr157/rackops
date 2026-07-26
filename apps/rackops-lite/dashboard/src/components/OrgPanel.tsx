@@ -63,7 +63,7 @@ export function OrgPanel() {
       return (
         <EmptyState icon={<AlertTriangle size={18} />} title="Couldn’t load your organization">
           <div style={{ marginBottom: 12 }}>
-            The server didn’t answer. Nothing was changed — retry once the connection is back.
+            The server didn’t answer. Nothing was changed; retry once the connection is back.
           </div>
           <button className="btn" onClick={() => { load(); }}>
             <RefreshCw size={13} aria-hidden /> Retry
@@ -73,7 +73,7 @@ export function OrgPanel() {
     }
     return (
       <EmptyState icon={<Building2 size={18} />} title="No organization yet">
-        Create one from the sidebar switcher.
+        Admins can create one from the sidebar switcher.
       </EmptyState>
     );
   }
@@ -126,7 +126,7 @@ export function OrgPanel() {
     if (role === 'owner') {
       const yes = await confirm({
         title: `Make ${userLabel(m.userId)} an owner?`,
-        body: 'Owners hold the organization — they can rename or delete it and manage every member, including you.',
+        body: 'Owners hold the organization. They can rename or delete it and manage every member, including you.',
         confirmLabel: 'Make owner',
       });
       if (!yes) return false;
@@ -188,55 +188,15 @@ export function OrgPanel() {
 
   return (
     <div className="stack">
-      {/* Identity + danger zone */}
-      <div className="card">
-        <div className="eyebrow" style={{ marginBottom: 12 }}><Building2 size={12} aria-hidden /> Organization</div>
-        <div className="row spread wrap">
-          {renaming ? (
-            <div className="row" style={{ flex: 1 }}>
-              <label className="sr-only" htmlFor={renameId}>Organization name</label>
-              <input className="input" id={renameId} style={{ maxWidth: 280 }} value={name} autoFocus
-                disabled={renameBusy}
-                onChange={(e) => setName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') rename();
-                  if (e.key === 'Escape') { setRenaming(false); setName(org.name); }
-                }} />
-              <button className="btn sm primary" onClick={rename} disabled={renameBusy}
-                aria-label="Save name" title="Save name">
-                {renameBusy ? <Spinner size={12} /> : <Check size={12} />}
-              </button>
-              <button className="btn sm ghost" aria-label="Cancel rename" title="Cancel rename" disabled={renameBusy}
-                onClick={() => { setRenaming(false); setName(org.name); }}><X size={12} /></button>
-            </div>
-          ) : (
-            <div className="row" style={{ minWidth: 0 }}>
-              <strong style={{ fontSize: 15, fontWeight: 650, letterSpacing: '-0.01em' }}>{org.name}</strong>
-              <span className="faint">created {timeAgo(org.createdAt)}</span>
-              {canManage && (
-                <button className="btn sm ghost" aria-label="Rename organization" title="Rename organization"
-                  onClick={() => setRenaming(true)}>
-                  <Pencil size={12} />
-                </button>
-              )}
-            </div>
-          )}
-          {canManage && (
-            <button className="btn sm danger" onClick={removeOrg} disabled={deleting}>
-              {deleting ? <Spinner size={12} /> : <Trash2 size={12} aria-hidden />} Delete
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Members */}
+      {/* Members lead: they are the day-to-day work of this tab. Identity
+          follows; deletion lives alone in the danger zone at the bottom. */}
       <div className="card">
         <div className="row spread" style={{ marginBottom: 4 }}>
           <div className="eyebrow" style={{ margin: 0 }}>
             <UsersRound size={12} aria-hidden /> Members
             <InfoTip wide>
               Owners hold the organization; admins manage members and settings; members act
-              within the permissions you grant them below — including which projects they can see.
+              within the permissions you grant them below, including which projects they can see.
             </InfoTip>
           </div>
           {canManage && (
@@ -323,7 +283,60 @@ export function OrgPanel() {
             ))}
           </div>
           <div className="faint" style={{ marginTop: 8 }}>
-            Links are shown once at creation — revoke and re-invite if one was lost.
+            Links are shown once at creation. Revoke and re-invite if one was lost.
+          </div>
+        </div>
+      )}
+
+      {/* Identity */}
+      <div className="card">
+        <div className="eyebrow" style={{ marginBottom: 12 }}><Building2 size={12} aria-hidden /> Organization</div>
+        {renaming ? (
+          <div className="row" style={{ flex: 1 }}>
+            <label className="sr-only" htmlFor={renameId}>Organization name</label>
+            <input className="input" id={renameId} style={{ maxWidth: 280 }} value={name} autoFocus
+              disabled={renameBusy}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') rename();
+                if (e.key === 'Escape') { setRenaming(false); setName(org.name); }
+              }} />
+            <button className="btn sm primary" onClick={rename} disabled={renameBusy}
+              aria-label="Save name" title="Save name">
+              {renameBusy ? <Spinner size={12} /> : <Check size={12} />}
+            </button>
+            <button className="btn sm ghost" aria-label="Cancel rename" title="Cancel rename" disabled={renameBusy}
+              onClick={() => { setRenaming(false); setName(org.name); }}><X size={12} /></button>
+          </div>
+        ) : (
+          <div className="row" style={{ minWidth: 0 }}>
+            <strong style={{ fontSize: 15, fontWeight: 650, letterSpacing: '-0.01em' }}>{org.name}</strong>
+            <span className="faint">created {timeAgo(org.createdAt)}</span>
+            {canManage && (
+              <button className="btn sm ghost" aria-label="Rename organization" title="Rename organization"
+                onClick={() => setRenaming(true)}>
+                <Pencil size={12} />
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Danger zone: the one irreversible action on this tab, kept away from
+          the routine controls above. */}
+      {canManage && (
+        <div className="card crit">
+          <div className="eyebrow" style={{ marginBottom: 8, color: 'var(--crit)' }}>
+            <AlertTriangle size={12} aria-hidden /> Danger zone
+          </div>
+          <div className="row spread wrap">
+            <span className="dim" style={{ flex: 1, minWidth: 220 }}>
+              Deleting is only possible while the organization has no projects, machines, or
+              domains. Members keep their accounts.
+            </span>
+            <button className="btn danger" onClick={removeOrg} disabled={deleting}>
+              {deleting ? <Spinner size={13} /> : <Trash2 size={13} aria-hidden />} Delete organization
+            </button>
           </div>
         </div>
       )}
@@ -348,9 +361,16 @@ function PermissionsModal({ org, member, projects, label, onClose, onSaved }: {
   onClose: () => void; onSaved: () => void;
 }) {
   const toast = useToast();
+  const scopeGroup = useId();
   const [perms, setPerms] = useState<OrgPermissions>({ ...member.permissions });
+  // The backend stores "all projects" as an empty list. The editor never shows
+  // that inversion: an explicit radio pair carries the intent, and the list of
+  // ticked projects survives a round-trip through "All projects" unharmed.
+  const storedSelection = member.permissions.accessedProjects ?? [];
+  const [scope, setScope] = useState<'all' | 'selected'>(storedSelection.length === 0 ? 'all' : 'selected');
+  const [selected, setSelected] = useState<string[]>(storedSelection);
   const [busy, setBusy] = useState(false);
-  const allProjects = perms.accessedProjects === undefined || perms.accessedProjects.length === 0;
+  const scopeError = scope === 'selected' && selected.length === 0;
 
   const SWITCHES: { key: keyof OrgPermissions; label: string; hint: string }[] = [
     { key: 'createProjects', label: 'Create projects', hint: 'Start new projects in this organization' },
@@ -363,17 +383,23 @@ function PermissionsModal({ org, member, projects, label, onClose, onSaved }: {
   ];
 
   const save = async () => {
-    if (busy) return;
+    if (busy || scopeError) return;
     setBusy(true);
     try {
-      await api.setOrgMember(org.id, member.userId, { permissions: perms });
+      // The empty-array-means-all convention is mapped exactly here, nowhere
+      // else: the radios above are the single source of intent.
+      const permissions: OrgPermissions = {
+        ...perms,
+        accessedProjects: scope === 'all' ? [] : selected,
+      };
+      await api.setOrgMember(org.id, member.userId, { permissions });
       toast.ok(`Permissions updated for ${label}.`);
       onSaved();
     } catch (e) { toast.err(cleanError(e)); setBusy(false); }
   };
 
   return (
-    <Modal title={`Permissions — ${label}`} icon={<Shield size={15} />} width={520} onClose={onClose}>
+    <Modal title={`Permissions for ${label}`} icon={<Shield size={15} />} width={520} onClose={onClose}>
       <div className="stack" style={{ gap: 6, marginBottom: 16 }}>
         {SWITCHES.map((s) => (
           <label key={s.key} className="check" style={{ alignItems: 'flex-start', gap: 9 }}>
@@ -390,36 +416,45 @@ function PermissionsModal({ org, member, projects, label, onClose, onSaved }: {
       <div className="eyebrow" style={{ marginBottom: 8 }}>
         Project access
         <InfoTip wide>
-          An empty selection means every project, current and future — unticking all
-          projects grants the same access as “All projects”.
+          All projects covers projects created later, too. Only selected projects limits this
+          member to the ticked projects until you change them here.
         </InfoTip>
       </div>
-      <label className="check" style={{ marginBottom: 6 }}>
-        <input type="checkbox" checked={allProjects} disabled={busy}
-          onChange={(e) => setPerms({ ...perms, accessedProjects: e.target.checked ? [] : projects.map((p) => p.id) })} />
-        <span>All projects (current and future)</span>
-      </label>
-      {!allProjects && (
+      <div className="stack" style={{ gap: 6, marginBottom: 8 }} role="radiogroup" aria-label="Project access">
+        <label className="check">
+          <input type="radio" name={scopeGroup} checked={scope === 'all'} disabled={busy}
+            onChange={() => setScope('all')} />
+          <span>All projects (current and future)</span>
+        </label>
+        <label className="check">
+          <input type="radio" name={scopeGroup} checked={scope === 'selected'} disabled={busy}
+            onChange={() => setScope('selected')} />
+          <span>Only selected projects</span>
+        </label>
+      </div>
+      {scope === 'selected' && (
         <div className="stack" style={{ gap: 4, marginLeft: 22, marginBottom: 8 }}>
           {projects.map((p) => {
-            const on = (perms.accessedProjects ?? []).includes(p.id);
+            const on = selected.includes(p.id);
             return (
               <label key={p.id} className="check">
                 <input type="checkbox" checked={on} disabled={busy}
                   onChange={(e) => {
-                    const cur = new Set(perms.accessedProjects ?? []);
+                    const cur = new Set(selected);
                     if (e.target.checked) cur.add(p.id); else cur.delete(p.id);
-                    setPerms({ ...perms, accessedProjects: [...cur] });
+                    setSelected([...cur]);
                   }} />
                 <span>{p.name}</span>
               </label>
             );
           })}
-          {projects.length === 0 && <span className="faint">no projects yet</span>}
+          {projects.length === 0 && <span className="faint">No projects in this organization yet.</span>}
+          {scopeError && <span className="field-error" role="alert">Select at least one project</span>}
         </div>
       )}
 
-      <button className="btn primary" style={{ width: '100%', marginTop: 10 }} disabled={busy} onClick={save}>
+      <button className="btn primary" style={{ width: '100%', marginTop: 10 }}
+        disabled={busy || scopeError} onClick={save}>
         {busy ? <Spinner size={13} /> : <Check size={13} />} Save permissions
       </button>
     </Modal>
@@ -452,7 +487,7 @@ function InviteModal({ org, onClose, onDone }: { org: Organization; onClose: () 
       await navigator.clipboard.writeText(link);
       setCopied(true); setTimeout(() => setCopied(false), 1400);
     } catch {
-      toast.err('Couldn’t reach the clipboard — select the link and copy it manually.');
+      toast.err('Couldn’t reach the clipboard. Select the link and copy it manually.');
     }
   };
 
@@ -462,7 +497,7 @@ function InviteModal({ org, onClose, onDone }: { org: Organization; onClose: () 
       {!link ? (
         <>
           <div className="dim" style={{ marginBottom: 14 }}>
-            You&rsquo;ll get a link to send them — it lets them create their account already
+            You&rsquo;ll get a link to send them. It lets them create their account already
             inside this organization. Links expire after 48 hours.
           </div>
           <Field label="Email">
@@ -471,11 +506,14 @@ function InviteModal({ org, onClose, onDone }: { org: Organization; onClose: () 
                 onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && create()} />
             )}
           </Field>
-          <Field label="Role">
+          <Field label="Role"
+            hint={role === 'admin'
+              ? 'Admins manage members, invitations, and settings.'
+              : 'Members work within the permissions you grant them.'}>
             {(p) => (
               <select className="input" {...p} value={role} onChange={(e) => setRole(e.target.value)}>
-                <option value="member">member — works within granted permissions</option>
-                <option value="admin">admin — manages members and settings</option>
+                <option value="member">member</option>
+                <option value="admin">admin</option>
               </select>
             )}
           </Field>
@@ -486,7 +524,7 @@ function InviteModal({ org, onClose, onDone }: { org: Organization; onClose: () 
       ) : (
         <>
           <div className="badge warn" style={{ width: '100%', marginBottom: 12 }}>
-            Copy this link now — it&rsquo;s shown only once.
+            Copy this link now. It&rsquo;s shown only once.
           </div>
           <div className="row" style={{ gap: 8, marginBottom: 14 }}>
             <code className="code-block" style={{ flex: 1, wordBreak: 'break-all' }}>{link}</code>

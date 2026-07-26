@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useId, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import {
   AlertTriangle, ArrowLeft, CheckCircle2, LifeBuoy, MessageSquareText, Plus, RotateCw, Send,
 } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
 import { api, subscribe } from '../api';
 import type { SupportTicket } from '../api';
 import { useToast, cleanError } from '../components/toast';
@@ -17,21 +18,55 @@ const CATEGORIES = [
   ['billing', 'Billing'],
 ] as const;
 
+// Option labels are the severity names alone; what each one means lives in
+// the field hint below the select, keyed to the current choice.
 const SEVERITIES = [
-  ['low', 'Low — no rush'],
+  ['low', 'Low'],
   ['normal', 'Normal'],
-  ['high', 'High — something important is broken'],
-  ['urgent', 'Urgent — production is down'],
+  ['high', 'High'],
+  ['urgent', 'Urgent'],
 ] as const;
+
+const SEVERITY_HINTS: Record<string, string> = {
+  low: 'No rush.',
+  normal: 'A standard question or request.',
+  high: 'Something important is broken.',
+  urgent: 'Production is down.',
+};
 
 // Support: talk to RackOps support without leaving the dashboard. Tickets are
 // forwarded to the support desk; replies land back in the thread (~1 min).
 export function SupportPage() {
+  const confirm = useConfirm();
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
-  const [open, setOpen] = useState('');
+  // The open ticket lives in the URL, so a refresh (or a shared link) lands
+  // back on the same thread instead of the inbox.
+  const [params, setParams] = useSearchParams();
+  const open = params.get('ticket') ?? '';
   const [composing, setComposing] = useState(false);
+  // A typed-but-unsent reply in the open thread; a ref because only the
+  // navigation guards read it, never the render.
+  const replyDirty = useRef(false);
+
+  const setOpen = useCallback((id: string) => {
+    setParams(id ? { ticket: id } : {}, { replace: true });
+  }, [setParams]);
+
+  // Leaving a thread with a typed reply pauses for the same decision the
+  // compose form asks for — real words must not vanish on a stray click.
+  const guardReply = useCallback(async (): Promise<boolean> => {
+    if (!replyDirty.current) return true;
+    const yes = await confirm({
+      title: 'Discard your reply?',
+      body: 'The reply you typed will be lost.',
+      confirmLabel: 'Discard reply',
+      danger: true,
+    });
+    if (yes) replyDirty.current = false;
+    return yes;
+  }, [confirm]);
 
   const load = useCallback(() => {
     api.tickets()
@@ -49,20 +84,29 @@ export function SupportPage() {
   const active = tickets.filter((t) => t.status !== 'resolved');
   const resolved = tickets.filter((t) => t.status === 'resolved');
   const current = tickets.find((t) => t.id === open);
+  // The empty state carries its own New ticket action, and the compose form
+  // is the action — one visible way in at a time.
+  const showNewTicket = !composing && !(loaded && tickets.length === 0 && !current);
 
   return (
     <div className="page" style={{ maxWidth: 780 }}>
       <div className="row spread" style={{ marginBottom: 4 }}>
         <div className="page-title">Support</div>
-        <button className="btn primary" onClick={() => { setComposing(true); setOpen(''); }}>
-          <Plus size={14} /> New ticket
-        </button>
+        {showNewTicket && (
+          <button className="btn primary"
+            onClick={async () => {
+              if (!(await guardReply())) return;
+              setComposing(true); setOpen('');
+            }}>
+            <Plus size={14} aria-hidden /> New ticket
+          </button>
+        )}
       </div>
       <div className="page-sub">
-        Ask RackOps support for help — replies show up right here
+        Ask RackOps support for help. Replies show up right here
         <InfoTip wide>
           Tickets are sent to the RackOps support team along with an anonymous usage summary
-          (version, machine/app counts, which features you use — never names, domains, or
+          (version, machine/app counts, which features you use; never names, domains, or
           credentials). It helps support see your setup at a glance and helps us improve RackOps.
         </InfoTip>
       </div>
@@ -70,7 +114,9 @@ export function SupportPage() {
       {composing && <Compose onDone={(id) => { setComposing(false); load(); setOpen(id); }} onCancel={() => setComposing(false)} />}
 
       {current ? (
-        <Thread ticket={current} onBack={() => setOpen('')} onChanged={load} />
+        <Thread key={current.id} ticket={current} onChanged={load}
+          onDirty={(d) => { replyDirty.current = d; }}
+          onBack={async () => { if (await guardReply()) setOpen(''); }} />
       ) : !composing && (
         <>
           {/* Until the first fetch answers, this is a list on its way — never
@@ -80,14 +126,14 @@ export function SupportPage() {
             <div className="card row">
               <AlertTriangle size={14} style={{ color: 'var(--crit)' }} aria-hidden />
               <span className="dim" style={{ flex: 1 }}>
-                Couldn&rsquo;t load your tickets — the server didn&rsquo;t answer.
+                Couldn&rsquo;t load your tickets. The server didn&rsquo;t answer.
               </span>
               <button className="btn sm" onClick={load}><RotateCw size={12} /> Retry</button>
             </div>
           )}
           {loaded && tickets.length === 0 && (
             <EmptyState icon={<LifeBuoy size={18} />} title="No tickets yet">
-              <div style={{ marginBottom: 14 }}>Stuck on something? Open a ticket — a human answers.</div>
+              <div style={{ marginBottom: 14 }}>Stuck on something? Open a ticket. A human answers.</div>
               <button className="btn primary" onClick={() => setComposing(true)}>
                 <Plus size={13} /> New ticket
               </button>
@@ -107,7 +153,7 @@ function ticketLed(status: SupportTicket['status']): string {
 
 function statusLabel(status: SupportTicket['status']): string {
   return status === 'open' ? 'waiting for support'
-    : status === 'pending' ? 'support replied — your turn' : 'resolved';
+    : status === 'pending' ? 'support replied, your turn' : 'resolved';
 }
 
 // One severity treatment everywhere: status ink only for real escalations,
@@ -161,11 +207,12 @@ function Compose({ onDone, onCancel }: { onDone: (id: string) => void; onCancel:
   const [busy, setBusy] = useState(false);
 
   const submit = async () => {
+    if (busy) return;
     if (!subject.trim() || !body.trim()) { toast.err('Give the ticket a subject and describe the problem.'); return; }
     setBusy(true);
     try {
       const t = await api.createTicket({ subject: subject.trim(), category, severity, body: body.trim() });
-      toast.ok('Ticket sent — support usually answers within a business day.');
+      toast.ok('Ticket sent. Support usually answers within a business day.');
       onDone(t.id);
     } catch (e) { toast.err(cleanError(e)); setBusy(false); }
   };
@@ -202,7 +249,7 @@ function Compose({ onDone, onCancel }: { onDone: (id: string) => void; onCancel:
             </select>
           )}
         </Field>
-        <Field label="Severity">
+        <Field label="Severity" hint={SEVERITY_HINTS[severity]}>
           {(p) => (
             <select className="input" {...p} value={severity} onChange={(e) => setSeverity(e.target.value)}>
               {SEVERITIES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
@@ -210,11 +257,14 @@ function Compose({ onDone, onCancel }: { onDone: (id: string) => void; onCancel:
           )}
         </Field>
       </div>
-      <Field label="What happened?">
+      <Field label="What happened?" hint="Error messages and logs help a lot. Ctrl/⌘+Enter sends.">
         {(p) => (
           <textarea className="input" {...p} rows={6} value={body}
-            placeholder="What did you try, what did you expect, what happened instead? Error messages and logs help a lot."
-            onChange={(e) => setBody(e.target.value)} />
+            placeholder="What did you try, what did you expect, what happened instead?"
+            onChange={(e) => setBody(e.target.value)}
+            onKeyDown={(e) => {
+              if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); submit(); }
+            }} />
         )}
       </Field>
       <div className="row">
@@ -227,14 +277,29 @@ function Compose({ onDone, onCancel }: { onDone: (id: string) => void; onCancel:
   );
 }
 
-function Thread({ ticket, onBack, onChanged }: {
+function Thread({ ticket, onBack, onChanged, onDirty }: {
   ticket: SupportTicket; onBack: () => void; onChanged: () => void;
+  onDirty: (dirty: boolean) => void;
 }) {
   const toast = useToast();
   const [reply, setReply] = useState('');
   const [busy, setBusy] = useState(false);
   const [resolving, setResolving] = useState(false);
   const replyId = useId();
+  const listRef = useRef<HTMLDivElement>(null);
+
+  // The parent's dirty flag must never outlive the thread it belongs to.
+  const onDirtyRef = useRef(onDirty);
+  onDirtyRef.current = onDirty;
+  useEffect(() => () => onDirtyRef.current(false), []);
+
+  // Newest message in view on mount and whenever one lands, so the reply row
+  // below never has to chase a growing list.
+  const lastMsgId = ticket.messages[ticket.messages.length - 1]?.id;
+  useEffect(() => {
+    const el = listRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [lastMsgId]);
 
   const send = async () => {
     if (!reply.trim() || busy) return;
@@ -242,6 +307,7 @@ function Thread({ ticket, onBack, onChanged }: {
     try {
       await api.replyTicket(ticket.id, reply.trim());
       setReply('');
+      onDirty(false);
       onChanged();
     } catch (e) { toast.err(cleanError(e)); }
     setBusy(false);
@@ -278,7 +344,8 @@ function Thread({ ticket, onBack, onChanged }: {
         </div>
       </div>
 
-      <div className="stack" style={{ gap: 10, margin: '14px 0' }}>
+      <div ref={listRef} className="stack"
+        style={{ gap: 10, margin: '14px 0', maxHeight: '55vh', overflowY: 'auto', paddingRight: 2 }}>
         {ticket.messages.map((m) => (
           <div key={m.id} className={`card inset ${m.author === 'agent' ? 'accent' : ''}`} style={{
             marginLeft: m.author === 'agent' ? 0 : 24,
@@ -302,7 +369,11 @@ function Thread({ ticket, onBack, onChanged }: {
           placeholder={ticket.status === 'resolved'
             ? 'Reply to reopen this ticket… (Ctrl/⌘+Enter to send)'
             : 'Write a reply… (Ctrl/⌘+Enter to send)'}
-          onChange={(e) => setReply(e.target.value)}
+          onChange={(e) => {
+            const v = e.target.value;
+            setReply(v);
+            onDirty(!!v.trim());
+          }}
           onKeyDown={(e) => {
             if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); send(); }
           }} />

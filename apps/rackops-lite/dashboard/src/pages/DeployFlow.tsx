@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   Rocket, Package, Container, GitBranch, Layers, Sparkles, Plus, Trash2, ArrowLeft, ArrowRight,
   Globe, Check, CheckCircle2, ScrollText, Bot, Server, Home, Wrench, Gamepad2, Database, KeyRound,
@@ -38,21 +38,93 @@ const TPL_GRID: React.CSSProperties = {
   display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 8,
 };
 
-// Env rows need identity that survives removal from the middle of the list —
+// Env rows need identity that survives removal from the middle of the list;
 // index keys would hand row N's focused input to row N+1's data.
 type EnvRow = EnvVar & { _id: number };
 let envRowSeq = 0;
 const envRow = (v: EnvVar): EnvRow => ({ ...v, _id: ++envRowSeq });
 
-// DeployFlow: pick a source → configure → launch and watch it go live.
+// The in-progress wizard lives in sessionStorage (tab-scoped) so a refresh at
+// step 1 or 2 lands back where the operator left off. Cleared the moment a
+// launch succeeds so a finished deploy never resurrects old input.
+const DRAFT_KEY = 'rackops-deploy-draft';
+
+interface DeployDraft {
+  step: 1 | 2;
+  source: Source;
+  // The whole template is stored, not just its id, so rehydration works even
+  // while the remote catalog is still loading (or failing to).
+  tpl: Template | null;
+  image: string;
+  gitRepo: string;
+  gitBranch: string;
+  gitToken: string;
+  composeYml: string;
+  name: string;
+  containerPort: string;
+  hostPort: string;
+  hostTouched: boolean;
+  nodeId: string;
+  envVars: EnvVar[];
+}
+
+function readDraft(): DeployDraft | null {
+  try {
+    const raw = sessionStorage.getItem(DRAFT_KEY);
+    if (!raw) return null;
+    const d = JSON.parse(raw) as Partial<DeployDraft> | null;
+    if (!d || typeof d !== 'object') return null;
+    const source: Source =
+      d.source === 'image' || d.source === 'git' || d.source === 'compose' ? d.source : 'template';
+    return {
+      step: d.step === 2 ? 2 : 1,
+      source,
+      tpl: d.tpl && typeof d.tpl === 'object' ? d.tpl : null,
+      image: typeof d.image === 'string' ? d.image : '',
+      gitRepo: typeof d.gitRepo === 'string' ? d.gitRepo : '',
+      gitBranch: typeof d.gitBranch === 'string' ? d.gitBranch : 'main',
+      gitToken: typeof d.gitToken === 'string' ? d.gitToken : '',
+      composeYml: typeof d.composeYml === 'string' ? d.composeYml : '',
+      name: typeof d.name === 'string' ? d.name : '',
+      containerPort: typeof d.containerPort === 'string' ? d.containerPort : '',
+      hostPort: typeof d.hostPort === 'string' ? d.hostPort : '',
+      hostTouched: !!d.hostTouched,
+      nodeId: typeof d.nodeId === 'string' && d.nodeId !== '' ? d.nodeId : 'auto',
+      envVars: Array.isArray(d.envVars)
+        ? d.envVars
+          .filter((v): v is EnvVar => !!v && typeof v.key === 'string' && typeof v.value === 'string')
+          .map((v) => ({ key: v.key, value: v.value, secret: !!v.secret }))
+        : [],
+    };
+  } catch {
+    return null;
+  }
+}
+
+// The placement panel renders its skeleton, result, and error states inside
+// one reserved slot so the fields below never jump while scores load.
+const PLACEMENT_SLOT = 118;
+
+// DeployFlow: pick a source, configure, launch and watch it go live.
 // The flow ends on a working app, not a closed dialog.
 export function DeployFlow() {
   const { nodes, projects, envs, nodeName } = useData();
   const navigate = useNavigate();
   const toast = useToast();
 
-  const [step, setStep] = useState<1 | 2 | 3>(1);
-  const [source, setSource] = useState<Source>('template');
+  // /apps/new/launch/:serviceId is the refresh-safe home of a running launch;
+  // with a serviceId in the URL this page shows live progress, not the form.
+  const { serviceId: launchId } = useParams();
+  const onLaunch = !!launchId;
+
+  // Machines detail links here with ?node=<id> preselected.
+  const [searchParams] = useSearchParams();
+  const nodeParam = searchParams.get('node');
+
+  const [draft] = useState<DeployDraft | null>(readDraft);
+
+  const [step, setStep] = useState<1 | 2>(draft?.step ?? 1);
+  const [source, setSource] = useState<Source>(draft?.source ?? 'template');
   const searchId = useId();
   const sourceRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
@@ -61,66 +133,89 @@ export function DeployFlow() {
   const [tplState, setTplState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [category, setCategory] = useState('');
   const [search, setSearch] = useState('');
-  const [tpl, setTpl] = useState<Template | null>(null);
-  const [image, setImage] = useState('');
-  const [gitRepo, setGitRepo] = useState('');
-  const [gitBranch, setGitBranch] = useState('main');
-  const [gitToken, setGitToken] = useState('');
-  const [composeYml, setComposeYml] = useState('');
+  const [tpl, setTpl] = useState<Template | null>(draft?.tpl ?? null);
+  const [image, setImage] = useState(draft?.image ?? '');
+  const [gitRepo, setGitRepo] = useState(draft?.gitRepo ?? '');
+  const [gitBranch, setGitBranch] = useState(draft?.gitBranch ?? 'main');
+  const [gitToken, setGitToken] = useState(draft?.gitToken ?? '');
+  const [composeYml, setComposeYml] = useState(draft?.composeYml ?? '');
 
-  // step 2 state — containerPort is what the app listens on; hostPort is what
+  // step 2 state. containerPort is what the app listens on; hostPort is what
   // it's published/reached on (auto-suggested free unless the user edits it).
-  const [name, setName] = useState('');
-  const [containerPort, setContainerPort] = useState('');
-  const [hostPort, setHostPort] = useState('');
-  const [hostTouched, setHostTouched] = useState(false);
+  const [name, setName] = useState(draft?.name ?? '');
+  const [containerPort, setContainerPort] = useState(draft?.containerPort ?? '');
+  const [hostPort, setHostPort] = useState(draft?.hostPort ?? '');
+  const [hostTouched, setHostTouched] = useState(draft?.hostTouched ?? false);
   const [suggesting, setSuggesting] = useState(false);
-  const [nodeId, setNodeId] = useState('auto');
-  const [envVars, setEnvVars] = useState<EnvRow[]>([]);
+  const [nodeId, setNodeId] = useState(nodeParam || draft?.nodeId || 'auto');
+  const [envVars, setEnvVars] = useState<EnvRow[]>((draft?.envVars ?? []).map(envRow));
   const [scores, setScores] = useState<PlacementScore[]>([]);
   const [scoresLoaded, setScoresLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  const isCompose = source === 'compose' || !!tpl?.composeYml;
+  // A picked compose template only matters while the source IS the template;
+  // switching to another source must not drag its compose behavior along.
+  const isCompose = source === 'compose' || (source === 'template' && !!tpl?.composeYml);
 
-  // step 3 state
-  const [svcId, setSvcId] = useState('');
+  // Every change updates the draft; a refresh at step 1 or 2 rehydrates it.
+  useEffect(() => {
+    if (onLaunch) return;
+    const d: DeployDraft = {
+      step, source, tpl, image, gitRepo, gitBranch, gitToken, composeYml,
+      name, containerPort, hostPort, hostTouched, nodeId,
+      envVars: envVars.map(({ key, value, secret }) => ({ key, value, secret })),
+    };
+    try { sessionStorage.setItem(DRAFT_KEY, JSON.stringify(d)); } catch { /* a blocked store only costs the draft */ }
+  }, [onLaunch, step, source, tpl, image, gitRepo, gitBranch, gitToken, composeYml,
+    name, containerPort, hostPort, hostTouched, nodeId, envVars]);
+
+  // Honor a ?node=<id> that arrives after mount (a link clicked mid-session).
+  useEffect(() => { if (nodeParam) setNodeId(nodeParam); }, [nodeParam]);
+
+  // A draft or link can name a machine that has since left the fleet.
+  useEffect(() => {
+    if (nodeId === 'auto' || nodes.length === 0) return;
+    if (!nodes.some((n) => n.id === nodeId)) setNodeId('auto');
+  }, [nodes, nodeId]);
 
   // The catalog is remote: show skeletons while it loads and a real error with
-  // a retry when it doesn't — a failed fetch must never read as "no templates".
+  // a retry when it doesn't. A failed fetch must never read as "no templates".
   const loadTemplates = useCallback(() => {
     setTplState('loading');
     api.templates()
       .then((t) => { setTemplates(t ?? []); setTplState('ready'); })
       .catch(() => setTplState('error'));
   }, []);
-  useEffect(() => { loadTemplates(); }, [loadTemplates]);
+  useEffect(() => { if (!onLaunch) loadTemplates(); }, [loadTemplates, onLaunch]);
 
   useEffect(() => {
+    if (onLaunch) return;
     setScoresLoaded(false);
     api.placement(tpl ? { memMb: tpl.memMb, needsGpu: !!tpl.gpu } : {})
       .then((s) => { setScores(s ?? []); setScoresLoaded(true); })
       .catch(() => setScoresLoaded(true));
-  }, [tpl]);
+  }, [tpl, onLaunch]);
 
   const filtered = useMemo(() => templates.filter((t) =>
     (!category || t.category === category) &&
     (!search || (t.name + t.description).toLowerCase().includes(search.toLowerCase()))
   ), [templates, category, search]);
 
+  // Selecting a template seeds the config step. Re-picking the same one keeps
+  // any edits; only a different template resets name, ports, and env rows.
   const pickTemplate = (t: Template) => {
+    if (tpl?.id === t.id) return;
     setTpl(t);
     setName(t.id);
     setContainerPort(t.composeYml ? '' : String(t.port));
     setHostTouched(false); // re-suggest a free host port for this template
     setEnvVars((t.env ?? []).map((d) => envRow({ key: d.key, value: d.default, secret: d.secret })));
-    setStep(2);
   };
 
   // Auto-fill a free host port when the target/port changes (until the user
   // types their own). For a compose stack the routing port is the template's.
   useEffect(() => {
-    if (step !== 2 || hostTouched) return;
+    if (onLaunch || step !== 2 || hostTouched) return;
     const prefer = isCompose ? (tpl?.port ?? 0) : parseInt(containerPort, 10) || 0;
     if (!prefer) return;
     setSuggesting(true);
@@ -128,7 +223,7 @@ export function DeployFlow() {
       .then((r) => setHostPort(String(r.port)))
       .catch(() => setHostPort(String(prefer)))
       .finally(() => setSuggesting(false));
-  }, [step, nodeId, containerPort, isCompose, tpl, hostTouched]);
+  }, [onLaunch, step, nodeId, containerPort, isCompose, tpl, hostTouched]);
 
   const sourceReady =
     (source === 'template' && !!tpl) ||
@@ -154,6 +249,9 @@ export function DeployFlow() {
   const launch = async () => {
     if (busy) return;
     if (!name.trim()) { toast.err('Give the app a name.'); return; }
+    // A rehydrated draft can only reach step 2 with a template when one was
+    // picked, but never trust storage: without one there is nothing to deploy.
+    if (source === 'template' && !tpl) { setStep(1); toast.err('Pick a template first.'); return; }
     const body: Record<string, unknown> = {
       name: name.trim(),
       projectId: projects[0]?.id ?? '',
@@ -176,37 +274,33 @@ export function DeployFlow() {
     setBusy(true);
     try {
       const s = await api.createService(body);
-      setSvcId(s.id);
-      setStep(3);
+      try { sessionStorage.removeItem(DRAFT_KEY); } catch { /* nothing to clear */ }
+      // The launch URL is the source of truth from here: a refresh lands back
+      // on live progress instead of an empty form.
+      navigate(`/apps/new/launch/${s.id}`, { replace: true });
     } catch (e) { toast.err(cleanError(e)); }
     setBusy(false);
   };
 
+  const shownStep: 1 | 2 | 3 = onLaunch ? 3 : step;
+
   return (
     <div className="page" style={{ maxWidth: 760 }}>
-      <div className="row" style={{ marginBottom: 4 }}>
-        <button className="btn sm ghost" disabled={step === 3}
-          aria-label={step === 1 ? 'Back to apps' : 'Back to the previous step'}
-          title={step === 1 ? 'Back to apps' : 'Back to the previous step'}
-          onClick={() => (step === 1 ? navigate('/apps') : setStep((s) => (s - 1) as 1 | 2))}>
-          <ArrowLeft size={13} />
-        </button>
-        <div className="page-title" style={{ margin: 0 }}>Deploy an app</div>
-      </div>
-      <div className="page-sub">From zero to a running app — RackOps picks the best machine for it.</div>
+      <div className="page-title">Deploy an app</div>
+      <div className="page-sub">From zero to a running app. RackOps picks the best machine for it.</div>
 
       <div className="stepper">
         {(['Source', 'Configure', 'Launch'] as const).map((label, i) => (
           <div key={label} className="row" style={{ gap: 10 }}>
             {i > 0 && <div className="step-rail" />}
-            <div className={`step ${step === i + 1 ? 'active' : step > i + 1 ? 'done' : ''}`}>
-              <span className="step-dot">{step > i + 1 ? <Check size={12} aria-hidden /> : i + 1}</span> {label}
+            <div className={`step ${shownStep === i + 1 ? 'active' : shownStep > i + 1 ? 'done' : ''}`}>
+              <span className="step-dot">{shownStep > i + 1 ? <Check size={12} aria-hidden /> : i + 1}</span> {label}
             </div>
           </div>
         ))}
       </div>
 
-      {step === 1 && (
+      {!onLaunch && step === 1 && (
         <>
           <div role="radiogroup" aria-label="Deploy source"
             style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8, marginBottom: 18 }}>
@@ -236,7 +330,7 @@ export function DeployFlow() {
             <>
               <div className="row wrap" style={{ marginBottom: 10 }} role="group" aria-label="Filter templates by category">
                 {CATEGORIES.map((c) => (
-                  <button key={c.key} type="button" className={`btn sm ${category === c.key ? 'primary' : ''}`}
+                  <button key={c.key} type="button" className={`btn sm ${category === c.key ? 'chip-on' : ''}`}
                     aria-pressed={category === c.key} onClick={() => setCategory(c.key)}>
                     {c.icon} {c.label}
                   </button>
@@ -258,7 +352,7 @@ export function DeployFlow() {
                 <div className="card crit">
                   <strong style={{ color: 'var(--crit)' }}>The template catalog didn&rsquo;t load.</strong>
                   <div className="dim" style={{ margin: '4px 0 10px' }}>
-                    The server didn&rsquo;t answer — your machines and apps are unaffected.
+                    The server didn&rsquo;t answer. Your machines and apps are unaffected.
                   </div>
                   <button type="button" className="btn sm" onClick={loadTemplates}>
                     <RotateCw size={12} /> Try again
@@ -266,23 +360,30 @@ export function DeployFlow() {
                 </div>
               )}
               {tplState === 'ready' && (
-                <div style={{ ...TPL_GRID, maxHeight: 380, overflowY: 'auto', alignContent: 'start' }}>
-                  {filtered.map((t) => (
-                    <button key={t.id} type="button" className="card clickable" style={{
-                      textAlign: 'left', fontFamily: 'inherit', padding: 12,
-                    }} onClick={() => pickTemplate(t)}>
-                      <div className="row spread">
-                        <strong style={{ fontSize: 13, color: 'var(--text)' }}>{t.name}</strong>
-                        <span className="tag">{t.category}</span>
-                      </div>
-                      <div className="faint" style={{ marginTop: 4 }}>{t.description}</div>
-                      {t.gpu && <span className="tag" style={{ marginTop: 6, display: 'inline-block' }}>needs GPU</span>}
-                    </button>
-                  ))}
+                <div role="radiogroup" aria-label="Template"
+                  style={{ ...TPL_GRID, maxHeight: 380, overflowY: 'auto', alignContent: 'start' }}>
+                  {filtered.map((t) => {
+                    const selected = tpl?.id === t.id;
+                    return (
+                      <button key={t.id} type="button" role="radio" aria-checked={selected}
+                        className="card clickable" style={{
+                          textAlign: 'left', fontFamily: 'inherit', padding: 12,
+                          borderColor: selected ? 'var(--accent)' : undefined,
+                          background: selected ? 'var(--accent-dim)' : undefined,
+                        }} onClick={() => pickTemplate(t)}>
+                        <div className="row spread">
+                          <strong style={{ fontSize: 13, color: 'var(--text)' }}>{t.name}</strong>
+                          <span className="tag">{t.category}</span>
+                        </div>
+                        <div className="faint" style={{ marginTop: 4 }}>{t.description}</div>
+                        {t.gpu && <span className="tag" style={{ marginTop: 6, display: 'inline-block' }}>needs GPU</span>}
+                      </button>
+                    );
+                  })}
                   {filtered.length === 0 && (
                     <div style={{ gridColumn: '1 / -1' }}>
                       <EmptyState icon={<Search size={18} />} title="No template matches">
-                        <div>Try different words or another category — or deploy from a Docker image instead.</div>
+                        <div>Try different words or another category, or deploy from a Docker image instead.</div>
                       </EmptyState>
                     </div>
                   )}
@@ -337,18 +438,18 @@ export function DeployFlow() {
             </Field>
           )}
 
-          {source !== 'template' && (
-            <button type="button" className="btn primary" style={{ marginTop: 6 }} disabled={!sourceReady}
-              onClick={() => setStep(2)}>
-              Continue <ArrowRight size={13} />
+          <div className="row spread" style={{ marginTop: 18 }}>
+            <Link to="/apps" className="btn ghost">Cancel</Link>
+            <button type="button" className="btn primary" disabled={!sourceReady} onClick={advance}>
+              Continue <ArrowRight size={13} aria-hidden />
             </button>
-          )}
+          </div>
         </>
       )}
 
-      {step === 2 && (
+      {!onLaunch && step === 2 && (
         <form onSubmit={(e) => { e.preventDefault(); launch(); }}>
-          {tpl && (
+          {source === 'template' && tpl && (
             <div className="card inset row" style={{ marginBottom: 16, padding: '10px 14px' }}>
               <Package size={14} style={{ color: 'var(--accent)' }} aria-hidden />
               <strong>{tpl.name}</strong>
@@ -359,7 +460,7 @@ export function DeployFlow() {
 
           <Field label="App name"
             error={name.trim() !== '' && dnsLabel(name) !== name.trim().toLowerCase()
-              ? `Will be published as "${dnsLabel(name)}" — URLs only allow lowercase letters, numbers, and dashes.`
+              ? `Will be published as "${dnsLabel(name)}". URLs only allow lowercase letters, numbers, and dashes.`
               : undefined}>
             {(p) => (
               <input className="input" {...p} placeholder="my-app" value={name} autoFocus
@@ -379,7 +480,7 @@ export function DeployFlow() {
           ) : (
             <div className="grid-2">
               <Field label="App listens on port"
-                hint={tpl ? 'From the template — the port inside the container.' : 'The port your app listens on inside the container.'}>
+                hint={tpl ? 'From the template: the port inside the container.' : 'The port your app listens on inside the container.'}>
                 {(p) => (
                   <input className="input mono" {...p} placeholder="8080" value={containerPort}
                     onChange={(e) => setContainerPort(e.target.value.replace(/\D/g, ''))} />
@@ -387,7 +488,7 @@ export function DeployFlow() {
               </Field>
               <Field
                 label={<>Reachable on host port {suggesting && <span className="faint">· finding a free one…</span>}</>}
-                hint={<>How you&rsquo;ll reach it — auto-picked to avoid clashes.
+                hint={<>How you&rsquo;ll reach it, auto-picked to avoid clashes.
                   {containerPort && hostPort && ` Maps ${hostPort} → ${containerPort}.`}</>}>
                 {(p) => (
                   <input className="input mono" {...p} placeholder="auto" value={hostPort}
@@ -397,53 +498,68 @@ export function DeployFlow() {
             </div>
           )}
 
-          <Field label="Machine" info={<>
-            &ldquo;Auto&rdquo; scores every online machine in this organization on CPU, memory,
-            thermal, and storage headroom (plus GPU when the app needs one) and picks the
-            winner — you&rsquo;ll see the choice and why before anything deploys.
-          </>}>
+          <Field label="Machine">
             {(p) => (
               <select className="input" {...p} value={nodeId} onChange={(e) => setNodeId(e.target.value)}>
-                <option value="auto">Auto — pick the best machine for me</option>
-                {nodes.map((n) => <option key={n.id} value={n.id}>{n.name}{n.status !== 'online' ? ' — offline' : ''}</option>)}
+                <option value="auto">Auto (recommended)</option>
+                {nodes.map((n) => (
+                  <option key={n.id} value={n.id} disabled={n.status !== 'online'}>
+                    {n.name}{n.status !== 'online' ? ' (offline)' : ''}
+                  </option>
+                ))}
               </select>
             )}
           </Field>
-          {nodeId === 'auto' && !scoresLoaded && (
-            <div style={{ marginBottom: 14 }}>
-              <Skeleton height={62} radius="var(--r-lg)" />
-            </div>
-          )}
-          {nodeId === 'auto' && scoresLoaded && best && (
-            <div className="card accent" style={{ marginBottom: 14 }}>
-              <div className="row">
-                <Sparkles size={14} style={{ color: 'var(--accent)' }} aria-hidden />
-                <strong>Will run on {nodeName(best.nodeId)}</strong>
-                <span className="badge accent">score {best.score}</span>
-              </div>
-              <div className="faint" style={{ marginTop: 6 }}>{best.reasons.join(' · ')}</div>
-            </div>
-          )}
-          {nodeId === 'auto' && scoresLoaded && !best && scores.length > 0 && (
-            <div className="card crit" style={{ marginBottom: 14 }}>
-              <strong style={{ color: 'var(--crit)' }}>No machine can run this right now.</strong>
-              <div className="dim" style={{ marginTop: 4 }}>
-                {scores[0]?.reasons.join(' · ') || 'Check that at least one machine is online with enough free memory.'}
-              </div>
+          {nodeId === 'auto' && (
+            <div style={{ minHeight: PLACEMENT_SLOT, marginBottom: 14 }}>
+              {!scoresLoaded && <Skeleton height={PLACEMENT_SLOT} radius="var(--r-lg)" />}
+              {scoresLoaded && best && (
+                <div className="card accent">
+                  <div className="row">
+                    <Sparkles size={14} style={{ color: 'var(--accent)' }} aria-hidden />
+                    <strong>Will run on {nodeName(best.nodeId)}</strong>
+                    <span className="badge accent">score {best.score}</span>
+                  </div>
+                  <div className="faint" style={{ marginTop: 6 }}>{best.reasons.join(', ')}</div>
+                  <div className="faint" style={{ marginTop: 4 }}>
+                    Auto scored every online machine in this organization on CPU, memory, thermal, and
+                    storage headroom (plus GPU when the app needs one). Nothing deploys until you launch.
+                  </div>
+                </div>
+              )}
+              {scoresLoaded && !best && scores.length > 0 && (
+                <div className="card crit">
+                  <strong style={{ color: 'var(--crit)' }}>No machine can run this right now.</strong>
+                  <div className="dim" style={{ marginTop: 4 }}>
+                    {scores[0]?.reasons.join(', ') || 'Check that at least one machine is online with enough free memory.'}
+                  </div>
+                </div>
+              )}
+              {scoresLoaded && scores.length === 0 && (
+                <div className="card inset">
+                  <div className="faint">
+                    The placement preview didn&rsquo;t load. Auto still picks the best machine when you launch.
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
           {/* A repeating row can't use one <label>, so each input names itself
-              and its own variable — "value for POSTGRES_PASSWORD", not "edit text". */}
+              and its own variable: "value for POSTGRES_PASSWORD", not "edit text". */}
           <fieldset className="field field-set">
-            <legend>Environment variables{tpl && (tpl.env ?? []).length > 0 ? ' — pre-filled from the template' : ' (optional)'}</legend>
+            <legend>Environment variables{source === 'template' && tpl && (tpl.env ?? []).length > 0
+              ? ' (pre-filled from the template)' : ' (optional)'}</legend>
             {envVars.map((v, i) => (
               <div className="row" key={v._id}>
+                {/* Enter in a repeating row must never fire the whole launch. */}
                 <input className="input mono" placeholder="KEY" value={v.key} aria-label={`Variable ${i + 1} name`}
+                  onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); }}
                   onChange={(e) => setEnvVars(envVars.map((x) => (x._id === v._id ? { ...x, key: e.target.value } : x)))} />
                 <input className="input mono" placeholder={v.secret ? 'auto-generated if blank' : 'value'}
                   type={v.secret ? 'password' : 'text'} value={v.value}
                   aria-label={v.key ? `Value for ${v.key}` : `Variable ${i + 1} value`}
+                  onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); }}
                   onChange={(e) => setEnvVars(envVars.map((x) => (x._id === v._id ? { ...x, value: e.target.value } : x)))} />
                 <button type="button" className="btn sm" aria-pressed={v.secret}
                   title={v.secret ? 'Shown as secret' : 'Mask as secret'}
@@ -461,27 +577,47 @@ export function DeployFlow() {
             </button>
           </fieldset>
 
-          <button type="submit" className="btn primary" style={{ width: '100%' }} disabled={busy || !name.trim()}>
-            {busy ? <Spinner /> : <Rocket size={14} />} {busy ? 'Starting…' : 'Launch'}
-          </button>
+          <div className="row spread" style={{ marginTop: 18 }}>
+            <button type="button" className="btn ghost" onClick={() => setStep(1)}>
+              <ArrowLeft size={13} aria-hidden /> Back
+            </button>
+            <button type="submit" className="btn primary" disabled={busy || !name.trim()}>
+              {busy ? <Spinner /> : <Rocket size={14} aria-hidden />} {busy ? 'Starting…' : 'Launch'}
+            </button>
+          </div>
         </form>
       )}
 
-      {step === 3 && svcId && <LaunchProgress serviceId={svcId} />}
+      {launchId && (
+        <>
+          <LaunchProgress serviceId={launchId} />
+          {/* Leaving is always safe: the deploy runs on the server, not this tab. */}
+          <div className="row spread" style={{ marginTop: 18 }}>
+            <Link to="/apps" className="btn ghost" title="The deploy keeps running on the server">
+              <ArrowLeft size={13} aria-hidden /> Back to apps
+            </Link>
+            <Link to={`/apps/${launchId}`} className="btn primary">Open app page</Link>
+          </div>
+        </>
+      )}
     </div>
   );
 }
 
 // LaunchProgress watches the new app go live: status timeline + build log,
-// ending on the "make it public" payoff instead of a closed dialog.
+// ending on the "make it public" payoff instead of a closed dialog. It reads
+// everything from the serviceId in the URL, so a refresh resumes cleanly.
 function LaunchProgress({ serviceId }: { serviceId: string }) {
-  const navigate = useNavigate();
-  const { nodes, ingress } = useData();
-  const [svc, setSvc] = useState<Service | null>(null);
+  const { nodes, ingress, services } = useData();
+  const [polled, setPolled] = useState<Service | null>(null);
   const [deploys, setDeploys] = useState<Deployment[]>([]);
   const [liveLog, setLiveLog] = useState('');
   const logRef = useRef<HTMLDivElement>(null);
   const pinnedRef = useRef(true); // keep scrolling to the bottom unless the user scrolled up
+
+  // The fleet stream usually knows the service already (instant paint after a
+  // refresh); polling keeps status and deployments converging regardless.
+  const svc = polled ?? services.find((s) => s.id === serviceId) ?? null;
 
   useEffect(() => {
     let alive = true;
@@ -489,7 +625,7 @@ function LaunchProgress({ serviceId }: { serviceId: string }) {
       try {
         const s = await api.service(serviceId);
         if (!alive) return;
-        setSvc(s);
+        setPolled(s);
         const d = await api.serviceDeployments(serviceId).catch(() => []);
         if (alive) setDeploys(d ?? []);
       } catch { /* service may briefly 404 right after create */ }
@@ -512,7 +648,7 @@ function LaunchProgress({ serviceId }: { serviceId: string }) {
   }, [serviceId]);
 
   // Auto-scroll to the newest line only while the reader is already at the
-  // bottom — scrolling up to reread an error must stick.
+  // bottom; scrolling up to reread an error must stick.
   useEffect(() => {
     const el = logRef.current;
     if (el && pinnedRef.current) el.scrollTop = el.scrollHeight;
@@ -544,7 +680,7 @@ function LaunchProgress({ serviceId }: { serviceId: string }) {
           </div>
           <div className="dim">
             {svc?.status === 'running' && node ? `running on ${node.name}`
-              : svc?.status === 'failed' ? 'the full output is below — fix and redeploy from the app page'
+              : svc?.status === 'failed' ? 'the full output is below. Fix and redeploy from the app page.'
               : 'pulling the image and starting the container'}
           </div>
         </div>
@@ -559,35 +695,25 @@ function LaunchProgress({ serviceId }: { serviceId: string }) {
           <div className="row wrap" style={{ marginBottom: 12 }}>
             {urls.map((u) => <UrlChip key={u.url} url={u.url} />)}
             {node && svc.port > 0 && <UrlChip url={`http://${node.ip}:${svc.port}`} />}
-            {!svc.port && <span className="faint">no port published — this app is internal</span>}
+            {!svc.port && <span className="faint">no port published (this app is internal)</span>}
           </div>
-          <div className="row">
-            <button className="btn primary" onClick={() => navigate(`/apps/${svc.id}/networking`)}>
-              <Globe size={13} /> Make it public
-            </button>
-            <button className="btn" onClick={() => navigate(`/apps/${svc.id}`)}>Open app page</button>
-          </div>
+          <Link to={`/apps/${svc.id}/networking`} className="btn">
+            <Globe size={13} aria-hidden /> Make it public
+          </Link>
         </div>
       )}
 
       {svc?.status === 'failed' && (
         <div className="row" style={{ marginBottom: 14 }}>
-          <button className="btn primary" onClick={() => navigate(`/apps/${svc.id}/logs`)}><ScrollText size={13} /> Open logs</button>
-          <button className="btn" onClick={() => navigate(`/apps/${svc.id}`)}>Open app page</button>
+          <Link to={`/apps/${svc.id}/logs`} className="btn">
+            <ScrollText size={13} aria-hidden /> Open logs
+          </Link>
         </div>
       )}
 
       <div className="eyebrow" style={{ marginBottom: 6 }}>Deployment output</div>
       <div className="terminal" ref={logRef} onScroll={onScroll} style={{ maxHeight: 400 }}>
         {liveLog || latest?.log || 'waiting for the machine to pick up the job…'}
-      </div>
-
-      {/* Leaving is always safe: the deploy runs on the server, not this tab. */}
-      <div style={{ marginTop: 14 }}>
-        <Link to="/apps" className="dim" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-          title="Leaving this page won't stop anything — the deploy keeps running on the server.">
-          <ArrowLeft size={12} aria-hidden /> Back to apps
-        </Link>
       </div>
     </>
   );

@@ -1,55 +1,71 @@
 import { useId, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Play, Square, RotateCw, Rocket, Search } from 'lucide-react';
-import { api } from '../api';
+import { Rocket, Search, TriangleAlert } from 'lucide-react';
 import type { Service } from '../api';
 import { useData } from '../data';
-import { useToast, cleanError } from '../components/toast';
-import { EmptyState, InfoTip, Led, SkeletonRows, Spinner, StatusBadge, UrlChip, publicUrls } from '../components/ui';
+import { EmptyState, InfoTip, Led, SkeletonRows, StatusBadge, UrlChip, publicUrls } from '../components/ui';
 
-// AppsPage: every workload, its health, and where it's reachable — with the
-// full detail one click away.
+// AppsPage: every workload, its health, and where it's reachable, with the
+// full detail one click away. Rows are pure navigation: lifecycle actions live
+// on the app detail header and in the command palette, so nothing on this list
+// can be mis-clicked while scanning.
 export function AppsPage() {
-  const { services, nodes, ingress, refresh, nodeName, loaded } = useData();
+  const { services, nodes, ingress, nodeName, loaded } = useData();
   const navigate = useNavigate();
-  const toast = useToast();
   const [search, setSearch] = useState('');
   const searchId = useId();
-  // busy = "serviceId:action" — disables every action button on that service
-  // while one is running, and spins the one that's running.
-  const [busy, setBusy] = useState('');
-
-  const act = async (e: React.MouseEvent, s: Service, action: string) => {
-    e.stopPropagation();
-    setBusy(`${s.id}:${action}`);
-    try {
-      await api.serviceAction(s.id, action);
-      toast.ok(action === 'stop' ? `${s.name} stopping.` : action === 'start' ? `${s.name} starting.` : `${s.name} restarting.`);
-      refresh();
-    } catch (err) { toast.err(cleanError(err)); }
-    setBusy('');
-  };
 
   const filtered = services.filter((s) =>
     !search || (s.name + (s.image ?? '') + (s.domain ?? '')).toLowerCase().includes(search.toLowerCase()));
 
-  // Triage default: broken apps surface first, then running, then the rest.
-  const failingFirst = [...filtered].sort((a, b) => {
-    const rank = (s: Service) => (s.status === 'failed' ? 0 : s.status === 'running' ? 1 : 2);
-    return rank(a) - rank(b) || a.name.localeCompare(b.name);
-  });
+  // Stable name order, always. Failed apps sit under their own labelled group
+  // instead of a live failing-first resort, so rows never jump mid-aim when a
+  // status flips between telemetry ticks.
+  const byName = [...filtered].sort((a, b) => a.name.localeCompare(b.name));
+  const attention = byName.filter((s) => s.status === 'failed');
+  const rest = byName.filter((s) => s.status !== 'failed');
 
   // The filter earns its place once there are 2+ apps, but its slot is always
   // reserved: appearing after the fleet loads must not shove the list down
   // mid-read. visibility keeps the exact footprint without a focusable ghost.
   const showFilter = loaded && services.length > 1;
 
+  const renderRow = (s: Service) => {
+    const urls = publicUrls(s, ingress);
+    const node = nodes.find((n) => n.id === s.nodeId);
+    return (
+      // The app name is the real link, stretched across the card: the whole
+      // surface stays clickable, and the row is reachable by Tab, openable
+      // with Enter, and middle-clickable into a new tab.
+      <div key={s.id} className="card row-card" style={{ padding: '13px 16px' }}>
+        <div className="row" style={{ minWidth: 0 }}>
+          <Link to={`/apps/${s.id}`} className="row-link"
+            style={{ fontSize: 14.5, fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {s.name}
+          </Link>
+          <StatusBadge status={s.status} />
+          {s.kind === 'compose' && <span className="tag">stack</span>}
+        </div>
+        {/* row-actions: keeps the live URLs clickable above the stretched link */}
+        <div className="row wrap row-actions" style={{ marginTop: 9, gap: 10 }}>
+          {urls.map((u) => <UrlChip key={u.url} url={u.url} />)}
+          {urls.length === 0 && s.port > 0 && node && s.status === 'running' && (
+            <UrlChip url={`http://${node.ip}:${s.port}`} />
+          )}
+          {urls.length === 0 && (s.port === 0 || s.status !== 'running') && (
+            <span className="faint">no public URL yet</span>
+          )}
+          <span className="faint mono" style={{ marginLeft: 'auto' }}>
+            {s.image || s.gitRepo || s.kind} · {nodeName(s.nodeId)}
+          </span>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="page">
-      <div className="row spread" style={{ marginBottom: 4 }}>
-        <div className="page-title">Apps</div>
-        <button className="btn primary" onClick={() => navigate('/apps/new')}><Rocket size={14} aria-hidden /> Deploy app</button>
-      </div>
+      <div className="page-title">Apps</div>
       <div className="page-sub">Everything running on your rack, and where it's reachable</div>
 
       <div className="search-input"
@@ -61,70 +77,24 @@ export function AppsPage() {
       </div>
 
       <div className="stack" style={{ gap: 8 }}>
-        {failingFirst.map((s) => {
-          const urls = publicUrls(s, ingress);
-          const node = nodes.find((n) => n.id === s.nodeId);
-          // Lock actions for the whole deploy window, not just our own HTTP
-          // call — svc.status arrives live over SSE, so this releases the
-          // moment the machine reports the container running (or failed).
-          const working = s.status === 'building' || s.status === 'pending';
-          const locked = busy.startsWith(`${s.id}:`) || working;
-          return (
-            // The app name is the real link, stretched across the card: the
-            // whole surface stays clickable, and the row is reachable by Tab,
-            // openable with Enter, and middle-clickable into a new tab.
-            <div key={s.id} className="card row-card" style={{ padding: '13px 16px' }}>
-              <div className="row spread">
-                <div className="row" style={{ minWidth: 0 }}>
-                  <Link to={`/apps/${s.id}`} className="row-link"
-                    style={{ fontSize: 14.5, fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {s.name}
-                  </Link>
-                  <StatusBadge status={s.status} />
-                  {s.kind === 'compose' && <span className="tag">stack</span>}
-                </div>
-                {/* Labeled lifecycle actions, spaced apart: Stop next to Restart
-                    is a consequential mis-click, so each wears its word. */}
-                <div className="row row-actions" style={{ gap: 12 }}>
-                  {s.status === 'running' ? (
-                    <button className="btn sm" disabled={locked} aria-label={`Stop ${s.name}`} onClick={(e) => act(e, s, 'stop')}>
-                      {busy === `${s.id}:stop` ? <Spinner size={12} /> : <Square size={12} aria-hidden />} Stop
-                    </button>
-                  ) : (
-                    <button className="btn sm" disabled={locked} aria-label={`Start ${s.name}`} onClick={(e) => act(e, s, 'start')}>
-                      {busy === `${s.id}:start` || working ? <Spinner size={12} /> : <Play size={12} aria-hidden />} Start
-                    </button>
-                  )}
-                  <button className="btn sm" disabled={locked} aria-label={`Restart ${s.name}`} onClick={(e) => act(e, s, 'restart')}>
-                    {busy === `${s.id}:restart` ? <Spinner size={12} /> : <RotateCw size={12} aria-hidden />} Restart
-                  </button>
-                </div>
-              </div>
-              {/* row-actions: keeps the live URLs clickable above the stretched link */}
-              <div className="row wrap row-actions" style={{ marginTop: 9, gap: 10 }}>
-                {urls.map((u) => <UrlChip key={u.url} url={u.url} />)}
-                {urls.length === 0 && s.port > 0 && node && s.status === 'running' && (
-                  <UrlChip url={`http://${node.ip}:${s.port}`} />
-                )}
-                {urls.length === 0 && (s.port === 0 || s.status !== 'running') && (
-                  <span className="faint">no public URL yet</span>
-                )}
-                <span className="faint mono" style={{ marginLeft: 'auto' }}>
-                  {s.image || s.gitRepo || s.kind} · {nodeName(s.nodeId)}
-                  {s.status === 'running' && ` · ${(s.cpuPct ?? 0).toFixed(1)}% cpu · ${s.memUsedMb ?? 0} MB`}
-                </span>
-              </div>
-            </div>
-          );
-        })}
+        {attention.length > 0 && (
+          <div className="eyebrow" style={{ color: 'var(--crit)' }}>
+            <TriangleAlert size={12} aria-hidden /> Needs attention
+          </div>
+        )}
+        {attention.map(renderRow)}
+        {attention.length > 0 && rest.length > 0 && (
+          <div className="eyebrow" style={{ marginTop: 8 }}>Everything else</div>
+        )}
+        {rest.map(renderRow)}
 
         {/* Waiting for the first load is not the same as having no apps. */}
-        {!loaded && services.length === 0 && <SkeletonRows count={3} height={86} />}
+        {!loaded && services.length === 0 && <SkeletonRows count={3} height={78} />}
 
         {loaded && services.length === 0 && (
           <EmptyState icon={<Rocket size={18} />} title="Nothing deployed yet">
             <div style={{ maxWidth: 460, margin: '0 auto 16px', lineHeight: 1.6 }}>
-              Pick from 45+ ready-made templates — media servers, databases, AI tools —
+              Pick from 45+ ready-made templates (media servers, databases, AI tools)
               or bring your own image, git repo, or compose file.
             </div>
             <button className="btn primary" onClick={() => navigate('/apps/new')}>
@@ -139,18 +109,18 @@ export function AppsPage() {
         )}
       </div>
 
-      {/* Legend for new users — same words the status badges use, so the page
+      {/* Legend for new users: same words the status badges use, so the page
           never speaks two dialects. */}
       {services.length > 0 && (
         <div className="row wrap" style={{ marginTop: 18, gap: 16 }}>
           <span className="faint row" style={{ gap: 5 }}><Led status="running" /> running</span>
           <span className="faint row" style={{ gap: 5 }}><Led status="building" /> building</span>
-          <span className="faint row" style={{ gap: 5 }}><Led status="failed" /> failed — auto-heal retries, check logs</span>
+          <span className="faint row" style={{ gap: 5 }}><Led status="failed" /> failed (auto-heal retries, check logs)</span>
           <span className="faint row" style={{ gap: 5 }}><Led status="stopped" /> stopped</span>
           <InfoTip wide>
-            &ldquo;Building&rdquo; means a deploy or restart is in flight — its buttons unlock when it
-            finishes. &ldquo;Failed&rdquo; apps are retried automatically a few times; if they stay
-            down, the logs usually say why.
+            &ldquo;Building&rdquo; means a deploy or restart is in flight. &ldquo;Failed&rdquo; apps are
+            retried automatically a few times; if they stay down, the logs usually say why.
+            Open an app to start, stop, or restart it.
           </InfoTip>
         </div>
       )}

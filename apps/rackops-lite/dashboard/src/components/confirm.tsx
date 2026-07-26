@@ -81,7 +81,11 @@ function ConfirmDialog({ opts, onResolve }: { opts: ConfirmOpts; onResolve: (v: 
         <div className="row" style={{ justifyContent: 'flex-end' }}>
           {/* Cancel is first in the DOM, so the focus trap lands on it. */}
           <button className="btn" onClick={() => onResolve(false)}>Cancel</button>
+          {/* Routine confirms focus the affirmative so Enter accepts (the
+              visual default and the keyboard default agree); danger and
+              type-to-confirm dialogs keep the focus-Cancel safety pattern. */}
           <button className={`btn ${opts.danger ? 'danger' : 'primary'}`} disabled={!armed}
+            autoFocus={!opts.danger && !opts.expect}
             onClick={() => onResolve(true)}>
             {opts.confirmLabel ?? 'Confirm'}
           </button>

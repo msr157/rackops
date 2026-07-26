@@ -1,19 +1,19 @@
-import { useEffect, useState } from 'react';
-import { Routes, Route, NavLink, Navigate, useNavigate } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { Routes, Route, NavLink, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import {
-  LayoutGrid, Boxes, HardDrive, Network as NetworkIcon, Settings, LogOut, Rocket, Bot, Search, Plus,
-  ArrowUpCircle, X, UserRound, LifeBuoy, CloudOff, RotateCw, Server,
+  LayoutGrid, Boxes, HardDrive, Network as NetworkIcon, Settings, LogOut, Rocket, Bot, Search,
+  UserRound, LifeBuoy, CloudOff, RotateCw, Server, ChevronsUpDown,
 } from 'lucide-react';
 import { api, getToken, clearToken, getActiveOrg } from './api';
 import type { VersionInfo, User } from './api';
 import { DataProvider, useData } from './data';
-import { ToastProvider, useToast, cleanError } from './components/toast';
-import { ConfirmProvider, useConfirm } from './components/confirm';
+import { ToastProvider } from './components/toast';
+import { ConfirmProvider } from './components/confirm';
 import { CopilotProvider, useCopilot } from './components/CopilotDrawer';
 import { CommandPalette } from './components/CommandPalette';
 import { AddMachineModal } from './components/AddMachineModal';
 import { OrgSwitcher } from './components/OrgSwitcher';
-import { Led, Spinner, timeAgo } from './components/ui';
+import { Led, timeAgo } from './components/ui';
 import { AuthScreen } from './pages/Auth';
 import { InvitationPage } from './pages/Invitation';
 import { HomePage } from './pages/Home';
@@ -30,13 +30,16 @@ import { ChangelogPage } from './pages/Changelog';
 export default function App() {
   const [authed, setAuthed] = useState<boolean | null>(null);
   // Remount the whole authed shell when the active org changes: every provider
-  // refetches through the new X-Rackops-Org header — no stale cross-org state.
+  // refetches through the new X-Rackops-Org header. No stale cross-org state.
   const [orgKey, setOrgKey] = useState(() => getActiveOrg());
+  const navigate = useNavigate();
 
   // Auth gate: first-run setup or an existing session decides the screen.
   useEffect(() => {
     const onLogout = () => setAuthed(false);
-    const onOrg = () => setOrgKey(getActiveOrg());
+    // Route reset on switch: a deep link like /apps/:id points at a resource
+    // that does not exist in the new org, so land on Home instead.
+    const onOrg = () => { setOrgKey(getActiveOrg()); navigate('/', { replace: true }); };
     window.addEventListener('rackops-logout', onLogout);
     window.addEventListener('rackops-org-changed', onOrg);
     api.authStatus()
@@ -46,7 +49,7 @@ export default function App() {
       window.removeEventListener('rackops-logout', onLogout);
       window.removeEventListener('rackops-org-changed', onOrg);
     };
-  }, []);
+  }, [navigate]);
 
   // Invitation links work signed-out or signed-in — before the auth gate.
   if (window.location.pathname === '/invitation') {
@@ -92,7 +95,7 @@ function ConnectionBanner() {
       <span style={{ flex: 1 }}>
         <strong>Can&rsquo;t reach the RackOps server</strong>
         <span className="dim">
-          {' — retrying every few seconds. '}
+          {'. Retrying every few seconds. '}
           {lastSync
             ? `Showing the last known state from ${timeAgo(lastSync)}; your apps keep running.`
             : 'Nothing has loaded yet, so this page may be blank.'}
@@ -107,13 +110,14 @@ function Shell({ onLogout }: { onLogout: () => void }) {
   const { overview, services, nodes, alerts, loaded } = useData();
   const { setOpen: setCopilotOpen } = useCopilot();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [addMachine, setAddMachine] = useState(false);
-  const [serverVersion, setServerVersion] = useState('');
+  const [version, setVersion] = useState<VersionInfo | null>(null);
   const [me, setMe] = useState<User | null>(null);
 
   useEffect(() => {
-    api.versionCheck().then((v) => setServerVersion(v.current)).catch(() => {});
+    api.versionCheck().then(setVersion).catch(() => {});
     api.me().then(setMe).catch(() => {});
   }, []);
 
@@ -137,11 +141,14 @@ function Shell({ onLogout }: { onLogout: () => void }) {
   const machinesOffline = nodes.filter((n) => n.status === 'offline').length;
   const attention = failing + openAlerts + machinesOffline;
 
-  const nav = [
-    { to: '/', label: 'Home', icon: <LayoutGrid size={16} />, count: attention, end: true },
-    { to: '/apps', label: 'Apps', icon: <Boxes size={16} />, count: services.length },
-    { to: '/machines', label: 'Machines', icon: <HardDrive size={16} />, count: nodes.length },
+  // Only attention is badged: a number in the rail always means "needs your
+  // attention", never an inventory total the page itself already shows.
+  const nav: { to: string; label: string; icon: React.ReactNode; count?: number; attn?: boolean; end?: boolean }[] = [
+    { to: '/', label: 'Home', icon: <LayoutGrid size={16} />, count: attention, attn: true, end: true },
+    { to: '/apps', label: 'Apps', icon: <Boxes size={16} /> },
+    { to: '/machines', label: 'Machines', icon: <HardDrive size={16} /> },
     { to: '/network', label: 'Network', icon: <NetworkIcon size={16} /> },
+    { to: '/settings', label: 'Settings', icon: <Settings size={16} /> },
   ];
 
   return (
@@ -154,8 +161,14 @@ function Shell({ onLogout }: { onLogout: () => void }) {
           <div className="brand-col">
             <NavLink to="/" className="brand-name">RackOps</NavLink>
             <NavLink to="/changelog" className="brand-ver" title="What's new">
-              LITE{serverVersion ? ` · v${serverVersion}` : ''}
+              LITE{version ? ` · v${version.current}` : ''}
             </NavLink>
+            {/* The quiet update signal. The changelog page hosts the action. */}
+            {version?.updateAvailable && (
+              <NavLink to="/changelog" className="update-chip">
+                v{version.latest.replace(/^v/, '')} available
+              </NavLink>
+            )}
           </div>
         </div>
 
@@ -168,7 +181,9 @@ function Shell({ onLogout }: { onLogout: () => void }) {
           <NavLink key={n.to} to={n.to} end={n.end} aria-label={n.label}
             className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
             {n.icon} <span className="nav-label">{n.label}</span>
-            {n.count !== undefined && n.count > 0 && <span className="count">{n.count}</span>}
+            {n.count !== undefined && n.count > 0 && (
+              <span className={`count${n.attn ? ' attn' : ''}`}>{n.count}</span>
+            )}
           </NavLink>
         ))}
 
@@ -183,24 +198,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
               {loaded && overview ? `${overview.nodesOnline}/${overview.nodesTotal} machines online` : 'checking machines…'}
             </span>
           </div>
-          <button className="btn" onClick={() => setAddMachine(true)} aria-label="Add machine">
-            <Plus size={14} /> <span className="nav-label">Add machine</span>
-          </button>
-          <NavLink to="/profile" aria-label="Profile"
-            className={({ isActive }) => `nav-item sub ${isActive ? 'active' : ''}`}>
-            <UserRound size={14} /> <span className="nav-label">Profile</span>
-          </NavLink>
-          <NavLink to="/support" aria-label="Support"
-            className={({ isActive }) => `nav-item sub ${isActive ? 'active' : ''}`}>
-            <LifeBuoy size={14} /> <span className="nav-label">Support</span>
-          </NavLink>
-          <NavLink to="/settings" aria-label="Settings"
-            className={({ isActive }) => `nav-item sub ${isActive ? 'active' : ''}`}>
-            <Settings size={14} /> <span className="nav-label">Settings</span>
-          </NavLink>
-          <button className="nav-item sub" aria-label="Log out" onClick={onLogout}>
-            <LogOut size={14} /> <span className="nav-label">Log out</span>
-          </button>
+          <AccountMenu me={me} onLogout={onLogout} />
         </div>
       </aside>
 
@@ -211,22 +209,26 @@ function Shell({ onLogout }: { onLogout: () => void }) {
             <kbd>{shortcutHint}</kbd>
           </button>
           <div style={{ marginLeft: 'auto' }} className="row">
-            <button className="btn" onClick={() => setCopilotOpen(true)}>
+            <button className="btn ghost" onClick={() => setCopilotOpen(true)}>
               <Bot size={14} /> Copilot
             </button>
-            <button className="btn primary" onClick={() => navigate('/apps/new')}>
-              <Rocket size={14} /> Deploy app
-            </button>
+            {/* Hidden while the wizard is open: the most prominent button on
+                screen must never be one that visibly does nothing. */}
+            {!pathname.startsWith('/apps/new') && (
+              <button className="btn primary" onClick={() => navigate('/apps/new')}>
+                <Rocket size={14} /> Deploy app
+              </button>
+            )}
           </div>
         </header>
 
         <main className="main">
           <ConnectionBanner />
-          <UpdateBanner />
           <Routes>
             <Route path="/" element={<HomePage onAddMachine={() => setAddMachine(true)} />} />
             <Route path="/apps" element={<AppsPage />} />
             <Route path="/apps/new" element={<DeployFlow />} />
+            <Route path="/apps/new/launch/:serviceId" element={<DeployFlow />} />
             <Route path="/apps/:id/:tab?" element={<AppDetail />} />
             <Route path="/machines" element={<MachinesPage onAddMachine={() => setAddMachine(true)} />} />
             <Route path="/machines/:id" element={<MachineDetail />} />
@@ -247,72 +249,58 @@ function Shell({ onLogout }: { onLogout: () => void }) {
   );
 }
 
-// UpdateBanner: pings the server's cached version check and offers a
-// one-click update. The server does the GitHub call (once per 6h) — a
-// hundred open dashboards cost one request.
-function UpdateBanner() {
-  const toast = useToast();
-  const confirm = useConfirm();
-  const [info, setInfo] = useState<VersionInfo | null>(null);
-  const [updating, setUpdating] = useState(false);
-  const [dismissed, setDismissed] = useState(() => sessionStorage.getItem('rackops-update-dismissed') ?? '');
+// AccountMenu: one row at the very bottom of the sidebar opening an upward
+// menu. Log out lives inside it, so ending the session is a deliberate
+// two-step, never a misclick under Settings.
+function AccountMenu({ me, onLogout }: { me: User | null; onLogout: () => void }) {
+  const [open, setOpen] = useState(false);
+  const boxRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    api.versionCheck().then(setInfo).catch(() => {});
-    const t = setInterval(() => api.versionCheck().then(setInfo).catch(() => {}), 60 * 60 * 1000);
-    return () => clearInterval(t);
-  }, []);
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { setOpen(false); triggerRef.current?.focus(); }
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
 
-  if (!info?.updateAvailable || dismissed === info.latest) return null;
-
-  const update = async () => {
-    const yes = await confirm({
-      title: `Update RackOps to ${info.latest}?`,
-      body: 'The server downloads the new release and restarts itself. Your apps keep running; the dashboard reconnects in a few seconds.',
-      confirmLabel: 'Update now',
-    });
-    if (!yes) return;
-    setUpdating(true);
-    try {
-      await api.applyUpdate();
-      toast.info('Updating — the server restarts shortly, this page will reconnect.');
-      // Poll until the new version answers, then reload onto fresh assets. If
-      // it never answers, say so instead of reloading onto an unchanged server
-      // and leaving the operator to guess whether the update took.
-      const target = info.latest.replace(/^v/, '');
-      const poll = setInterval(async () => {
-        try {
-          const v = await api.versionCheck();
-          if (v.current === target) { clearInterval(poll); window.location.reload(); }
-        } catch { /* server restarting */ }
-      }, 2000);
-      setTimeout(() => {
-        clearInterval(poll);
-        setUpdating(false);
-        toast.err(`The server hasn't come back on ${info.latest} yet. It may still be restarting — `
-          + 'check the server log (journalctl -u rackops) and reload this page.');
-      }, 60000);
-    } catch (e) {
-      toast.err(cleanError(e));
-      setUpdating(false);
-    }
-  };
+  const name = me?.fullName || me?.email || 'Account';
+  const initial = (me?.fullName || me?.email || '?').trim().charAt(0).toUpperCase();
 
   return (
-    <div className="update-banner">
-      <ArrowUpCircle size={16} style={{ color: 'var(--accent)', flexShrink: 0 }} />
-      <span style={{ flex: 1 }}>
-        <strong>RackOps {info.latest} is available</strong>
-        <span className="dim"> — you&rsquo;re on v{info.current}. </span>
-        <a href={info.releaseUrl} target="_blank" rel="noreferrer">What&rsquo;s new</a>
-      </span>
-      <button className="btn sm primary" disabled={updating} onClick={update}>
-        {updating ? <><Spinner size={12} /> Updating…</> : 'Update now'}
+    <div className="account" ref={boxRef}>
+      <button ref={triggerRef} className="account-trigger" onClick={() => setOpen((v) => !v)}
+        aria-haspopup="menu" aria-expanded={open} aria-label={`Account: ${name}`}>
+        <span className="avatar" aria-hidden>{initial}</span>
+        <span className="nav-label account-names">
+          <span className="account-name">{name}</span>
+          {!!me?.fullName && !!me?.email && <span className="faint">{me.email}</span>}
+        </span>
+        <ChevronsUpDown size={13} aria-hidden />
       </button>
-      <button className="btn sm ghost" aria-label="Dismiss"
-        onClick={() => { sessionStorage.setItem('rackops-update-dismissed', info.latest); setDismissed(info.latest); }}>
-        <X size={13} />
-      </button>
+      {open && (
+        <div className="org-menu up" role="menu">
+          <NavLink to="/profile" role="menuitem" className="org-item" onClick={() => setOpen(false)}>
+            <UserRound size={14} /> Profile
+          </NavLink>
+          <NavLink to="/support" role="menuitem" className="org-item" onClick={() => setOpen(false)}>
+            <LifeBuoy size={14} /> Support
+          </NavLink>
+          <div className="org-menu-sep" />
+          <button role="menuitem" className="org-item" onClick={onLogout}>
+            <LogOut size={14} /> Log out
+          </button>
+        </div>
+      )}
     </div>
   );
 }

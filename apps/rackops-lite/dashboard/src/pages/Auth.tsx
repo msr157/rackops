@@ -7,7 +7,7 @@ import { Field, InfoTip, PasswordInput, Spinner } from '../components/ui';
 
 type Mode = 'login' | 'signup' | 'forgot' | 'reset';
 
-const BROKEN_RESET_MSG = 'This reset link is incomplete — request a new one.';
+const BROKEN_RESET_MSG = 'This reset link is incomplete. Request a new one.';
 
 export function AuthScreen({ onAuthed }: { onAuthed: () => void }) {
   // Landing on /reset-password?token=… (from the email or the server log)
@@ -94,7 +94,7 @@ export function AuthScreen({ onAuthed }: { onAuthed: () => void }) {
       }>
       {needsSetup && mode === 'signup' && (
         <div className="auth-notice">
-          First run — create the owner account
+          First run: create the owner account
           <InfoTip wide>
             The first account becomes the Owner: it manages users, organizations, and updates.
             After this, new people join through invitations or an admin creating their account.
@@ -104,7 +104,7 @@ export function AuthScreen({ onAuthed }: { onAuthed: () => void }) {
 
       {mode === 'forgot' && (
         <p className="dim" style={{ marginBottom: 16, lineHeight: 1.6 }}>
-          Enter your account email. We&rsquo;ll send a reset link — it&rsquo;s also printed in the
+          Enter your account email. We&rsquo;ll send a reset link. It&rsquo;s also printed in the
           server log (<code className="mono">journalctl -u rackops</code>) if email can&rsquo;t reach you.
         </p>
       )}

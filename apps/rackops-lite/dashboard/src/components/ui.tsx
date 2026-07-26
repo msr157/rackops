@@ -193,7 +193,7 @@ export function CopyBtn({ text, label }: { text: string; label?: string }) {
   };
   return (
     <button className="btn sm" onClick={copy}
-      title={state === 'fail' ? 'Copy failed — select and copy it manually' : 'Copy'}>
+      title={state === 'fail' ? 'Copy failed. Select and copy it manually.' : 'Copy'}>
       {state === 'ok' && <Check size={12} style={{ color: 'var(--ok)' }} />}
       {state === 'fail' && <X size={12} style={{ color: 'var(--crit)' }} />}
       {state === 'idle' && <Copy size={12} />}

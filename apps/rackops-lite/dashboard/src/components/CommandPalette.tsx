@@ -7,6 +7,7 @@ import {
 import { api } from '../api';
 import type { Service } from '../api';
 import { useData } from '../data';
+import { useConfirm } from './confirm';
 import { cleanError, useToast } from './toast';
 import { Led } from './ui';
 import { useDialogBehavior } from './useDialog';
@@ -25,9 +26,10 @@ interface Entry {
   run: () => void;
 }
 
-// CommandPalette: ⌘K / Ctrl+K acts, not just navigates. Lifecycle verbs for
-// every app sit beside the page jumps, grouped and searchable by name,
-// status, or (for machines) IP.
+// CommandPalette: ⌘K / Ctrl+K acts, not just navigates. Opened empty it is a
+// directory (Pages, the three global actions, Apps, Machines); typing brings
+// in per-app lifecycle verbs, searchable by name, status, or (for machines)
+// IP.
 export function CommandPalette({ open, ...rest }: {
   open: boolean; onClose: () => void; onAddMachine: () => void; onCopilot: () => void;
 }) {
@@ -42,6 +44,7 @@ function Palette({ onClose, onAddMachine, onCopilot }: {
   const navigate = useNavigate();
   const { services, nodes, refresh, loaded } = useData();
   const toast = useToast();
+  const confirm = useConfirm();
   const [q, setQ] = useState('');
   const [hl, setHl] = useState(0);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -54,51 +57,28 @@ function Palette({ onClose, onAddMachine, onCopilot }: {
 
   // Fire a lifecycle action and get out of the way: the palette closes
   // immediately, the toast reports the outcome. Same call, same success and
-  // error copy as the buttons on the Apps page — no confirms on lifecycle.
-  const act = useCallback((s: Service, action: 'start' | 'stop' | 'restart') => {
+  // error copy as the buttons on the Apps page. Stop pauses for a routine
+  // confirm (Enter accepts); start and restart never confirm.
+  const act = useCallback(async (s: Service, action: 'start' | 'stop' | 'restart') => {
     onClose();
+    if (action === 'stop') {
+      const ok = await confirm({
+        title: `Stop ${s.name}?`,
+        body: `${s.name} stops serving until you start it again.`,
+        confirmLabel: 'Stop app',
+      });
+      if (!ok) return;
+    }
     api.serviceAction(s.id, action)
       .then(() => {
         toast.ok(action === 'stop' ? `${s.name} stopping.` : action === 'start' ? `${s.name} starting.` : `${s.name} restarting.`);
         refresh();
       })
       .catch((err) => toast.err(cleanError(err)));
-  }, [onClose, refresh, toast]);
+  }, [onClose, confirm, refresh, toast]);
 
   const entries = useMemo<Entry[]>(() => {
     const go = (path: string) => () => { navigate(path); onClose(); };
-
-    const actions: Entry[] = [
-      { key: 'deploy', group: 'Actions', label: 'Deploy an app', icon: <Rocket size={14} />, run: go('/apps/new') },
-      { key: 'add-machine', group: 'Actions', label: 'Add a machine', icon: <Plus size={14} />, run: () => { onAddMachine(); onClose(); } },
-      { key: 'copilot', group: 'Actions', label: 'Ask Copilot', icon: <Bot size={14} />, run: () => { onCopilot(); onClose(); } },
-    ];
-    for (const s of services) {
-      // Mirrors the Apps page: no start/stop/restart while a deploy or
-      // restart is already in flight — the server would refuse it anyway.
-      const working = s.status === 'building' || s.status === 'pending';
-      if (!working) {
-        if (s.status === 'running') {
-          actions.push({
-            key: `stop-${s.id}`, group: 'Actions', label: `Stop ${s.name}`,
-            icon: <Square size={14} />, match: s.status, run: () => act(s, 'stop'),
-          });
-        } else {
-          actions.push({
-            key: `start-${s.id}`, group: 'Actions', label: `Start ${s.name}`,
-            icon: <Play size={14} />, match: s.status, run: () => act(s, 'start'),
-          });
-        }
-        actions.push({
-          key: `restart-${s.id}`, group: 'Actions', label: `Restart ${s.name}`,
-          icon: <RotateCw size={14} />, match: s.status, run: () => act(s, 'restart'),
-        });
-      }
-      actions.push({
-        key: `logs-${s.id}`, group: 'Actions', label: `Logs: ${s.name}`,
-        icon: <ScrollText size={14} />, match: s.status, run: go(`/apps/${s.id}/logs`),
-      });
-    }
 
     const pages: Entry[] = [
       { key: 'home', group: 'Pages', label: 'Home', icon: <LayoutGrid size={14} />, run: go('/') },
@@ -107,6 +87,43 @@ function Palette({ onClose, onAddMachine, onCopilot }: {
       { key: 'network', group: 'Pages', label: 'Network', icon: <Network size={14} />, run: go('/network') },
       { key: 'settings', group: 'Pages', label: 'Settings', icon: <Settings size={14} />, run: go('/settings') },
     ];
+
+    const actions: Entry[] = [
+      { key: 'deploy', group: 'Actions', label: 'Deploy an app', icon: <Rocket size={14} />, run: go('/apps/new') },
+      { key: 'add-machine', group: 'Actions', label: 'Add a machine', icon: <Plus size={14} />, run: () => { onAddMachine(); onClose(); } },
+      { key: 'copilot', group: 'Actions', label: 'Ask Copilot', icon: <Bot size={14} />, run: () => { onCopilot(); onClose(); } },
+    ];
+
+    // Per-service lifecycle verbs join the Actions group only once the query
+    // is non-empty; the resting palette stays a short directory instead of a
+    // wall of every verb for every app.
+    const lifecycle: Entry[] = [];
+    for (const s of services) {
+      // Mirrors the Apps page: no start/stop/restart while a deploy or
+      // restart is already in flight; the server would refuse it anyway.
+      const working = s.status === 'building' || s.status === 'pending';
+      if (!working) {
+        if (s.status === 'running') {
+          lifecycle.push({
+            key: `stop-${s.id}`, group: 'Actions', label: `Stop ${s.name}`,
+            icon: <Square size={14} />, match: s.status, run: () => { void act(s, 'stop'); },
+          });
+        } else {
+          lifecycle.push({
+            key: `start-${s.id}`, group: 'Actions', label: `Start ${s.name}`,
+            icon: <Play size={14} />, match: s.status, run: () => { void act(s, 'start'); },
+          });
+        }
+        lifecycle.push({
+          key: `restart-${s.id}`, group: 'Actions', label: `Restart ${s.name}`,
+          icon: <RotateCw size={14} />, match: s.status, run: () => { void act(s, 'restart'); },
+        });
+      }
+      lifecycle.push({
+        key: `logs-${s.id}`, group: 'Actions', label: `Logs: ${s.name}`,
+        icon: <ScrollText size={14} />, match: s.status, run: go(`/apps/${s.id}/logs`),
+      });
+    }
 
     // The status is the visible hint, so the dot needs no sr-only echo here.
     const appEntries: Entry[] = services.map((s) => ({
@@ -119,15 +136,15 @@ function Palette({ onClose, onAddMachine, onCopilot }: {
       hint: n.ip, match: `${n.status} ${n.ip}`, run: go(`/machines/${n.id}`),
     }));
 
-    const all = [...actions, ...pages, ...appEntries, ...nodeEntries];
     const needle = q.trim().toLowerCase();
-    if (!needle) return all;
+    if (!needle) return [...pages, ...actions, ...appEntries, ...nodeEntries];
+    const all = [...pages, ...actions, ...lifecycle, ...appEntries, ...nodeEntries];
     return all.filter((e) => `${e.label} ${e.match ?? ''}`.toLowerCase().includes(needle));
   }, [q, services, nodes, navigate, onClose, onAddMachine, onCopilot, act]);
 
   useEffect(() => { setHl((h) => Math.min(h, Math.max(entries.length - 1, 0))); }, [entries]);
 
-  // Keep the highlighted row in view — driven by the row's own ref, not a
+  // Keep the highlighted row in view, driven by the row's own ref, not a
   // class-selector query racing the next paint.
   useEffect(() => {
     itemRefs.current[hl]?.scrollIntoView({ block: 'nearest' });
@@ -143,7 +160,7 @@ function Palette({ onClose, onAddMachine, onCopilot }: {
     else if (e.key === 'End') { e.preventDefault(); setHl(Math.max(n - 1, 0)); }
     else if (e.key === 'Enter') { e.preventDefault(); entries[hl]?.run(); return; }
     else return;
-    // Keyboard moved the list — a stationary cursor may not steal it back.
+    // Keyboard moved the list; a stationary cursor may not steal it back.
     mouseMoved.current = false;
   };
 
@@ -180,7 +197,7 @@ function Palette({ onClose, onAddMachine, onCopilot }: {
             <div className="palette-empty">
               {loaded
                 ? <>Nothing matches &ldquo;{q}&rdquo;. Try an app name, a status like failed, or a machine IP.</>
-                : 'Still reading the fleet — try again in a second.'}
+                : 'Still reading the fleet. Try again in a second.'}
             </div>
           )}
         </div>

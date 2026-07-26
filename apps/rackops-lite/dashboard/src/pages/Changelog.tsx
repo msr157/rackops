@@ -1,9 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  ArrowRight, ExternalLink, GitBranch, KeyRound, LifeBuoy, Network, ShieldCheck, Sparkles, Users,
+  AlertTriangle, ArrowRight, ArrowUpCircle, ExternalLink, GitBranch, KeyRound, LifeBuoy, Network,
+  RotateCw, ShieldCheck, Sparkles, Users,
 } from 'lucide-react';
 import { api } from '../api';
+import type { VersionInfo } from '../api';
+import { useToast, cleanError } from '../components/toast';
+import { useConfirm } from '../components/confirm';
+import { Spinner } from '../components/ui';
 
 // A change line: the optional lead is the feature name the sentence already
 // opens with, bolded as a scanning anchor; lead + text is the exact history.
@@ -14,10 +19,10 @@ const releases: Release[] = [
   {
     version: 'v0.4.0', date: 'July 17, 2026', title: 'Organizations done right, support, and AI-tool access',
     changes: [
-      { lead: 'Organizations', text: ' rebuilt Dokploy-style: a sidebar switcher, invitation links, per-member permissions with project-level access, and true scoping — every org sees only its own machines, apps, domains, and settings.' },
+      { lead: 'Organizations', text: ' rebuilt Dokploy-style: a sidebar switcher, invitation links, per-member permissions with project-level access, and true scoping. Every org sees only its own machines, apps, domains, and settings.' },
       { lead: 'Profile page', text: ' with password change, API keys (expiry, last-used, shown once) that act with your role, and ready-to-paste MCP config for VS Code, Claude, and Cursor.' },
       { lead: 'Password reset', text: ' that works self-hosted: emailed from RackOps support, and always printed in the server log as the universal fallback.' },
-      { lead: 'Support tickets', text: ' inside the dashboard — replies from the RackOps team land straight back in the thread.' },
+      { lead: 'Support tickets', text: ' inside the dashboard. Replies from the RackOps team land straight back in the thread.' },
       { lead: 'Interactive API docs', text: ' at /swagger, generated from the live route table and served fully offline.' },
       { lead: 'Needs Attention', text: ' now clears itself the moment an issue resolves, and action buttons stay locked for the whole deploy window.' },
       { lead: 'Info tips', text: ' (ⓘ) across every page explain anything non-obvious in plain language.' },
@@ -57,15 +62,65 @@ const featureLinks = [
 ];
 
 export function ChangelogPage() {
+  const toast = useToast();
+  const confirm = useConfirm();
   // The rail dot marks the release this server is actually running, not just
   // the newest entry — an operator a version behind should see that at a
   // glance. Until (or unless) the server answers, the newest release stands in.
-  const [runningVersion, setRunningVersion] = useState<string | null>(null);
+  const [info, setInfo] = useState<VersionInfo | null>(null);
+  const [updating, setUpdating] = useState(false);
+  // The update never came back in time: the poll gave up and the page says
+  // so inline, where it survives being missed for a minute.
+  const [stalled, setStalled] = useState(false);
+  const pollRef = useRef<number | undefined>(undefined);
+  const giveUpRef = useRef<number | undefined>(undefined);
+  const runningVersion = info?.current ?? null;
+
   useEffect(() => {
     let cancelled = false;
-    api.versionCheck().then((v) => { if (!cancelled) setRunningVersion(v.current); }).catch(() => {});
-    return () => { cancelled = true; };
+    api.versionCheck().then((v) => { if (!cancelled) setInfo(v); }).catch(() => {});
+    return () => {
+      cancelled = true;
+      window.clearInterval(pollRef.current);
+      window.clearTimeout(giveUpRef.current);
+    };
   }, []);
+
+  // The one-click update, hosted here since the changelog is where the
+  // sidebar's "vX available" chip lands.
+  const update = async () => {
+    if (!info || updating) return;
+    const yes = await confirm({
+      title: `Update RackOps to ${info.latest}?`,
+      body: 'The server downloads the new release and restarts itself. Your apps keep running; the dashboard reconnects in a few seconds.',
+      confirmLabel: 'Update now',
+    });
+    if (!yes) return;
+    setUpdating(true);
+    setStalled(false);
+    try {
+      await api.applyUpdate();
+      toast.info('Updating. The server restarts shortly; this page will reconnect.');
+      // Poll until the new version answers, then reload onto fresh assets. If
+      // it never answers, say so inline instead of reloading onto an unchanged
+      // server and leaving the operator to guess whether the update took.
+      const target = info.latest.replace(/^v/, '');
+      pollRef.current = window.setInterval(async () => {
+        try {
+          const v = await api.versionCheck();
+          if (v.current === target) { window.clearInterval(pollRef.current); window.location.reload(); }
+        } catch { /* server restarting */ }
+      }, 2000);
+      giveUpRef.current = window.setTimeout(() => {
+        window.clearInterval(pollRef.current);
+        setUpdating(false);
+        setStalled(true);
+      }, 60000);
+    } catch (e) {
+      toast.err(cleanError(e));
+      setUpdating(false);
+    }
+  };
 
   // React owns navigation, so a #v0-4-0 deep link needs this nudge: the
   // browser's own hash scroll fired before the releases existed.
@@ -83,6 +138,43 @@ export function ChangelogPage() {
     <div className="page">
       <div className="page-title row"><Sparkles size={20} style={{ color: 'var(--accent)' }} aria-hidden /> What&rsquo;s new</div>
       <div className="page-sub">Every user-visible RackOps change, with direct paths to the features that shipped.</div>
+
+      {stalled && info && (
+        <div className="card warn" role="alert" style={{ maxWidth: 850, marginBottom: 14 }}>
+          <div className="row wrap">
+            <AlertTriangle size={16} style={{ color: 'var(--warn)', flexShrink: 0 }} aria-hidden />
+            <span style={{ flex: 1, minWidth: 240 }}>
+              The server has not come back on {info.latest} yet. It may still be restarting.
+              Check the server log (<code className="mono">journalctl -u rackops</code>), then reload.
+            </span>
+            <button className="btn sm" onClick={() => window.location.reload()}>
+              <RotateCw size={12} aria-hidden /> Reload page
+            </button>
+          </div>
+        </div>
+      )}
+
+      {info?.updateAvailable && (
+        <div className="card accent" style={{ maxWidth: 850, marginBottom: 18 }}>
+          <div className="row wrap">
+            <ArrowUpCircle size={16} style={{ color: 'var(--accent)', flexShrink: 0 }} aria-hidden />
+            <span style={{ flex: 1, minWidth: 240 }}>
+              <strong>RackOps {info.latest} is available.</strong>{' '}
+              <span className="dim">You are running v{info.current}.</span>{' '}
+              {info.releaseUrl && (
+                <a href={info.releaseUrl} target="_blank" rel="noreferrer">
+                  Release notes on GitHub <ExternalLink size={11} aria-hidden />
+                </a>
+              )}
+            </span>
+            <button className="btn primary" disabled={updating} onClick={update}>
+              {updating
+                ? <><Spinner size={13} /> Updating…</>
+                : <><ArrowUpCircle size={13} aria-hidden /> Update now</>}
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="release-list">
         {releases.map((release, index) => (

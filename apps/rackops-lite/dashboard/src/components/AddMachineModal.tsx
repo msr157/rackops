@@ -1,23 +1,24 @@
 import { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Check, Copy, HardDrive, RotateCw } from 'lucide-react';
 import { api } from '../api';
 import { useData } from '../data';
 import { cleanError } from './toast';
-import { CopyField, InfoTip, Modal, Spinner } from './ui';
+import { CopyBtn, Modal, Spinner } from './ui';
 
 type JoinState =
   | { phase: 'loading' }
   | { phase: 'ready'; command: string }
   | { phase: 'error'; message: string };
 
-// AddMachineModal shows the one-line join command. The machine appears in
-// the fleet on its own within seconds of running it — and this modal says so
-// the moment it does.
+// AddMachineModal is command-first: one instruction, the join command with a
+// Copy button, one caption about the token. When the machine reports in, the
+// modal says so and Done turns primary.
 export function AddMachineModal({ onClose }: { onClose: () => void }) {
   const { nodes } = useData();
   const [state, setState] = useState<JoinState>({ phase: 'loading' });
 
-  // Machines already in the fleet when the modal opened — anything beyond
+  // Machines already in the fleet when the modal opened. Anything beyond
   // this set joined while the operator was looking at the command.
   const [baseline] = useState(() => new Set(nodes.map((n) => n.id)));
   const joined = nodes.filter((n) => !baseline.has(n.id));
@@ -31,7 +32,7 @@ export function AddMachineModal({ onClose }: { onClose: () => void }) {
         setState({
           phase: 'error',
           message: /failed to fetch|networkerror|load failed/i.test(msg)
-            ? 'The server didn’t answer — is the control plane running?'
+            ? 'The server didn’t answer. Is the control plane running?'
             : msg,
         });
       });
@@ -42,14 +43,8 @@ export function AddMachineModal({ onClose }: { onClose: () => void }) {
   return (
     <Modal title="Add a machine" icon={<HardDrive size={16} />} onClose={onClose}>
       <p className="dim" style={{ marginBottom: 14, lineHeight: 1.6 }}>
-        Copy the <code className="mono">rackops</code> binary to the new machine, then run this
-        command on it. The machine joins the rack within seconds and its hardware is
-        discovered automatically.
-        <InfoTip wide>
-          The command carries a join token (which authorizes the machine) and your organization,
-          so the new machine lands in the right place. The agent reports telemetry every 2 seconds
-          and receives work over the same connection.
-        </InfoTip>
+        Copy the <code className="mono">rackops</code> binary to the new machine, then run
+        this command on it. The machine joins the rack within seconds.
       </p>
 
       {state.phase === 'loading' && (
@@ -57,37 +52,49 @@ export function AddMachineModal({ onClose }: { onClose: () => void }) {
           <code className="code-block row" style={{ flex: 1, gap: 8 }}>
             <Spinner size={13} /> <span className="dim">fetching a join command…</span>
           </code>
-          <button className="btn sm" disabled title="Copy" aria-label="Copy join command">
-            <Copy size={12} />
-          </button>
+          <button className="btn sm" disabled><Copy size={12} /> Copy</button>
         </div>
       )}
-      {state.phase === 'ready' && <CopyField text={state.command} />}
+      {state.phase === 'ready' && (
+        <>
+          <div className="row" style={{ gap: 8 }}>
+            <code className="code-block" style={{ flex: 1 }}>{state.command}</code>
+            <CopyBtn text={state.command} label="Copy" />
+          </div>
+          <div className="row" style={{ marginTop: 10, alignItems: 'flex-start' }}>
+            <span className="faint" style={{ flex: 1, lineHeight: 1.6 }}>
+              The command carries a join token that authorizes the machine, and the token
+              expires, so run it soon.
+            </span>
+            <button className="btn sm ghost" style={{ flex: 'none' }} onClick={load}>
+              <RotateCw size={12} aria-hidden /> New command
+            </button>
+          </div>
+        </>
+      )}
       {state.phase === 'error' && (
         <div className="auth-notice err" role="alert" style={{ marginBottom: 0 }}>
           <div style={{ marginBottom: 8 }}>
             <strong>Couldn&rsquo;t get a join command.</strong> {state.message}
           </div>
-          <button className="btn sm" onClick={load}><RotateCw size={12} /> Retry</button>
+          <button className="btn sm" onClick={load}><RotateCw size={12} aria-hidden /> Retry</button>
         </div>
       )}
 
-      <p className="faint" style={{ marginTop: 10, lineHeight: 1.6 }}>
-        The command embeds a join token — it&rsquo;s what authorizes the machine, and it
-        expires, so run it soon rather than saving it for later.
-      </p>
-
       {joined.map((n) => (
-        <div key={n.id} className="row" style={{ marginTop: 10 }} role="status">
+        <div key={n.id} className="row" style={{ marginTop: 12 }} role="status">
           <span className="badge ok"><Check size={11} aria-hidden /> {n.name} joined</span>
-          <span className="faint">it&rsquo;s reporting telemetry — you can close this window</span>
+          <Link to={`/machines/${n.id}`} onClick={onClose} style={{ fontSize: 12.5 }}>
+            View machine
+          </Link>
         </div>
       ))}
 
-      <p className="faint" style={{ marginTop: 14, lineHeight: 1.6 }}>
-        Works behind CGNAT and firewalls — the agent only makes outbound connections.
-        No port forwarding, no VPN setup.
-      </p>
+      <div className="row" style={{ justifyContent: 'flex-end', marginTop: 20 }}>
+        <button className={`btn ${joined.length > 0 ? 'primary' : ''}`} onClick={onClose}>
+          Done
+        </button>
+      </div>
     </Modal>
   );
 }

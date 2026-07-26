@@ -1,10 +1,13 @@
 import { useNavigate } from 'react-router-dom';
+import { Server } from 'lucide-react';
 import type { Node, Service } from '../api';
-import { Led, Skeleton, UsageBar } from './ui';
+import { EmptyState, Led, Skeleton, UsageBar } from './ui';
 
-// Rack renders the fleet as slot-numbered rows — the signature element,
+// Rack renders the fleet as slot-numbered rows (the signature element),
 // drawn flat: a mono U-number rail, status dot + word, name, live meters.
-export function Rack({ nodes, services, loading }: { nodes: Node[]; services: Service[]; loading?: boolean }) {
+export function Rack({ nodes, services, loading, onAdd }: {
+  nodes: Node[]; services: Service[]; loading?: boolean; onAdd?: () => void;
+}) {
   const navigate = useNavigate();
 
   // An unanswered fetch must never render as an empty rack.
@@ -15,6 +18,18 @@ export function Rack({ nodes, services, loading }: { nodes: Node[]; services: Se
           {[0, 1, 2].map((i) => <Skeleton key={i} height={50} radius={6} />)}
         </div>
       </div>
+    );
+  }
+
+  // A truly empty rack is the start of onboarding, not a dead end: callers
+  // that can open the add-machine flow get a real call to action instead of
+  // prose. The EmptyState replaces the panel so borders never nest.
+  if (nodes.length === 0 && onAdd) {
+    return (
+      <EmptyState icon={<Server size={18} />} title="The rack is empty">
+        <div style={{ marginBottom: 14 }}>Add any Linux box: an old PC, a Pi, a VPS.</div>
+        <button className="btn primary" onClick={onAdd}>Add your first machine</button>
+      </EmptyState>
     );
   }
 
@@ -33,7 +48,12 @@ export function Rack({ nodes, services, loading }: { nodes: Node[]; services: Se
                 <span className="u-name">{n.name}</span>
                 {n.role === 'server' && <span className="tag">control</span>}
               </div>
-              <div className="faint mono u-sub">{n.ip}{apps.length > 0 && ` · ${up}/${apps.length} apps up`}</div>
+              {/* One middot per line: ip first, then readings comma-joined.
+                  Temperature lives here because it is a reading, not a
+                  percentage, so it never gets a meter bar. */}
+              <div className="faint mono u-sub">
+                {n.ip} · {apps.length > 0 && `${up}/${apps.length} apps up, `}{n.metrics.tempC.toFixed(0)}°C
+              </div>
             </div>
             <div className="u-meter">
               <span className="faint mono">CPU {n.metrics.cpuPct.toFixed(0)}%</span>
@@ -43,17 +63,12 @@ export function Rack({ nodes, services, loading }: { nodes: Node[]; services: Se
               <span className="faint mono">MEM {n.metrics.memPct.toFixed(0)}%</span>
               <UsageBar pct={n.metrics.memPct} />
             </div>
-            {/* Temperature is a reading, not a percentage — no meter bar. */}
-            <div className="u-meter">
-              <span className="faint mono">{n.metrics.tempC.toFixed(0)}°C</span>
-              <span className="faint" style={{ fontSize: 10.5 }}>temp</span>
-            </div>
           </button>
         );
       })}
       {nodes.length === 0 && (
         <div style={{ padding: '30px 16px', textAlign: 'center' }} className="faint">
-          The rack is empty — add your first machine to bring it online.
+          The rack is empty. Add your first machine to bring it online.
         </div>
       )}
     </div>

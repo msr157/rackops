@@ -133,11 +133,22 @@ export function OrgSwitcher({ me }: { me: User | null }) {
         // The list hasn't arrived yet — hold the trigger's exact footprint.
         <Skeleton height={35} radius="var(--r-md)" />
       ) : !active ? (
-        // Zero organizations: a quiet way in, same footprint as the trigger.
-        <button ref={triggerRef} className="org-trigger" onClick={openCreate}>
-          <Plus size={14} style={{ color: 'var(--faint)', flexShrink: 0 }} aria-hidden />
-          <span className="org-name nav-label" style={{ color: 'var(--dim)' }}>Create organization</span>
-        </button>
+        me === null ? (
+          // Who is asking decides what zero orgs means — hold the footprint
+          // until the account answers.
+          <Skeleton height={35} radius="var(--r-md)" />
+        ) : platformAdmin ? (
+          // Zero organizations: a quiet way in, same footprint as the trigger.
+          <button ref={triggerRef} className="org-trigger" onClick={openCreate}>
+            <Plus size={14} style={{ color: 'var(--faint)', flexShrink: 0 }} aria-hidden />
+            <span className="org-name" style={{ color: 'var(--dim)' }}>Create organization</span>
+          </button>
+        ) : (
+          // Members cannot create organizations, so no dead-end button.
+          <div className="faint" style={{ padding: '4px 2px', lineHeight: 1.5 }}>
+            <span className="nav-label">Ask an admin to invite you to an organization.</span>
+          </div>
+        )
       ) : (
         <button ref={triggerRef} className="org-trigger" onClick={() => setOpen((v) => !v)}
           title={active.name} aria-label={`Switch organization (current: ${active.name})`}
@@ -146,8 +157,9 @@ export function OrgSwitcher({ me }: { me: User | null }) {
             if (!open && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) { e.preventDefault(); setOpen(true); }
           }}>
           <Building2 size={14} style={{ color: 'var(--accent)', flexShrink: 0 }} aria-hidden />
-          <span className="org-name nav-label">{active.name}</span>
-          <ChevronsUpDown size={12} style={{ marginLeft: 'auto', color: 'var(--faint)', flexShrink: 0 }} aria-hidden />
+          <span className="org-name">{active.name}</span>
+          <ChevronsUpDown className="org-caret" size={12}
+            style={{ marginLeft: 'auto', color: 'var(--faint)', flexShrink: 0 }} aria-hidden />
         </button>
       )}
 
@@ -184,7 +196,7 @@ export function OrgSwitcher({ me }: { me: User | null }) {
       {creating && (
         <Modal title="New organization" icon={<Building2 size={15} />} width={380} onClose={() => setCreating(false)}>
           <div className="dim" style={{ marginBottom: 14 }}>
-            An organization has its own projects, machines, domains, and members — a clean
+            An organization has its own projects, machines, domains, and members: a clean
             boundary between teams or clients.
           </div>
           <Field label="Name" error={nameError || undefined}>
@@ -194,9 +206,12 @@ export function OrgSwitcher({ me }: { me: User | null }) {
                 onKeyDown={(e) => e.key === 'Enter' && create()} />
             )}
           </Field>
-          <button className="btn primary" style={{ width: '100%' }} disabled={busy} onClick={create}>
-            {busy ? <Spinner size={13} /> : <Plus size={13} />} Create organization
-          </button>
+          <div className="row" style={{ justifyContent: 'flex-end' }}>
+            <button className="btn ghost" disabled={busy} onClick={() => setCreating(false)}>Cancel</button>
+            <button className="btn primary" disabled={busy} onClick={create}>
+              {busy ? <Spinner size={13} /> : <Plus size={13} />} Create
+            </button>
+          </div>
         </Modal>
       )}
     </div>

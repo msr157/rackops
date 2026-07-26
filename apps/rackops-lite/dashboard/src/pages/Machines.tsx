@@ -12,19 +12,24 @@ import {
 // MachinesPage: the physical rack, plus fleet-wide capacity.
 export function MachinesPage({ onAddMachine }: { onAddMachine: () => void }) {
   const { nodes, services, overview, loaded } = useData();
+  // One add-machine action at a time: while the empty state carries the CTA,
+  // the header button steps aside so the intent never appears twice.
+  const fleetEmpty = loaded && nodes.length === 0;
 
   return (
     <div className="page">
       <div className="row spread" style={{ marginBottom: 4 }}>
         <div className="page-title">Machines</div>
-        <button className="btn primary" onClick={onAddMachine}><Plus size={14} aria-hidden /> Add machine</button>
+        {!fleetEmpty && (
+          <button className="btn primary" onClick={onAddMachine}><Plus size={14} aria-hidden /> Add machine</button>
+        )}
       </div>
-      <div className="page-sub">Every box in your rack — hardware discovered automatically</div>
+      <div className="page-sub">Every box in your rack, hardware discovered automatically</div>
 
       {/* Fleet KPIs: skeletons hold the row's shape until the overview arrives,
           so numbers land without a layout jump. An empty (loaded) fleet has no
           capacity to summarize, so the row disappears rather than showing zeros. */}
-      {loaded && nodes.length === 0 ? null : overview ? (
+      {fleetEmpty ? null : overview ? (
         <div className="kpi-row">
           <Kpi icon={<HardDrive size={12} aria-hidden />} label="Machines" value={`${overview.nodesOnline}/${overview.nodesTotal}`} unit="online" />
           <Kpi icon={<Cpu size={12} aria-hidden />} label="Fleet CPU" value={overview.avgCpuPct.toFixed(0)} unit="%" />
@@ -41,15 +46,15 @@ export function MachinesPage({ onAddMachine }: { onAddMachine: () => void }) {
 
       {/* The rack shows its own skeletons while loading; once the fleet is
           confirmed empty, the single empty state below takes over. */}
-      {(!loaded || nodes.length > 0) && <Rack nodes={nodes} services={services} loading={!loaded} />}
+      {!fleetEmpty && <Rack nodes={nodes} services={services} loading={!loaded} />}
 
-      {loaded && nodes.length === 0 && (
+      {fleetEmpty && (
         <EmptyState icon={<Server size={18} />} title="One command turns any Linux box into part of your rack">
           <div style={{ marginBottom: 14, lineHeight: 1.6 }}>
-            Old PC, Raspberry Pi, VPS — install the agent and it shows up here in seconds,<br />
+            Old PC, Raspberry Pi, VPS: install the agent and it shows up here in seconds,<br />
             hardware and all. Works behind CGNAT; only outbound connections.
           </div>
-          <button className="btn primary" onClick={onAddMachine}><Plus size={13} aria-hidden /> Show the command</button>
+          <button className="btn primary" onClick={onAddMachine}><Plus size={13} aria-hidden /> Add machine</button>
         </EmptyState>
       )}
     </div>
@@ -78,7 +83,7 @@ export function MachineDetail() {
   }, [node, node?.metrics.timestamp]);
 
   if (!node) {
-    // The fleet hasn't answered yet — this is loading, not a missing machine.
+    // The fleet hasn't answered yet; this is loading, not a missing machine.
     if (!loaded) {
       return (
         <div className="page" aria-busy="true">
@@ -114,13 +119,17 @@ export function MachineDetail() {
       <div className="row" style={{ marginBottom: 4 }}>
         <button className="btn sm ghost" onClick={() => navigate('/machines')}
           aria-label="Back to machines" title="Back to machines"><ArrowLeft size={14} aria-hidden /></button>
-        <div className="page-title" style={{ margin: 0 }}>{node.name}</div>
+        <div className="page-title" style={{ margin: 0, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{node.name}</div>
         <StatusBadge status={node.status} />
+        <Link to={`/apps/new?node=${node.id}`} className="btn" style={{ marginLeft: 'auto', flex: 'none' }}>
+          <Rocket size={13} aria-hidden /> Deploy to this machine
+        </Link>
       </div>
       <div className="row wrap page-sub" style={{ gap: 8 }}>
         <span className="tag">{node.os}</span>
         <span className="tag">{node.arch}</span>
         <span className="tag">kernel {node.kernel}</span>
+        <span className="tag">{hw.cpuModel}</span>
         <span className="dim mono">{node.ip}</span>
         {node.publicIp && <span className="dim mono">public {node.publicIp}</span>}
         <span className="dim row" style={{ gap: 5 }}><Clock size={12} aria-hidden /> up {formatUptime(m.uptimeSec)}</span>
@@ -156,14 +165,14 @@ export function MachineDetail() {
           <div className="faint">{m.memPct.toFixed(0)}% used</div>
           <UsageBar pct={m.memPct} />
         </Kpi>
-        {/* Temperature is a reading, not a percentage — the number stands alone,
+        {/* Temperature is a reading, not a percentage; the number stands alone,
             no meter bar. */}
         <Kpi icon={<Thermometer size={12} aria-hidden />} label="Package temp" value={m.tempC.toFixed(0)} unit="°C">
           <div className="faint">
             {m.tempC > 85 ? 'throttling risk' : m.tempC > 70 ? 'warm' : 'healthy'}
             <InfoTip>
               The CPU package sensor, read straight from the hardware. Above ~85°C most CPUs slow
-              themselves down to cool off — an alert opens if it stays there.
+              themselves down to cool off; an alert opens if it stays there.
             </InfoTip>
           </div>
         </Kpi>
@@ -172,10 +181,26 @@ export function MachineDetail() {
         </Kpi>
       </div>
 
-      <div className="card" style={{ marginBottom: 14 }}>
-        <div className="eyebrow" style={{ marginBottom: 4 }}>Processor</div>
-        <strong>{hw.cpuModel}</strong>
-      </div>
+      <div className="section-title" style={{ marginTop: 4 }}><Boxes size={15} aria-hidden /> Apps on this machine</div>
+      {apps.length > 0 ? (
+        <div className="stack" style={{ gap: 8 }}>
+          {apps.map((s) => (
+            <Link key={s.id} to={`/apps/${s.id}`} className="card clickable row" style={{ padding: '10px 14px', color: 'var(--text)' }}>
+              <Led status={s.status} label />
+              <strong style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</strong>
+              <span className="faint mono" style={{ marginLeft: 'auto', flex: 'none' }}>
+                {s.status === 'running' ? `${s.cpuPct.toFixed(0)}% cpu · ${s.memUsedMb} MB` : s.status}
+              </span>
+            </Link>
+          ))}
+        </div>
+      ) : (
+        <EmptyState icon={<Boxes size={18} />} title="Nothing deployed here yet">
+          {/* The header's "Deploy to this machine" is the one deploy action on
+              this page; the empty state points at it instead of cloning it. */}
+          <div>Use <strong>Deploy to this machine</strong> above, or let auto-placement pick this box for a new app.</div>
+        </EmptyState>
+      )}
 
       {gpus.length > 0 && (
         <>
@@ -185,7 +210,7 @@ export function MachineDetail() {
               <div className="card" key={g.index}>
                 <div className="row spread">
                   <strong>{shortGpu(g.model)}</strong>
-                  {/* Vendor is an identity fact, not a status — neutral tag. */}
+                  {/* Vendor is an identity fact, not a status; neutral tag. */}
                   <span className="tag">{g.vendor.toUpperCase()}</span>
                 </div>
                 <div className="grid-3" style={{ marginTop: 12 }}>
@@ -198,8 +223,9 @@ export function MachineDetail() {
                     <UsageBar pct={g.utilPct} />
                   </div>
                   <div>
-                    {/* Temp and power are readings, not fill levels — no bar. */}
-                    <div className="row spread dim"><span>Temp · power</span><span className="mono">{g.tempC.toFixed(0)}°C · {g.powerW.toFixed(0)}W</span></div>
+                    {/* Temp and power are readings, not fill levels; no bar. */}
+                    <div className="row spread dim"><span>Temp</span><span className="mono">{g.tempC.toFixed(0)}°C</span></div>
+                    <div className="row spread dim"><span>Power</span><span className="mono">{g.powerW.toFixed(0)}W</span></div>
                   </div>
                 </div>
               </div>
@@ -212,7 +238,7 @@ export function MachineDetail() {
         <HardDrive size={15} aria-hidden /> Drives
         <InfoTip>
           Live read/write throughput and fill level per drive. The health badge warns at 85% full
-          and turns critical at 95% — full disks are the top cause of failed deploys.
+          and turns critical at 95%; full disks are the top cause of failed deploys.
         </InfoTip>
       </div>
       {drives.length > 0 ? (
@@ -224,7 +250,7 @@ export function MachineDetail() {
                 <div className="row spread">
                   <div className="row wrap">
                     <strong className="mono">{d.device}</strong>
-                    {/* Drive type is hardware identity — neutral tag, never a status hue. */}
+                    {/* Drive type is hardware identity; neutral tag, never a status hue. */}
                     <span className="tag">{d.type.toUpperCase()}</span>
                     <span className={`badge ${healthBadge[d.health] ?? 'neutral'}`}>{d.health}</span>
                     {!d.mountPoint && <span className="badge warn">not mounted</span>}
@@ -277,26 +303,6 @@ export function MachineDetail() {
       ) : (
         <EmptyState icon={<NetworkIcon size={18} />} title="No interfaces reported">
           <div>The agent hasn't reported any network interfaces for this machine yet.</div>
-        </EmptyState>
-      )}
-
-      <div className="section-title"><Boxes size={15} aria-hidden /> Apps on this machine</div>
-      {apps.length > 0 ? (
-        <div className="stack" style={{ gap: 8 }}>
-          {apps.map((s) => (
-            <Link key={s.id} to={`/apps/${s.id}`} className="card clickable row" style={{ padding: '10px 14px', color: 'var(--text)' }}>
-              <Led status={s.status} label />
-              <strong style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</strong>
-              <span className="faint mono" style={{ marginLeft: 'auto', flex: 'none' }}>
-                {s.status === 'running' ? `${s.cpuPct.toFixed(0)}% cpu · ${s.memUsedMb} MB` : s.status}
-              </span>
-            </Link>
-          ))}
-        </div>
-      ) : (
-        <EmptyState icon={<Boxes size={18} />} title="Nothing deployed here yet">
-          <div style={{ marginBottom: 14 }}>Deploy an app and choose this machine — or let auto-placement pick it.</div>
-          <Link to="/apps/new" className="btn"><Rocket size={13} aria-hidden /> Deploy an app</Link>
         </EmptyState>
       )}
     </div>

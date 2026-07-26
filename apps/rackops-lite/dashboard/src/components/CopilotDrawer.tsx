@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useId, useRef, useState } from 'react';
-import { Bot, RotateCw, Send, X } from 'lucide-react';
+import { Bot, RotateCw, Send, SquarePen, X } from 'lucide-react';
 import { api } from '../api';
 import { useData } from '../data';
 import { cleanError } from './toast';
@@ -68,7 +68,7 @@ export function CopilotProvider({ children }: { children: React.ReactNode }) {
     await ask(q);
   };
 
-  // Retry swaps the error bubble for a fresh attempt at the same prompt —
+  // Retry swaps the error bubble for a fresh attempt at the same prompt, so
   // the question stays in the thread without being repeated.
   const retry = (id: number) => {
     if (thinking) return;
@@ -78,21 +78,30 @@ export function CopilotProvider({ children }: { children: React.ReactNode }) {
     void ask(failed.prompt);
   };
 
+  // New chat wipes the thread for a fresh question. Blocked while a reply is
+  // in flight, or the late reply would land in the emptied thread.
+  const reset = () => {
+    if (thinking) return;
+    setMsgs([]);
+    setInput('');
+  };
+
   return (
     <CopilotCtx.Provider value={{ open, setOpen }}>
       {children}
       {open && (
         <CopilotPanel msgs={msgs} input={input} thinking={thinking}
-          setInput={setInput} send={send} retry={retry} onClose={() => setOpen(false)} />
+          setInput={setInput} send={send} retry={retry} reset={reset}
+          onClose={() => setOpen(false)} />
       )}
     </CopilotCtx.Provider>
   );
 }
 
-function CopilotPanel({ msgs, input, thinking, setInput, send, retry, onClose }: {
+function CopilotPanel({ msgs, input, thinking, setInput, send, retry, reset, onClose }: {
   msgs: Msg[]; input: string; thinking: boolean;
   setInput: (v: string) => void; send: (text?: string) => void;
-  retry: (id: number) => void; onClose: () => void;
+  retry: (id: number) => void; reset: () => void; onClose: () => void;
 }) {
   const { overview } = useData();
   const endRef = useRef<HTMLDivElement>(null);
@@ -104,81 +113,85 @@ function CopilotPanel({ msgs, input, thinking, setInput, send, retry, onClose }:
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [msgs, thinking]);
 
-  // Announce only what's new — the latest reply — instead of re-reading the
+  // Announce only what's new (the latest reply) instead of re-reading the
   // whole thread on every change.
   let lastBot: Msg | undefined;
   for (let i = msgs.length - 1; i >= 0; i--) {
     if (msgs[i].role === 'bot') { lastBot = msgs[i]; break; }
   }
 
+  // No overlay: the drawer is non-modal on purpose, so the page stays visible
+  // and clickable as context while the conversation runs. Escape (dialog hook)
+  // and the X still close it. aria-modal stays off because the rest of the
+  // page really is interactive.
   return (
-    <>
-      <div className="drawer-overlay" onClick={onClose} />
-      <div ref={ref} className="drawer" tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={titleId}>
-        <div className="drawer-head">
-          <Bot size={16} style={{ color: 'var(--accent)' }} aria-hidden />
-          <strong id={titleId}>Copilot</strong>
-          <span className="faint">grounded in live telemetry</span>
-          <button className="btn sm ghost" style={{ marginLeft: 'auto' }}
-            onClick={onClose} aria-label="Close Copilot"><X size={14} /></button>
-        </div>
+    <div ref={ref} className="drawer" tabIndex={-1} role="dialog" aria-labelledby={titleId}>
+      <div className="drawer-head">
+        <Bot size={16} style={{ color: 'var(--accent)' }} aria-hidden />
+        <strong id={titleId}>Copilot</strong>
+        <button className="btn sm ghost" style={{ marginLeft: 'auto' }}
+          onClick={reset} disabled={thinking || msgs.length === 0}>
+          <SquarePen size={13} aria-hidden /> New chat
+        </button>
+        <button className="btn sm ghost"
+          onClick={onClose} aria-label="Close Copilot"><X size={14} /></button>
+      </div>
 
-        <div className="chat-list">
-          {msgs.length === 0 && (
-            <div style={{ textAlign: 'center', paddingTop: 24 }}>
-              <Bot size={26} style={{ color: 'var(--accent)', marginBottom: 10 }} aria-hidden />
-              <div className="dim" style={{ marginBottom: 6 }}>
-                Ask anything about your rack.
-              </div>
-              <div className="faint" style={{ marginBottom: 18 }}>
-                {overview ? `${overview.nodesOnline}/${overview.nodesTotal} machines · ${overview.servicesUp} apps up · ${overview.openAlerts} alerts` : ''}
-              </div>
-              <div className="stack" style={{ gap: 8 }}>
-                {STARTERS.map((s) => (
-                  <button key={s} className="btn sm" style={{ justifyContent: 'flex-start' }}
-                    disabled={thinking} onClick={() => send(s)}>{s}</button>
-                ))}
+      <div className="chat-list">
+        {msgs.length === 0 && (
+          <div style={{ textAlign: 'center', paddingTop: 24 }}>
+            <Bot size={26} style={{ color: 'var(--accent)', marginBottom: 10 }} aria-hidden />
+            <div className="dim" style={{ marginBottom: 6 }}>
+              Ask anything about your rack.
+            </div>
+            <div className="faint" style={{ marginBottom: 18 }}>
+              {overview ? `${overview.nodesOnline}/${overview.nodesTotal} machines online · ${overview.servicesUp} apps up, ${overview.openAlerts} alerts` : ''}
+            </div>
+            <div className="stack" style={{ gap: 8 }}>
+              {STARTERS.map((s) => (
+                <button key={s} className="btn sm" style={{ justifyContent: 'flex-start' }}
+                  disabled={thinking} onClick={() => send(s)}>{s}</button>
+              ))}
+            </div>
+          </div>
+        )}
+        {msgs.map((m) => (
+          m.error ? (
+            <div key={m.id} className="chat-msg error">
+              {m.text}
+              <div style={{ marginTop: 8 }}>
+                <button className="btn sm" disabled={thinking} onClick={() => retry(m.id)}>
+                  <RotateCw size={12} /> Retry
+                </button>
               </div>
             </div>
-          )}
-          {msgs.map((m) => (
-            m.error ? (
-              <div key={m.id} className="chat-msg error">
-                {m.text}
-                <div style={{ marginTop: 8 }}>
-                  <button className="btn sm" disabled={thinking} onClick={() => retry(m.id)}>
-                    <RotateCw size={12} /> Retry
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div key={m.id} className={`chat-msg ${m.role === 'user' ? 'user' : 'bot'}`}>
-                {m.text}
-                {m.provider && <div className="faint" style={{ marginTop: 6 }}>Copilot · {m.provider}</div>}
-              </div>
-            )
-          ))}
-          {thinking && <div className="row dim" style={{ gap: 8 }}><Spinner size={13} /> thinking…</div>}
-          <div ref={endRef} />
-        </div>
-
-        {/* Live region scoped to the newest reply, not the whole thread. */}
-        <div className="sr-only" role="status">
-          {thinking ? 'Copilot is thinking…'
-            : lastBot ? (lastBot.error ? `Copilot error: ${lastBot.text}` : `Copilot: ${lastBot.text}`) : ''}
-        </div>
-
-        <div className="drawer-foot row">
-          <label className="sr-only" htmlFor={inputId}>Ask Copilot</label>
-          <input className="input" id={inputId} placeholder="Ask Copilot…" autoFocus value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && send()} />
-          <button className="btn primary" disabled={thinking || !input.trim()}
-            onClick={() => send()} aria-label="Send" title="Send">
-            {thinking ? <Spinner size={14} /> : <Send size={14} />}
-          </button>
-        </div>
+          ) : (
+            <div key={m.id} className={`chat-msg ${m.role === 'user' ? 'user' : 'bot'}`}>
+              {m.text}
+              {m.provider && <div className="faint" style={{ marginTop: 6 }}>Copilot · {m.provider}</div>}
+            </div>
+          )
+        ))}
+        {thinking && <div className="row dim" style={{ gap: 8 }}><Spinner size={13} /> thinking…</div>}
+        <div ref={endRef} />
       </div>
-    </>
+
+      {/* Live region scoped to the newest reply, not the whole thread. */}
+      <div className="sr-only" role="status">
+        {thinking ? 'Copilot is thinking…'
+          : lastBot ? (lastBot.error ? `Copilot error: ${lastBot.text}` : `Copilot: ${lastBot.text}`) : ''}
+      </div>
+
+      <div className="drawer-foot row">
+        <label className="sr-only" htmlFor={inputId}>Ask Copilot</label>
+        <input className="input" id={inputId} placeholder="Ask Copilot…" autoFocus value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && send()} />
+        <button className="btn primary" disabled={thinking || !input.trim()}
+          onClick={() => send()} aria-label="Send" title="Send">
+          {thinking ? <Spinner size={14} /> : <Send size={14} />}
+        </button>
+      </div>
+    </div>
   );
 }

@@ -1,18 +1,81 @@
-import { useCallback, useEffect, useState } from 'react';
-import { AlertTriangle, ArrowRight, Bell, Building2, Key, KeyRound, RotateCw, Zap } from 'lucide-react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useCallback, useEffect, useId, useMemo, useState } from 'react';
+import { AlertTriangle, Bell, Building2, Key, RotateCw, Zap } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../api';
 import type { Settings } from '../api';
 import { useToast, cleanError } from '../components/toast';
 import { OrgPanel } from '../components/OrgPanel';
 import { Field, InfoTip, Spinner } from '../components/ui';
 
-type Tab = 'org' | 'ai' | 'notify' | 'tokens';
+type Tab = 'org' | 'ai' | 'notify';
+
+type VendorId = 'anthropic' | 'gemini' | 'openai';
+
+// One radio-card per provider; what each one is lives in the card itself, so
+// the choice never depends on remembering a dropdown's fine print.
+const PROVIDERS: { id: string; name: string; hint: string }[] = [
+  { id: 'auto', name: 'Auto', hint: 'Uses the first provider with a stored key and falls back to the built-in rule engine.' },
+  { id: 'anthropic', name: 'Anthropic', hint: 'Claude models, using your Anthropic API key.' },
+  { id: 'gemini', name: 'Gemini', hint: 'Gemini models, using a Google AI Studio key.' },
+  { id: 'openai', name: 'OpenAI-compatible', hint: 'OpenAI or any compatible endpoint, including Ollama.' },
+  { id: 'builtin', name: 'Built-in', hint: 'The rule engine alone: answers from live telemetry, no key, no data leaves your machines.' },
+];
+
+const MODEL_PRESETS: Record<VendorId, string[]> = {
+  anthropic: ['claude-opus-4-8', 'claude-sonnet-5', 'claude-haiku-4-5', 'claude-fable-5'],
+  gemini: ['gemini-3.5-flash', 'gemini-3-flash', 'gemini-3.1-flash-lite', 'gemini-3-pro-preview'],
+  openai: ['gpt-5.5', 'gpt-5.4-mini', 'gpt-5.4-nano', 'llama3.1', 'qwen2.5'],
+};
+
+const CUSTOM = '__custom__';
+
+// ModelSelect: presets as a real <select> (ids alone), with a Custom option
+// that reveals a free-text input for anything the preset list doesn't cover.
+function ModelSelect({ label, presets, defaultId, customHint, value, onChange }: {
+  label: string; presets: string[]; defaultId: string; customHint?: string;
+  value: string; onChange: (v: string) => void;
+}) {
+  // Custom stays sticky while its input is empty, so picking it doesn't snap
+  // back to Default before anything is typed.
+  const [forcedCustom, setForcedCustom] = useState(false);
+  const isCustom = forcedCustom || (!!value && !presets.includes(value));
+  return (
+    <>
+      <Field label={label} hint={`Default is ${defaultId}.`}>
+        {(p) => (
+          <select className="input" {...p} value={isCustom ? CUSTOM : value}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v === CUSTOM) {
+                setForcedCustom(true);
+                if (!value || presets.includes(value)) onChange('');
+              } else {
+                setForcedCustom(false);
+                onChange(v);
+              }
+            }}>
+            <option value="">Default</option>
+            {presets.map((m) => <option key={m} value={m}>{m}</option>)}
+            <option value={CUSTOM}>Custom</option>
+          </select>
+        )}
+      </Field>
+      {isCustom && (
+        <Field label="Custom model id" hint={customHint ?? 'Any model id the provider accepts.'}>
+          {(p) => (
+            <input className="input" {...p} value={value} placeholder="model-id"
+              onChange={(e) => onChange(e.target.value)} />
+          )}
+        </Field>
+      )}
+    </>
+  );
+}
 
 export function SettingsPage() {
   const toast = useToast();
   const [params, setParams] = useSearchParams();
-  const tab = (['org', 'ai', 'notify', 'tokens'].includes(params.get('tab') ?? '') ? params.get('tab') : 'org') as Tab;
+  const tab = (['org', 'ai', 'notify'].includes(params.get('tab') ?? '') ? params.get('tab') : 'org') as Tab;
   const setTab = (t: Tab) => setParams({ tab: t }, { replace: true });
   const [s, setS] = useState<Settings>({ notifyDeploys: true, notifyAlerts: true });
   // The server only ever tests what it has stored, so the UI tracks what's
@@ -54,7 +117,63 @@ export function SettingsPage() {
 
   const set = (patch: Partial<Settings>) => setS({ ...s, ...patch });
   const prov = s.aiProvider ?? 'auto';
-  const show = (p: string) => prov === 'auto' || prov === p;
+  const vendorProv: VendorId | null =
+    prov === 'anthropic' ? 'anthropic' : prov === 'gemini' ? 'gemini' : prov === 'openai' ? 'openai' : null;
+  const provGroup = useId();
+  // Under Auto, each provider's credentials expand in place instead of all
+  // three vendors' fields stacking up at once.
+  const [expanded, setExpanded] = useState<VendorId | null>(null);
+  // The Auto status lines describe what the server has stored, not what is
+  // typed and unsaved: "key stored" must never be a promise.
+  const stored = useMemo<Settings | null>(
+    () => (savedState ? JSON.parse(savedState) as Settings : null),
+    [savedState],
+  );
+
+  const vendorFields = (v: VendorId) => v === 'anthropic' ? (
+    <>
+      <Field label="Anthropic API key">
+        {(p) => (
+          <input className="input" {...p} type="password" placeholder="sk-ant-…"
+            value={s.anthropicKey ?? ''} onChange={(e) => set({ anthropicKey: e.target.value })} />
+        )}
+      </Field>
+      <ModelSelect label="Anthropic model" presets={MODEL_PRESETS.anthropic} defaultId="claude-opus-4-8"
+        value={s.anthropicModel ?? ''} onChange={(m) => set({ anthropicModel: m })} />
+    </>
+  ) : v === 'gemini' ? (
+    <>
+      <Field label="Gemini API key"
+        hint={'Create at aistudio.google.com. "consumer suspended" means Google suspended that key\'s project; make a key in a fresh project.'}>
+        {(p) => (
+          <input className="input" {...p} type="password" placeholder="AIza…"
+            value={s.geminiKey ?? ''} onChange={(e) => set({ geminiKey: e.target.value })} />
+        )}
+      </Field>
+      <ModelSelect label="Gemini model" presets={MODEL_PRESETS.gemini} defaultId="gemini-3.5-flash"
+        value={s.geminiModel ?? ''} onChange={(m) => set({ geminiModel: m })} />
+    </>
+  ) : (
+    <>
+      <div className="grid-2">
+        <Field label="OpenAI-compatible key" hint="Leave blank for Ollama.">
+          {(p) => (
+            <input className="input" {...p} type="password" placeholder="sk-…"
+              value={s.openaiKey ?? ''} onChange={(e) => set({ openaiKey: e.target.value })} />
+          )}
+        </Field>
+        <Field label="Base URL" hint="Ollama: http://host:11434/v1">
+          {(p) => (
+            <input className="input" {...p} placeholder="https://api.openai.com/v1"
+              value={s.openaiBase ?? ''} onChange={(e) => set({ openaiBase: e.target.value })} />
+          )}
+        </Field>
+      </div>
+      <ModelSelect label="OpenAI model" presets={MODEL_PRESETS.openai} defaultId="gpt-5.5"
+        customHint="Any model id works here, including Ollama model names."
+        value={s.openaiModel ?? ''} onChange={(m) => set({ openaiModel: m })} />
+    </>
+  );
 
   // Until settings() answers, the whole form stays disabled: typing into
   // defaults that are about to be replaced by the server's values would
@@ -63,7 +182,7 @@ export function SettingsPage() {
     <div className="row" style={{ marginBottom: 14 }}>
       <AlertTriangle size={14} style={{ color: 'var(--crit)' }} aria-hidden />
       <span className="dim" style={{ flex: 1 }}>
-        Couldn&rsquo;t load the stored settings — editing stays locked so nothing is overwritten blind.
+        Couldn&rsquo;t load the stored settings. Editing stays locked so nothing is overwritten blind.
       </span>
       <button className="btn sm" onClick={loadSettings}><RotateCw size={12} /> Retry</button>
     </div>
@@ -72,14 +191,13 @@ export function SettingsPage() {
   return (
     <div className="page" style={{ maxWidth: 720 }}>
       <div className="page-title">Settings</div>
-      <div className="page-sub">Organization, Copilot providers, notifications, and API access</div>
+      <div className="page-sub">Organization, Copilot providers, and notifications</div>
 
       <div className="tabs">
         {([
           ['org', <Building2 size={14} key="o" />, 'Organization'],
           ['ai', <Key size={14} key="a" />, 'Copilot AI'],
           ['notify', <Bell size={14} key="n" />, 'Notifications'],
-          ['tokens', <Key size={14} key="t" />, 'API tokens'],
         ] as [Tab, React.ReactNode, string][]).map(([key, icon, label]) => (
           <button key={key} className={`tab ${tab === key ? 'active' : ''}`} onClick={() => setTab(key)}>
             {icon} {label}
@@ -96,102 +214,71 @@ export function SettingsPage() {
             <InfoTip wide>
               Keys are stored on your own server (per organization) and sent only to the provider
               you pick. Without a key, the built-in rule engine still answers placement, thermal,
-              and failure questions from telemetry — no data leaves your machines.
+              and failure questions from telemetry; no data leaves your machines.
             </InfoTip>
           </div>
           {loadNotice}
           <fieldset className="field-set" disabled={!loaded} aria-busy={!loaded}
             style={{ opacity: loaded ? 1 : 0.6 }}>
-            <Field label="Provider">
-              {(p) => (
-                <select className="input" {...p} value={prov} onChange={(e) => set({ aiProvider: e.target.value })}>
-                  <option value="auto">Auto — first configured key wins</option>
-                  <option value="anthropic">Anthropic (Claude)</option>
-                  <option value="gemini">Google Gemini</option>
-                  <option value="openai">OpenAI / compatible (incl. Ollama)</option>
-                  <option value="builtin">Built-in rule engine only</option>
-                </select>
-              )}
-            </Field>
-            {show('anthropic') && (
-              <>
-                <Field label="Anthropic API key">
-                  {(p) => (
-                    <input className="input" {...p} type="password" placeholder="sk-ant-…"
-                      value={s.anthropicKey ?? ''} onChange={(e) => set({ anthropicKey: e.target.value })} />
-                  )}
-                </Field>
-                <Field label="Anthropic model" hint="Leave blank for the recommended default (Opus 4.8).">
-                  {(p) => (
-                    <input className="input" {...p} list="anthropic-models" placeholder="claude-opus-4-8 (default)"
-                      value={s.anthropicModel ?? ''} onChange={(e) => set({ anthropicModel: e.target.value })} />
-                  )}
-                </Field>
-                <datalist id="anthropic-models">
-                  <option value="claude-opus-4-8">Claude Opus 4.8 — most capable</option>
-                  <option value="claude-sonnet-5">Claude Sonnet 5 — balanced</option>
-                  <option value="claude-haiku-4-5">Claude Haiku 4.5 — fastest</option>
-                  <option value="claude-fable-5">Claude Fable 5 — frontier</option>
-                </datalist>
-              </>
-            )}
-            {show('gemini') && (
-              <>
-                <Field label="Gemini API key"
-                  hint={'Create at aistudio.google.com — "consumer suspended" means Google suspended that key\'s project; make a key in a fresh project.'}>
-                  {(p) => (
-                    <input className="input" {...p} type="password" placeholder="AIza…"
-                      value={s.geminiKey ?? ''} onChange={(e) => set({ geminiKey: e.target.value })} />
-                  )}
-                </Field>
-                <Field label="Gemini model">
-                  {(p) => (
-                    <input className="input" {...p} list="gemini-models" placeholder="gemini-3.5-flash (default)"
-                      value={s.geminiModel ?? ''} onChange={(e) => set({ geminiModel: e.target.value })} />
-                  )}
-                </Field>
-                <datalist id="gemini-models">
-                  <option value="gemini-3.5-flash">Gemini 3.5 Flash — recommended</option>
-                  <option value="gemini-3-flash">Gemini 3 Flash</option>
-                  <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash-Lite — cheapest</option>
-                  <option value="gemini-3-pro-preview">Gemini 3 Pro</option>
-                </datalist>
-              </>
-            )}
-            {show('openai') && (
-              <>
-                <div className="grid-2">
-                  <Field label="OpenAI-compatible key">
-                    {(p) => (
-                      <input className="input" {...p} type="password" placeholder="sk-… (blank for Ollama)"
-                        value={s.openaiKey ?? ''} onChange={(e) => set({ openaiKey: e.target.value })} />
-                    )}
-                  </Field>
-                  <Field label="Base URL (Ollama: http://host:11434/v1)">
-                    {(p) => (
-                      <input className="input" {...p} placeholder="https://api.openai.com/v1"
-                        value={s.openaiBase ?? ''} onChange={(e) => set({ openaiBase: e.target.value })} />
-                    )}
-                  </Field>
+            <fieldset className="field-set" style={{ marginBottom: 14 }}>
+              <legend>Provider</legend>
+              <div className="stack" style={{ gap: 6 }}>
+                {PROVIDERS.map((pr) => (
+                  <label key={pr.id} className={`card inset check ${prov === pr.id ? 'accent' : ''}`}
+                    style={{ alignItems: 'flex-start', gap: 10, padding: '10px 12px' }}>
+                    <input type="radio" name={provGroup} value={pr.id} checked={prov === pr.id}
+                      onChange={() => set({ aiProvider: pr.id })} style={{ marginTop: 3 }} />
+                    <span style={{ minWidth: 0 }}>
+                      <span className="row" style={{ gap: 8 }}>
+                        <strong style={{ fontSize: 13, color: 'var(--fg)' }}>{pr.name}</strong>
+                        {pr.id === 'auto' && <span className="badge accent">Recommended</span>}
+                      </span>
+                      <span className="faint" style={{ display: 'block' }}>{pr.hint}</span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+            {prov === 'auto' && (
+              <div className="card inset" style={{ marginBottom: 14, padding: '4px 14px 10px' }}>
+                <div className="list">
+                  {(['anthropic', 'gemini', 'openai'] as VendorId[]).map((v) => {
+                    const vName = v === 'anthropic' ? 'Anthropic' : v === 'gemini' ? 'Gemini' : 'OpenAI-compatible';
+                    const status = v === 'anthropic' ? (stored?.anthropicKey ? 'key stored' : 'not configured')
+                      : v === 'gemini' ? (stored?.geminiKey ? 'key stored' : 'not configured')
+                      : stored?.openaiKey ? 'key stored'
+                      : stored?.openaiBase ? 'endpoint set' : 'not configured';
+                    const isOpen = expanded === v;
+                    return (
+                      <div key={v} className="list-row" style={{ display: 'block', padding: '9px 2px' }}>
+                        <div className="row spread">
+                          <span className="dim">
+                            {vName}:{' '}
+                            <span style={{ color: status === 'not configured' ? 'var(--faint)' : 'var(--fg)' }}>
+                              {status}
+                            </span>
+                          </span>
+                          <button type="button" className="btn sm ghost" aria-expanded={isOpen}
+                            aria-label={`${isOpen ? 'Hide' : 'Edit'} ${vName} credentials`}
+                            onClick={() => setExpanded(isOpen ? null : v)}>
+                            {isOpen ? 'Hide' : 'Edit'}
+                          </button>
+                        </div>
+                        {isOpen && <div style={{ marginTop: 10 }}>{vendorFields(v)}</div>}
+                      </div>
+                    );
+                  })}
                 </div>
-                <Field label="OpenAI model" hint="Pick a preset or type any model id (Ollama model names work here too).">
-                  {(p) => (
-                    <input className="input" {...p} list="openai-models" placeholder="gpt-5.5 (default) / llama3.1 for Ollama"
-                      value={s.openaiModel ?? ''} onChange={(e) => set({ openaiModel: e.target.value })} />
-                  )}
-                </Field>
-                <datalist id="openai-models">
-                  <option value="gpt-5.5">GPT-5.5 — flagship</option>
-                  <option value="gpt-5.4-mini">GPT-5.4 mini — cheap/fast</option>
-                  <option value="gpt-5.4-nano">GPT-5.4 nano — cheapest</option>
-                  <option value="llama3.1">llama3.1 (Ollama)</option>
-                  <option value="qwen2.5">qwen2.5 (Ollama)</option>
-                </datalist>
-              </>
+                <div className="faint" style={{ marginTop: 6 }}>
+                  Auto picks the first configured provider above and falls back to the built-in rule engine.
+                </div>
+              </div>
             )}
+            {vendorProv && vendorFields(vendorProv)}
             {prov === 'builtin' && (
               <div className="dim" style={{ marginBottom: 14 }}>
-                No key needed — the rule engine answers placement, thermal, storage and failure questions from live telemetry.
+                No key needed. The rule engine answers placement, thermal, storage, and failure
+                questions from live telemetry.
               </div>
             )}
             <div className="row wrap">
@@ -201,10 +288,10 @@ export function SettingsPage() {
               {/* The test hits the stored key, so it stays out of reach until
                   there is nothing unsaved left to confuse the result. */}
               <button className="btn" disabled={testing || dirty || !loaded} onClick={testProvider}
-                title={dirty ? 'Save your changes first — the test uses the stored key' : undefined}>
+                title={dirty ? 'Save your changes first. The test uses the stored key.' : undefined}>
                 {testing ? <Spinner size={13} /> : <Zap size={13} />} Test provider
               </button>
-              {dirty && <span className="faint">Save first — the test uses the stored key.</span>}
+              {dirty && <span className="faint">Save first. The test uses the stored key.</span>}
               {testResult && (
                 <span className={`badge ${testResult.ok ? 'ok' : 'crit'}`} role="status" style={{ maxWidth: 340, overflow: 'hidden' }}>
                   {testResult.ok ? `${testResult.provider} OK` : `${testResult.provider}: ${testResult.error?.slice(0, 140)}`}
@@ -218,7 +305,7 @@ export function SettingsPage() {
       {tab === 'notify' && (
         <div className="card">
           <div className="dim" style={{ marginBottom: 14 }}>
-            Get pinged when deploys finish or alerts fire — per organization.
+            Get pinged when deploys finish or alerts fire, per organization.
             <InfoTip>
               Fill in any channel you use; empty ones are ignored. Notifications fire for this
               organization&rsquo;s machines and apps only.
@@ -253,7 +340,7 @@ export function SettingsPage() {
                 )}
               </Field>
             </div>
-            <Field label="Generic webhook (JSON POST — ntfy, Gotify, PagerDuty…)">
+            <Field label="Generic webhook (JSON POST: ntfy, Gotify, PagerDuty…)">
               {(p) => (
                 <input className="input" {...p} placeholder="https://…"
                   value={s.genericWebhook ?? ''} onChange={(e) => set({ genericWebhook: e.target.value })} />
@@ -271,22 +358,6 @@ export function SettingsPage() {
               {saving ? <Spinner size={13} /> : null} {!loaded || dirty ? 'Save settings' : 'Saved'}
             </button>
           </fieldset>
-        </div>
-      )}
-
-      {tab === 'tokens' && (
-        <div className="card">
-          <div className="row" style={{ gap: 10, marginBottom: 8 }}>
-            <KeyRound size={15} style={{ color: 'var(--accent)' }} aria-hidden />
-            <strong>API keys moved to your profile</strong>
-          </div>
-          <div className="dim" style={{ marginBottom: 14, lineHeight: 1.6 }}>
-            Keys belong to the person who creates them — they act with your role and are
-            managed alongside your account and password.
-          </div>
-          <Link to="/profile" className="btn primary" style={{ width: 'fit-content' }}>
-            Open profile <ArrowRight size={13} />
-          </Link>
         </div>
       )}
     </div>
