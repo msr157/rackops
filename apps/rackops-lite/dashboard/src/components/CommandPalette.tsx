@@ -32,20 +32,22 @@ interface Entry {
 // IP.
 export function CommandPalette({ open, ...rest }: {
   open: boolean; onClose: () => void; onAddMachine: () => void; onCopilot: () => void;
+  seed?: string;
 }) {
   // Mounted only while open, so its focus trap and focus-restore run per
-  // opening and every session starts on a cleared query.
+  // opening and every session starts on a cleared query (or the keystroke
+  // that opened it, when the topbar search box handed off).
   return open ? <Palette {...rest} /> : null;
 }
 
-function Palette({ onClose, onAddMachine, onCopilot }: {
-  onClose: () => void; onAddMachine: () => void; onCopilot: () => void;
+function Palette({ onClose, onAddMachine, onCopilot, seed }: {
+  onClose: () => void; onAddMachine: () => void; onCopilot: () => void; seed?: string;
 }) {
   const navigate = useNavigate();
   const { services, nodes, refresh, loaded } = useData();
   const toast = useToast();
   const confirm = useConfirm();
-  const [q, setQ] = useState('');
+  const [q, setQ] = useState(seed ?? '');
   const [hl, setHl] = useState(0);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
   // Scrolling the list under a resting cursor fires mouseenter on whatever

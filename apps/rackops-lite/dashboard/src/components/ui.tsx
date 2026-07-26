@@ -118,6 +118,40 @@ export function StatusBadge({ status }: { status: string }) {
   );
 }
 
+// Pill: dot + word in a tinted capsule — the status language for tables and
+// dense lists, where a bare colored word would drown in surrounding text.
+export function Pill({ status, children }: { status: string; children?: React.ReactNode }) {
+  const cls = ledClass(status);
+  return <span className={`pill ${cls === 'off' ? '' : cls}`}>{children ?? status}</span>;
+}
+
+// IconChip: a glyph in a soft tinted container. The tone carries meaning;
+// neutral is the default for identity and inventory facts.
+export function IconChip({ tone, sm, children }: {
+  tone?: 'ok' | 'warn' | 'crit' | 'accent'; sm?: boolean; children: React.ReactNode;
+}) {
+  return <span className={`icon-chip ${tone ?? ''} ${sm ? 'sm' : ''}`} aria-hidden>{children}</span>;
+}
+
+// Delta: "how does now compare to before" beside a KPI value. The caller
+// says which direction is good — more apps running is good, more CPU is not.
+export function Delta({ pct, goodWhenUp, label }: {
+  pct: number | null; goodWhenUp?: boolean; label?: string;
+}) {
+  // No history yet (fresh install, new machine): say nothing rather than "0%".
+  if (pct === null || !Number.isFinite(pct)) return null;
+  const flat = Math.abs(pct) < 1;
+  const tone = flat ? 'flat' : (pct > 0) === !!goodWhenUp ? 'good' : 'bad';
+  const arrow = flat ? '→' : pct > 0 ? '↑' : '↓';
+  return (
+    <span className={`delta ${tone}`} title={label ?? 'vs 24 hours ago'}>
+      <span aria-hidden>{arrow}</span>
+      {Math.abs(pct).toFixed(Math.abs(pct) >= 10 ? 0 : 1)}%
+      <span className="sr-only">{pct > 0 ? 'up' : flat ? 'unchanged' : 'down'} {label ?? 'vs 24 hours ago'}</span>
+    </span>
+  );
+}
+
 /* ---- KPI + usage bars ---- */
 
 export function Kpi({ icon, label, value, unit, children }: {

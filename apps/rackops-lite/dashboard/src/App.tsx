@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { Routes, Route, NavLink, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutGrid, Boxes, HardDrive, Network as NetworkIcon, Settings, LogOut, Rocket, Bot, Search,
-  UserRound, LifeBuoy, CloudOff, RotateCw, Server, ChevronsUpDown,
+  UserRound, LifeBuoy, CloudOff, RotateCw, Server, ChevronsUpDown, Bell, Sparkles,
+  AlertTriangle, AlertCircle,
 } from 'lucide-react';
 import { api, getToken, clearToken, getActiveOrg } from './api';
 import type { VersionInfo, User } from './api';
@@ -112,6 +113,9 @@ function Shell({ onLogout }: { onLogout: () => void }) {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const [paletteOpen, setPaletteOpen] = useState(false);
+  // The topbar search box hands its first keystroke to the palette, so typing
+  // in the box and typing in the palette are the same gesture.
+  const [paletteSeed, setPaletteSeed] = useState('');
   const [addMachine, setAddMachine] = useState(false);
   const [version, setVersion] = useState<VersionInfo | null>(null);
   const [me, setMe] = useState<User | null>(null);
@@ -126,6 +130,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
+        setPaletteSeed('');
         setPaletteOpen((v) => !v);
       }
     };
@@ -143,13 +148,27 @@ function Shell({ onLogout }: { onLogout: () => void }) {
 
   // Only attention is badged: a number in the rail always means "needs your
   // attention", never an inventory total the page itself already shows.
-  const nav: { to: string; label: string; icon: React.ReactNode; count?: number; attn?: boolean; end?: boolean }[] = [
+  type NavItem = { to: string; label: string; icon: React.ReactNode; count?: number; attn?: boolean; end?: boolean };
+  const navOperate: NavItem[] = [
     { to: '/', label: 'Home', icon: <LayoutGrid size={16} />, count: attention, attn: true, end: true },
     { to: '/apps', label: 'Apps', icon: <Boxes size={16} /> },
     { to: '/machines', label: 'Machines', icon: <HardDrive size={16} /> },
     { to: '/network', label: 'Network', icon: <NetworkIcon size={16} /> },
-    { to: '/settings', label: 'Settings', icon: <Settings size={16} /> },
   ];
+  const navWorkspace: NavItem[] = [
+    { to: '/settings', label: 'Settings', icon: <Settings size={16} /> },
+    { to: '/support', label: 'Support', icon: <LifeBuoy size={16} /> },
+    { to: '/changelog', label: "What's new", icon: <Sparkles size={16} /> },
+  ];
+  const renderNav = (items: NavItem[]) => items.map((n) => (
+    <NavLink key={n.to} to={n.to} end={n.end} aria-label={n.label}
+      className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+      {n.icon} <span className="nav-label">{n.label}</span>
+      {n.count !== undefined && n.count > 0 && (
+        <span className={`count${n.attn ? ' attn' : ''}`}>{n.count}</span>
+      )}
+    </NavLink>
+  ));
 
   return (
     <>
@@ -174,18 +193,12 @@ function Shell({ onLogout }: { onLogout: () => void }) {
 
         <OrgSwitcher me={me} />
 
-        <div className="nav-section">Your rack</div>
         {/* aria-label carries the name at narrow widths, where the visible
             label is hidden and the item would otherwise be an unnamed icon. */}
-        {nav.map((n) => (
-          <NavLink key={n.to} to={n.to} end={n.end} aria-label={n.label}
-            className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
-            {n.icon} <span className="nav-label">{n.label}</span>
-            {n.count !== undefined && n.count > 0 && (
-              <span className={`count${n.attn ? ' attn' : ''}`}>{n.count}</span>
-            )}
-          </NavLink>
-        ))}
+        <div className="nav-section">Operate</div>
+        {renderNav(navOperate)}
+        <div className="nav-section">Workspace</div>
+        {renderNav(navWorkspace)}
 
         <div className="sidebar-footer">
           {/* Before anything has loaded there is no count to report — "0/0"
@@ -204,11 +217,17 @@ function Shell({ onLogout }: { onLogout: () => void }) {
 
       <div className="shell-right">
         <header className="topbar">
-          <button className="search-trigger" onClick={() => setPaletteOpen(true)}>
-            <Search size={14} aria-hidden /> Jump to app, machine, action…
+          {/* A real input, but the palette is the engine: the first keystroke
+              (or Enter/click-through) opens it, seeded with what was typed. */}
+          <div className="gsearch">
+            <Search size={14} aria-hidden />
+            <input value="" placeholder="Search apps, machines, actions…" aria-label="Search"
+              onChange={(e) => { setPaletteSeed(e.target.value); setPaletteOpen(true); }}
+              onKeyDown={(e) => { if (e.key === 'Enter') { setPaletteSeed(''); setPaletteOpen(true); } }} />
             <kbd>{shortcutHint}</kbd>
-          </button>
+          </div>
           <div style={{ marginLeft: 'auto' }} className="row">
+            <NotificationBell />
             <button className="btn ghost" onClick={() => setCopilotOpen(true)}>
               <Bot size={14} /> Copilot
             </button>
@@ -242,10 +261,91 @@ function Shell({ onLogout }: { onLogout: () => void }) {
         </main>
       </div>
 
-      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)}
+      <CommandPalette open={paletteOpen} seed={paletteSeed} onClose={() => setPaletteOpen(false)}
         onAddMachine={() => setAddMachine(true)} onCopilot={() => setCopilotOpen(true)} />
       {addMachine && <AddMachineModal onClose={() => setAddMachine(false)} />}
     </>
+  );
+}
+
+// NotificationBell: open alerts plus the recent activity stream, one click
+// from the fix. The badge counts only open alerts — it never counts routine
+// activity, so a number on the bell always means something is wrong.
+function NotificationBell() {
+  const { alerts, events } = useData();
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const boxRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { setOpen(false); triggerRef.current?.focus(); }
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const openAlerts = alerts.filter((a) => !a.resolved);
+  const recent = events.slice(0, 8);
+
+  return (
+    <div className="bell" ref={boxRef}>
+      <button ref={triggerRef} className="bell-btn" onClick={() => setOpen((v) => !v)}
+        aria-haspopup="dialog" aria-expanded={open} title="Notifications"
+        aria-label={openAlerts.length > 0 ? `Notifications: ${openAlerts.length} open alert${openAlerts.length > 1 ? 's' : ''}` : 'Notifications'}>
+        <Bell size={16} aria-hidden />
+        {openAlerts.length > 0 && <span className="bell-count" aria-hidden>{openAlerts.length > 9 ? '9+' : openAlerts.length}</span>}
+      </button>
+      {open && (
+        <div className="bell-pop" role="dialog" aria-label="Notifications">
+          <div className="bell-head">
+            Notifications
+            {openAlerts.length > 0 && <span className="pill crit">{openAlerts.length} open</span>}
+          </div>
+          <div className="bell-list">
+            {openAlerts.map((a) => (
+              <button key={a.id} className="bell-item"
+                onClick={() => { setOpen(false); if (a.nodeId) navigate(`/machines/${a.nodeId}`); else navigate('/'); }}>
+                {a.level === 'critical'
+                  ? <AlertCircle size={14} style={{ color: 'var(--crit)', flexShrink: 0, marginTop: 2 }} aria-hidden />
+                  : <AlertTriangle size={14} style={{ color: 'var(--warn)', flexShrink: 0, marginTop: 2 }} aria-hidden />}
+                <span style={{ flex: 1 }}>
+                  {a.message}
+                  <span className="faint">{timeAgo(a.createdAt)}</span>
+                </span>
+              </button>
+            ))}
+            {openAlerts.length === 0 && recent.length === 0 && (
+              <div className="bell-empty">Nothing needs your attention.</div>
+            )}
+            {recent.length > 0 && (
+              <>
+                <div className="org-menu-label">Recent activity</div>
+                {recent.map((e) => (
+                  <div key={e.id} className="bell-item" style={{ cursor: 'default' }}>
+                    {/* neutral dot: activity is information, not status */}
+                    <span className="led off" style={{ marginTop: 5 }} aria-hidden />
+                    <span style={{ flex: 1 }}>
+                      {e.message}
+                      <span className="faint">{timeAgo(e.createdAt)}</span>
+                    </span>
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -291,9 +391,6 @@ function AccountMenu({ me, onLogout }: { me: User | null; onLogout: () => void }
         <div className="org-menu up" role="menu">
           <NavLink to="/profile" role="menuitem" className="org-item" onClick={() => setOpen(false)}>
             <UserRound size={14} /> Profile
-          </NavLink>
-          <NavLink to="/support" role="menuitem" className="org-item" onClick={() => setOpen(false)}>
-            <LifeBuoy size={14} /> Support
           </NavLink>
           <div className="org-menu-sep" />
           <button role="menuitem" className="org-item" onClick={onLogout}>
