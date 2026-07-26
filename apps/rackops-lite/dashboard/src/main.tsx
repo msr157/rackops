@@ -4,7 +4,6 @@ import { BrowserRouter } from 'react-router-dom'
 // Fonts ship with the binary: a rack behind an air gap renders the real
 // typeface, and no page load waits on a third-party CDN.
 import '@fontsource-variable/inter/wght.css'
-import '@fontsource-variable/space-grotesk/wght.css'
 import '@fontsource/ibm-plex-mono/latin-400.css'
 import '@fontsource/ibm-plex-mono/latin-500.css'
 import '@fontsource/ibm-plex-mono/latin-600.css'

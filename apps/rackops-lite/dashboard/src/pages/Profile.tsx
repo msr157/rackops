@@ -1,16 +1,22 @@
 import { useCallback, useEffect, useState } from 'react';
-import { BookOpenText, Bot, KeyRound, Plus, Trash2, UserRound, ShieldCheck } from 'lucide-react';
+import {
+  AlertTriangle, BookOpenText, Bot, Check, Copy, KeyRound, Plus, RotateCw, ShieldCheck, Trash2, UserRound,
+} from 'lucide-react';
 import { api } from '../api';
 import type { APIToken, User } from '../api';
 import { useToast, cleanError } from '../components/toast';
 import { useConfirm } from '../components/confirm';
-import { CopyBtn, CopyField, Field, InfoTip, PasswordInput, Spinner, timeAgo } from '../components/ui';
+import { Field, InfoTip, PasswordInput, SkeletonRows, Spinner, timeAgo } from '../components/ui';
+
+// A key is shown in full exactly once, at creation. Everything about that
+// moment — the highlighted card, the MCP snippet below picking it up, revoking
+// it clearing the card — matches on this id, never on the (reusable) name.
+interface FreshKey { id: string; name: string; token: string }
 
 // Profile: the signed-in operator's own account — identity, password, and the
 // API keys that act on their behalf. Fleet-wide settings live in Settings.
 export function ProfilePage() {
-  const [me, setMe] = useState<User | null>(null);
-  useEffect(() => { api.me().then(setMe).catch(() => {}); }, []);
+  const [fresh, setFresh] = useState<FreshKey | null>(null);
 
   return (
     <div className="page">
@@ -18,35 +24,75 @@ export function ProfilePage() {
       <div className="page-sub">Your account, password, API keys, and AI-tool access</div>
 
       <div className="stack">
-        <AccountCard me={me} />
+        <AccountCard />
         <ChangePasswordCard />
-        <ApiKeysCard />
-        <McpCard />
+        <ApiKeysCard fresh={fresh} onFresh={setFresh} />
+        <McpCard freshToken={fresh?.token} />
       </div>
     </div>
   );
 }
 
-function AccountCard({ me }: { me: User | null }) {
+// "0001-…" is Go's zero time — the backend's way of saying "not set".
+function realDate(iso?: string): iso is string {
+  return !!iso && !iso.startsWith('0001-');
+}
+
+function isExpired(t: APIToken): boolean {
+  return realDate(t.expiresAt) && new Date(t.expiresAt) < new Date();
+}
+
+// The kit CopyBtn assumes the clipboard write succeeds; on a plain-HTTP LAN
+// install the Clipboard API is unavailable and it fails silently. The two
+// copies on this page must never fail silently — an API key shown once, and
+// the config built from it — so they use this guarded button instead.
+function CopyGuard({ text }: { text: string }) {
+  const toast = useToast();
+  const [done, setDone] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setDone(true);
+      window.setTimeout(() => setDone(false), 1400);
+    } catch {
+      toast.err('Copy failed — copy it manually');
+    }
+  };
+  return (
+    <button className="btn sm" title="Copy" aria-label="Copy" onClick={copy}>
+      {done ? <Check size={12} style={{ color: 'var(--ok)' }} aria-hidden /> : <Copy size={12} aria-hidden />}
+    </button>
+  );
+}
+
+function AccountCard() {
+  const [me, setMe] = useState<User | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  const load = useCallback(() => {
+    setFailed(false);
+    api.me().then(setMe).catch(() => setFailed(true));
+  }, []);
+  useEffect(load, [load]);
+
   return (
     <div className="card">
       <div className="eyebrow" style={{ marginBottom: 12 }}><UserRound size={12} /> Account</div>
-      {!me ? <div className="row dim"><Spinner /> loading…</div> : (
-        <table style={{ borderCollapse: 'collapse' }}>
-          <tbody>
-            {[
-              ['Name', me.fullName || '—'],
-              ['Email', me.email],
-              ['Role', me.role],
-              ['Member since', new Date(me.createdAt).toLocaleDateString()],
-            ].map(([k, v]) => (
-              <tr key={k}>
-                <td className="dim" style={{ padding: '6px 28px 6px 0', whiteSpace: 'nowrap' }}>{k}</td>
-                <td style={{ padding: '6px 0' }}>{v}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      {me ? (
+        <dl className="kv">
+          <dt>Name</dt><dd>{me.fullName || '—'}</dd>
+          <dt>Email</dt><dd>{me.email}</dd>
+          <dt>Role</dt><dd>{me.role}</dd>
+          <dt>Member since</dt><dd>{new Date(me.createdAt).toLocaleDateString()}</dd>
+        </dl>
+      ) : failed ? (
+        <div className="row">
+          <AlertTriangle size={14} style={{ color: 'var(--crit)' }} aria-hidden />
+          <span className="dim" style={{ flex: 1 }}>Couldn&rsquo;t load your account — the server didn&rsquo;t answer.</span>
+          <button className="btn sm" onClick={load}><RotateCw size={12} /> Retry</button>
+        </div>
+      ) : (
+        <SkeletonRows count={4} height={16} />
       )}
     </div>
   );
@@ -88,7 +134,7 @@ function ChangePasswordCard() {
           {(p) => <PasswordInput {...p} value={confirm} onChange={setConfirm} autoComplete="new-password" onEnter={submit} />}
         </Field>
       </div>
-      <button className="btn" disabled={busy || !current || !next || !confirm} onClick={submit}>
+      <button className="btn primary" disabled={busy || !current || !next || !confirm} onClick={submit}>
         {busy ? <Spinner size={12} /> : <ShieldCheck size={12} />} Update password
       </button>
     </div>
@@ -103,16 +149,22 @@ const EXPIRY_OPTIONS = [
   { value: '1y', label: '1 year' },
 ];
 
-function ApiKeysCard() {
+function ApiKeysCard({ fresh, onFresh }: {
+  fresh: FreshKey | null; onFresh: (k: FreshKey | null) => void;
+}) {
   const toast = useToast();
   const confirm = useConfirm();
   const [tokens, setTokens] = useState<APIToken[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [name, setName] = useState('');
   const [expiresIn, setExpiresIn] = useState('never');
-  const [fresh, setFresh] = useState<{ name: string; token: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const load = useCallback(() => { api.tokens().then((t) => setTokens(t ?? [])).catch(() => {}); }, []);
+  const load = useCallback(() => {
+    setLoadFailed(false);
+    api.tokens().then((t) => { setTokens(t ?? []); setLoaded(true); }).catch(() => setLoadFailed(true));
+  }, []);
   useEffect(load, [load]);
 
   const create = async () => {
@@ -120,7 +172,7 @@ function ApiKeysCard() {
     setBusy(true);
     try {
       const r = await api.createApiToken(name.trim(), expiresIn);
-      setFresh({ name: r.name, token: r.token });
+      onFresh({ id: r.id, name: r.name, token: r.token });
       setName('');
       load();
     } catch (e) { toast.err(cleanError(e)); }
@@ -136,7 +188,7 @@ function ApiKeysCard() {
     if (!yes) return;
     try {
       await api.deleteApiToken(t.id);
-      if (fresh && fresh.name === t.name) setFresh(null);
+      if (fresh && fresh.id === t.id) onFresh(null);
       toast.ok('Key revoked.');
       load();
     } catch (e) { toast.err(cleanError(e)); }
@@ -177,34 +229,55 @@ function ApiKeysCard() {
       </div>
 
       {fresh && (
-        <div className="card inset" style={{ borderColor: 'var(--amber)', marginBottom: 14 }}>
-          <div style={{ marginBottom: 8 }}>
-            <strong>{fresh.name}</strong>
-            <span className="dim"> — copy it now, it won&rsquo;t be shown again.</span>
+        <div className="card inset" style={{ borderColor: 'rgba(87, 162, 255, 0.45)', marginBottom: 14 }}>
+          <div className="row spread" style={{ marginBottom: 8, alignItems: 'flex-start' }}>
+            <div>
+              <strong>{fresh.name}</strong>
+              <span className="dim"> — copy it now, it won&rsquo;t be shown again.</span>
+            </div>
+            <button className="btn sm ghost" onClick={() => onFresh(null)}>Dismiss</button>
           </div>
-          <CopyField text={fresh.token} />
+          <div className="row" style={{ gap: 8 }}>
+            <code className="code-block" style={{ flex: 1 }}>{fresh.token}</code>
+            <CopyGuard text={fresh.token} />
+          </div>
         </div>
       )}
 
-      {tokens.length === 0 && !fresh && <div className="faint">No API keys yet.</div>}
-      {tokens.map((t) => (
-        <div key={t.id} className="row spread" style={{ borderTop: '1px solid var(--border)', padding: '9px 0' }}>
-          <div className="row" style={{ gap: 10 }}>
-            <KeyRound size={13} style={{ color: 'var(--faint)' }} />
-            <strong>{t.name || '(unnamed)'}</strong>
-            <span className="faint">created {timeAgo(t.createdAt)}</span>
-            {t.lastUsed && !t.lastUsed.startsWith('0001-') && <span className="faint">· last used {timeAgo(t.lastUsed)}</span>}
-            {t.expiresAt && !t.expiresAt.startsWith('0001-') && (
-              new Date(t.expiresAt) < new Date()
-                ? <span className="badge red">expired</span>
-                : <span className="tag">expires {new Date(t.expiresAt).toLocaleDateString()}</span>
-            )}
-          </div>
-          <button className="btn sm danger" onClick={() => revoke(t)} aria-label={`Revoke ${t.name}`}>
-            <Trash2 size={12} />
-          </button>
+      {!loaded && !loadFailed && <SkeletonRows count={2} height={38} />}
+      {!loaded && loadFailed && (
+        <div className="row" style={{ padding: '4px 0' }}>
+          <AlertTriangle size={14} style={{ color: 'var(--crit)' }} aria-hidden />
+          <span className="dim" style={{ flex: 1 }}>Couldn&rsquo;t load your keys — the server didn&rsquo;t answer.</span>
+          <button className="btn sm" onClick={load}><RotateCw size={12} /> Retry</button>
         </div>
-      ))}
+      )}
+      {loaded && tokens.length === 0 && !fresh && (
+        <div className="faint">No API keys yet — create one above.</div>
+      )}
+      {loaded && tokens.length > 0 && (
+        <div className="list">
+          {tokens.map((t) => {
+            const expired = isExpired(t);
+            return (
+              // An expired key is inert — the row dims, and the badge says why.
+              <div key={t.id} className="list-row" style={expired ? { opacity: 0.6 } : undefined}>
+                <KeyRound size={13} style={{ color: 'var(--faint)' }} aria-hidden />
+                <strong>{t.name || '(unnamed)'}</strong>
+                <span className="faint">created {timeAgo(t.createdAt)}</span>
+                {realDate(t.lastUsed) && <span className="faint">· last used {timeAgo(t.lastUsed)}</span>}
+                {expired
+                  ? <span className="badge crit">expired</span>
+                  : realDate(t.expiresAt) && <span className="tag">expires {new Date(t.expiresAt).toLocaleDateString()}</span>}
+                <button className="btn sm danger" style={{ marginLeft: 'auto' }} onClick={() => revoke(t)}
+                  aria-label={`Revoke ${t.name || 'unnamed key'}`} title="Revoke key">
+                  <Trash2 size={12} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       <div className="row" style={{ marginTop: 14, gap: 14 }}>
         <a className="faint row" style={{ gap: 5 }} href="/swagger" target="_blank" rel="noreferrer">
@@ -216,8 +289,9 @@ function ApiKeysCard() {
 }
 
 // McpCard: ready-to-paste MCP config so VS Code / Claude / Cursor can manage
-// the fleet through `rackops mcp` with one of the keys above.
-function McpCard() {
+// the fleet through `rackops mcp` with one of the keys above. While a freshly
+// created key is on screen, it is injected here so the snippet is paste-ready.
+function McpCard({ freshToken }: { freshToken?: string }) {
   const origin = window.location.origin;
   const config = `{
   "mcpServers": {
@@ -226,7 +300,7 @@ function McpCard() {
       "args": ["mcp"],
       "env": {
         "RACKOPS_SERVER": "${origin}",
-        "RACKOPS_TOKEN": "rk_YOUR_API_KEY"
+        "RACKOPS_TOKEN": "${freshToken ?? 'rk_YOUR_API_KEY'}"
       }
     }
   }
@@ -249,9 +323,15 @@ function McpCard() {
       <div style={{ position: 'relative' }}>
         <pre className="code-block" style={{ whiteSpace: 'pre', overflowX: 'auto', margin: 0 }}>{config}</pre>
         <div style={{ position: 'absolute', top: 8, right: 8 }}>
-          <CopyBtn text={config} />
+          <CopyGuard text={config} />
         </div>
       </div>
+      {freshToken && (
+        <div className="faint" style={{ marginTop: 10 }}>
+          Your new key is filled in above — paste the snippet as-is. It disappears from here when
+          you dismiss the key card.
+        </div>
+      )}
       <div className="faint" style={{ marginTop: 10 }}>
         The <code className="mono">rackops</code> binary must be installed where the AI tool runs
         (the same one-line installer works on a workstation).

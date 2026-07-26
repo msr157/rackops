@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Routes, Route, NavLink, Navigate, useNavigate } from 'react-router-dom';
 import {
   LayoutGrid, Boxes, HardDrive, Network as NetworkIcon, Settings, LogOut, Rocket, Bot, Search, Plus,
-  ArrowUpCircle, X, UserRound, LifeBuoy, CloudOff, RotateCw,
+  ArrowUpCircle, X, UserRound, LifeBuoy, CloudOff, RotateCw, Server,
 } from 'lucide-react';
 import { api, getToken, clearToken, getActiveOrg } from './api';
 import type { VersionInfo, User } from './api';
@@ -69,13 +69,12 @@ export default function App() {
   );
 }
 
-// BootScreen fills the gap between load and the auth answer. The rack-unit
-// mark with a warming LED says "this is RackOps, and it is starting" — the
-// blank frame it replaced said nothing at all.
+// BootScreen fills the gap between load and the auth answer — the blank
+// frame it replaced said nothing at all.
 function BootScreen() {
   return (
     <div className="boot" role="status">
-      <div className="brand-unit boot-unit"><span className="led warn" /></div>
+      <div className="brand-mark" style={{ width: 34, height: 34 }}><Server size={18} /></div>
       <div className="boot-name">RackOps</div>
       <div className="faint">Starting up…</div>
     </div>
@@ -135,9 +134,8 @@ function Shell({ onLogout }: { onLogout: () => void }) {
 
   const failing = services.filter((s) => s.status === 'failed').length;
   const openAlerts = alerts.filter((a) => !a.resolved).length;
-  const attention = failing + openAlerts;
-  const fleetStatus = nodes.some((n) => n.status === 'offline') || failing > 0 ? 'failed'
-    : nodes.length === 0 ? 'stopped' : 'running';
+  const machinesOffline = nodes.filter((n) => n.status === 'offline').length;
+  const attention = failing + openAlerts + machinesOffline;
 
   const nav = [
     { to: '/', label: 'Home', icon: <LayoutGrid size={16} />, count: attention, end: true },
@@ -149,15 +147,17 @@ function Shell({ onLogout }: { onLogout: () => void }) {
   return (
     <>
       <aside className="sidebar">
-        <NavLink to="/" className="brand">
-          <div className="brand-unit"><Led status={fleetStatus} /></div>
-          <div>
-            <div className="brand-name">RackOps</div>
-            <NavLink to="/changelog" className="brand-ver" title="What's new" style={{ textDecoration: 'none', color: 'inherit' }}>
+        {/* Two sibling links, never nested: the wordmark goes home, the
+            version goes to the changelog. */}
+        <div className="brand">
+          <div className="brand-mark" aria-hidden><Server size={15} /></div>
+          <div className="brand-col">
+            <NavLink to="/" className="brand-name">RackOps</NavLink>
+            <NavLink to="/changelog" className="brand-ver" title="What's new">
               LITE{serverVersion ? ` · v${serverVersion}` : ''}
             </NavLink>
           </div>
-        </NavLink>
+        </div>
 
         <OrgSwitcher me={me} />
 
@@ -175,7 +175,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
         <div className="sidebar-footer">
           {/* Before anything has loaded there is no count to report — "0/0"
               would be an assertion the dashboard cannot yet make. */}
-          <div className="dim row" style={{ gap: 8, padding: '0 6px' }}>
+          <div className="sidebar-fleet">
             <Led status={!loaded ? 'pending'
               : overview && overview.nodesOnline === overview.nodesTotal && overview.nodesTotal > 0 ? 'running'
               : overview?.nodesOnline ? 'building' : 'stopped'} />
@@ -186,20 +186,21 @@ function Shell({ onLogout }: { onLogout: () => void }) {
           <button className="btn" onClick={() => setAddMachine(true)} aria-label="Add machine">
             <Plus size={14} /> <span className="nav-label">Add machine</span>
           </button>
-          <div className="row">
-            <NavLink to="/profile" className="btn sm" style={{ flex: 1 }} title="Profile" aria-label="Profile">
-              <UserRound size={13} />
-            </NavLink>
-            <NavLink to="/support" className="btn sm" style={{ flex: 1 }} title="Support" aria-label="Support">
-              <LifeBuoy size={13} />
-            </NavLink>
-            <NavLink to="/settings" className="btn sm" style={{ flex: 1 }} title="Settings" aria-label="Settings">
-              <Settings size={13} />
-            </NavLink>
-            <button className="btn sm" style={{ flex: 1 }} title="Log out" aria-label="Log out" onClick={onLogout}>
-              <LogOut size={13} />
-            </button>
-          </div>
+          <NavLink to="/profile" aria-label="Profile"
+            className={({ isActive }) => `nav-item sub ${isActive ? 'active' : ''}`}>
+            <UserRound size={14} /> <span className="nav-label">Profile</span>
+          </NavLink>
+          <NavLink to="/support" aria-label="Support"
+            className={({ isActive }) => `nav-item sub ${isActive ? 'active' : ''}`}>
+            <LifeBuoy size={14} /> <span className="nav-label">Support</span>
+          </NavLink>
+          <NavLink to="/settings" aria-label="Settings"
+            className={({ isActive }) => `nav-item sub ${isActive ? 'active' : ''}`}>
+            <Settings size={14} /> <span className="nav-label">Settings</span>
+          </NavLink>
+          <button className="nav-item sub" aria-label="Log out" onClick={onLogout}>
+            <LogOut size={14} /> <span className="nav-label">Log out</span>
+          </button>
         </div>
       </aside>
 
@@ -299,7 +300,7 @@ function UpdateBanner() {
 
   return (
     <div className="update-banner">
-      <ArrowUpCircle size={16} style={{ color: 'var(--amber)', flexShrink: 0 }} />
+      <ArrowUpCircle size={16} style={{ color: 'var(--accent)', flexShrink: 0 }} />
       <span style={{ flex: 1 }}>
         <strong>RackOps {info.latest} is available</strong>
         <span className="dim"> — you&rsquo;re on v{info.current}. </span>

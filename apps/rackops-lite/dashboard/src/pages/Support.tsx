@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useId, useState } from 'react';
-import { ArrowLeft, CheckCircle2, LifeBuoy, MessageSquareText, Plus, Send } from 'lucide-react';
+import {
+  AlertTriangle, ArrowLeft, CheckCircle2, LifeBuoy, MessageSquareText, Plus, RotateCw, Send,
+} from 'lucide-react';
 import { api, subscribe } from '../api';
 import type { SupportTicket } from '../api';
 import { useToast, cleanError } from '../components/toast';
-import { Field, InfoTip, Led, Spinner, timeAgo } from '../components/ui';
+import { useConfirm } from '../components/confirm';
+import { EmptyState, Field, InfoTip, Led, SkeletonRows, Spinner, timeAgo } from '../components/ui';
 
 const CATEGORIES = [
   ['general', 'General question'],
@@ -25,11 +28,15 @@ const SEVERITIES = [
 // forwarded to the support desk; replies land back in the thread (~1 min).
 export function SupportPage() {
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [open, setOpen] = useState('');
   const [composing, setComposing] = useState(false);
 
   const load = useCallback(() => {
-    api.tickets().then((t) => setTickets(t ?? [])).catch(() => {});
+    api.tickets()
+      .then((t) => { setTickets(t ?? []); setLoaded(true); setLoadFailed(false); })
+      .catch(() => setLoadFailed(true));
   }, []);
   useEffect(() => {
     load();
@@ -66,12 +73,25 @@ export function SupportPage() {
         <Thread ticket={current} onBack={() => setOpen('')} onChanged={load} />
       ) : !composing && (
         <>
-          {tickets.length === 0 && (
-            <div className="empty" style={{ padding: '56px 20px' }}>
-              <LifeBuoy size={26} style={{ marginBottom: 10 }} />
-              <div className="empty-title">No tickets yet</div>
-              <div>Stuck on something? Open a ticket — a human answers.</div>
+          {/* Until the first fetch answers, this is a list on its way — never
+              an empty inbox, and never a silent nothing when the fetch failed. */}
+          {!loaded && !loadFailed && <SkeletonRows count={3} height={46} />}
+          {!loaded && loadFailed && (
+            <div className="card row">
+              <AlertTriangle size={14} style={{ color: 'var(--crit)' }} aria-hidden />
+              <span className="dim" style={{ flex: 1 }}>
+                Couldn&rsquo;t load your tickets — the server didn&rsquo;t answer.
+              </span>
+              <button className="btn sm" onClick={load}><RotateCw size={12} /> Retry</button>
             </div>
+          )}
+          {loaded && tickets.length === 0 && (
+            <EmptyState icon={<LifeBuoy size={18} />} title="No tickets yet">
+              <div style={{ marginBottom: 14 }}>Stuck on something? Open a ticket — a human answers.</div>
+              <button className="btn primary" onClick={() => setComposing(true)}>
+                <Plus size={13} /> New ticket
+              </button>
+            </EmptyState>
           )}
           {active.length > 0 && <TicketList title="Active" items={active} onOpen={setOpen} />}
           {resolved.length > 0 && <TicketList title="Resolved" items={resolved} onOpen={setOpen} />}
@@ -90,29 +110,42 @@ function statusLabel(status: SupportTicket['status']): string {
     : status === 'pending' ? 'support replied — your turn' : 'resolved';
 }
 
+// One severity treatment everywhere: status ink only for real escalations,
+// neutral tag for the ordinary facts (low, normal).
+function SeverityTag({ severity }: { severity: string }) {
+  if (severity === 'urgent') return <span className="badge crit">urgent</span>;
+  if (severity === 'high') return <span className="badge warn">high</span>;
+  return <span className="tag">{severity}</span>;
+}
+
 function TicketList({ title, items, onOpen }: {
   title: string; items: SupportTicket[]; onOpen: (id: string) => void;
 }) {
   return (
     <>
       <div className="section-title">{title}</div>
-      <div className="stack" style={{ gap: 8, marginBottom: 18 }}>
-        {/* Opening a ticket is a state change, not navigation — so it's a
-            button, which Tab reaches and Enter activates. */}
-        {items.map((t) => (
-          <button key={t.id} type="button" className="card clickable row spread ticket-row"
-            style={{ padding: '12px 16px' }} onClick={() => onOpen(t.id)}>
-            <div className="row" style={{ minWidth: 0 }}>
-              <Led status={ticketLed(t.status)} />
-              <strong style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.subject}</strong>
-              <span className="tag">{t.category}</span>
-              {t.severity === 'high' || t.severity === 'urgent' ? <span className="badge red">{t.severity}</span> : null}
-            </div>
-            <span className="faint" style={{ whiteSpace: 'nowrap' }}>
-              {statusLabel(t.status)} · {timeAgo(t.updatedAt)}
-            </span>
-          </button>
-        ))}
+      <div className="card" style={{ padding: '3px 16px', marginBottom: 18 }}>
+        <div className="list">
+          {/* Opening a ticket is a state change, not navigation — so each row
+              is a button, which Tab reaches and Enter activates. The inline
+              resets strip button chrome the .list-row grammar doesn't cover;
+              the hairline top border stays with the class. */}
+          {items.map((t) => (
+            <button key={t.id} type="button" className="list-row ticket-row"
+              style={{ background: 'none', borderLeft: 'none', borderRight: 'none', borderBottom: 'none', cursor: 'pointer' }}
+              onClick={() => onOpen(t.id)}>
+              <div className="row" style={{ minWidth: 0, flex: 1 }}>
+                <Led status={ticketLed(t.status)} />
+                <strong style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.subject}</strong>
+                <span className="tag">{t.category}</span>
+                <SeverityTag severity={t.severity} />
+              </div>
+              <span className="faint" style={{ whiteSpace: 'nowrap' }}>
+                {statusLabel(t.status)} · {timeAgo(t.updatedAt)}
+              </span>
+            </button>
+          ))}
+        </div>
       </div>
     </>
   );
@@ -120,6 +153,7 @@ function TicketList({ title, items, onOpen }: {
 
 function Compose({ onDone, onCancel }: { onDone: (id: string) => void; onCancel: () => void }) {
   const toast = useToast();
+  const confirm = useConfirm();
   const [subject, setSubject] = useState('');
   const [category, setCategory] = useState('general');
   const [severity, setSeverity] = useState('normal');
@@ -134,6 +168,21 @@ function Compose({ onDone, onCancel }: { onDone: (id: string) => void; onCancel:
       toast.ok('Ticket sent — support usually answers within a business day.');
       onDone(t.id);
     } catch (e) { toast.err(cleanError(e)); setBusy(false); }
+  };
+
+  // Cancel with typed content pauses for a decision — a half-written problem
+  // report is real work, and one stray click must not eat it.
+  const cancel = async () => {
+    if (subject.trim() || body.trim()) {
+      const yes = await confirm({
+        title: 'Discard this ticket?',
+        body: 'The draft you typed will be lost.',
+        confirmLabel: 'Discard draft',
+        danger: true,
+      });
+      if (!yes) return;
+    }
+    onCancel();
   };
 
   return (
@@ -172,7 +221,7 @@ function Compose({ onDone, onCancel }: { onDone: (id: string) => void; onCancel:
         <button className="btn primary" disabled={busy} onClick={submit}>
           {busy ? <Spinner size={13} /> : <Send size={13} />} Send ticket
         </button>
-        <button className="btn ghost" onClick={onCancel}>Cancel</button>
+        <button className="btn ghost" disabled={busy} onClick={cancel}>Cancel</button>
       </div>
     </div>
   );
@@ -184,10 +233,11 @@ function Thread({ ticket, onBack, onChanged }: {
   const toast = useToast();
   const [reply, setReply] = useState('');
   const [busy, setBusy] = useState(false);
+  const [resolving, setResolving] = useState(false);
   const replyId = useId();
 
   const send = async () => {
-    if (!reply.trim()) return;
+    if (!reply.trim() || busy) return;
     setBusy(true);
     try {
       await api.replyTicket(ticket.id, reply.trim());
@@ -198,11 +248,13 @@ function Thread({ ticket, onBack, onChanged }: {
   };
 
   const resolve = async () => {
+    setResolving(true);
     try {
       await api.resolveTicket(ticket.id);
       toast.ok('Ticket resolved. Reply any time to reopen it.');
       onChanged();
     } catch (e) { toast.err(cleanError(e)); }
+    setResolving(false);
   };
 
   return (
@@ -212,28 +264,29 @@ function Thread({ ticket, onBack, onChanged }: {
           <button className="btn sm ghost" onClick={onBack} aria-label="Back to all tickets"><ArrowLeft size={14} /></button>
           <strong style={{ fontSize: 14.5 }}>{ticket.subject}</strong>
           <span className="tag">{ticket.category}</span>
-          <span className="tag">{ticket.severity}</span>
+          <SeverityTag severity={ticket.severity} />
         </div>
         <div className="row">
           <span className="row faint" style={{ gap: 6 }}>
             <Led status={ticketLed(ticket.status)} /> {statusLabel(ticket.status)}
           </span>
           {ticket.status !== 'resolved' && (
-            <button className="btn sm" onClick={resolve}><CheckCircle2 size={12} /> Mark resolved</button>
+            <button className="btn sm" disabled={resolving} onClick={resolve}>
+              {resolving ? <Spinner size={12} /> : <CheckCircle2 size={12} />} Mark resolved
+            </button>
           )}
         </div>
       </div>
 
       <div className="stack" style={{ gap: 10, margin: '14px 0' }}>
         {ticket.messages.map((m) => (
-          <div key={m.id} className="card inset" style={{
-            borderColor: m.author === 'agent' ? 'var(--amber)' : 'var(--border)',
+          <div key={m.id} className={`card inset ${m.author === 'agent' ? 'accent' : ''}`} style={{
             marginLeft: m.author === 'agent' ? 0 : 24,
             marginRight: m.author === 'agent' ? 24 : 0,
           }}>
             <div className="row spread" style={{ marginBottom: 6 }}>
               <strong className="row" style={{ gap: 6, fontSize: 12.5 }}>
-                <MessageSquareText size={12} style={{ color: m.author === 'agent' ? 'var(--amber)' : 'var(--faint)' }} />
+                <MessageSquareText size={12} style={{ color: m.author === 'agent' ? 'var(--accent)' : 'var(--faint)' }} aria-hidden />
                 {m.author === 'agent' ? `${m.name} (RackOps)` : m.name || 'You'}
               </strong>
               <span className="faint">{timeAgo(m.at)}</span>
@@ -246,10 +299,15 @@ function Thread({ ticket, onBack, onChanged }: {
       <div className="row" style={{ alignItems: 'flex-end' }}>
         <label className="sr-only" htmlFor={replyId}>Reply to this ticket</label>
         <textarea className="input" id={replyId} rows={3} style={{ flex: 1 }} value={reply}
-          placeholder={ticket.status === 'resolved' ? 'Reply to reopen this ticket…' : 'Write a reply…'}
-          onChange={(e) => setReply(e.target.value)} />
-        <button className="btn primary" disabled={busy || !reply.trim()} onClick={send} aria-label="Send reply">
-          {busy ? <Spinner size={13} /> : <Send size={13} />}
+          placeholder={ticket.status === 'resolved'
+            ? 'Reply to reopen this ticket… (Ctrl/⌘+Enter to send)'
+            : 'Write a reply… (Ctrl/⌘+Enter to send)'}
+          onChange={(e) => setReply(e.target.value)}
+          onKeyDown={(e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); send(); }
+          }} />
+        <button className="btn primary" disabled={busy || !reply.trim()} onClick={send}>
+          {busy ? <Spinner size={13} /> : <Send size={13} />} Send
         </button>
       </div>
     </div>

@@ -1,14 +1,17 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   Rocket, Package, Container, GitBranch, Layers, Sparkles, Plus, Trash2, ArrowLeft, ArrowRight,
-  Globe, CheckCircle2, ScrollText, Bot, Server, Home, Wrench, Gamepad2, Database, KeyRound,
+  Globe, Check, CheckCircle2, ScrollText, Bot, Server, Home, Wrench, Gamepad2, Database, KeyRound,
+  Search, RotateCw,
 } from 'lucide-react';
 import { api, subscribeLogChunks } from '../api';
 import type { Template, EnvVar, PlacementScore, Service, Deployment, LogChunk } from '../api';
 import { useData } from '../data';
 import { useToast, cleanError } from '../components/toast';
-import { Field, Led, Spinner, UrlChip, dnsLabel, publicUrls } from '../components/ui';
+import {
+  EmptyState, Field, Led, PasswordInput, Skeleton, Spinner, UrlChip, dnsLabel, publicUrls,
+} from '../components/ui';
 
 type Source = 'template' | 'image' | 'git' | 'compose';
 
@@ -23,6 +26,24 @@ const CATEGORIES = [
   { key: 'database', label: 'Databases', icon: <Database size={12} /> },
 ];
 
+const SOURCES: { key: Source; icon: React.ReactNode; label: string; sub: string }[] = [
+  { key: 'template', icon: <Package size={16} />, label: 'Template', sub: 'Ready-made apps' },
+  { key: 'image', icon: <Container size={16} />, label: 'Image', sub: 'Any Docker image' },
+  { key: 'git', icon: <GitBranch size={16} />, label: 'Git repo', sub: 'Build from source' },
+  { key: 'compose', icon: <Layers size={16} />, label: 'Compose', sub: 'Multi-container stack' },
+];
+
+// Templates render in as many columns as fit; a lone result keeps card width.
+const TPL_GRID: React.CSSProperties = {
+  display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 8,
+};
+
+// Env rows need identity that survives removal from the middle of the list —
+// index keys would hand row N's focused input to row N+1's data.
+type EnvRow = EnvVar & { _id: number };
+let envRowSeq = 0;
+const envRow = (v: EnvVar): EnvRow => ({ ...v, _id: ++envRowSeq });
+
 // DeployFlow: pick a source → configure → launch and watch it go live.
 // The flow ends on a working app, not a closed dialog.
 export function DeployFlow() {
@@ -33,9 +54,11 @@ export function DeployFlow() {
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [source, setSource] = useState<Source>('template');
   const searchId = useId();
+  const sourceRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   // step 1 state
   const [templates, setTemplates] = useState<Template[]>([]);
+  const [tplState, setTplState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [category, setCategory] = useState('');
   const [search, setSearch] = useState('');
   const [tpl, setTpl] = useState<Template | null>(null);
@@ -53,8 +76,9 @@ export function DeployFlow() {
   const [hostTouched, setHostTouched] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
   const [nodeId, setNodeId] = useState('auto');
-  const [envVars, setEnvVars] = useState<EnvVar[]>([]);
+  const [envVars, setEnvVars] = useState<EnvRow[]>([]);
   const [scores, setScores] = useState<PlacementScore[]>([]);
+  const [scoresLoaded, setScoresLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const isCompose = source === 'compose' || !!tpl?.composeYml;
@@ -62,9 +86,21 @@ export function DeployFlow() {
   // step 3 state
   const [svcId, setSvcId] = useState('');
 
-  useEffect(() => { api.templates().then((t) => setTemplates(t ?? [])).catch(() => {}); }, []);
+  // The catalog is remote: show skeletons while it loads and a real error with
+  // a retry when it doesn't — a failed fetch must never read as "no templates".
+  const loadTemplates = useCallback(() => {
+    setTplState('loading');
+    api.templates()
+      .then((t) => { setTemplates(t ?? []); setTplState('ready'); })
+      .catch(() => setTplState('error'));
+  }, []);
+  useEffect(() => { loadTemplates(); }, [loadTemplates]);
+
   useEffect(() => {
-    api.placement(tpl ? { memMb: tpl.memMb, needsGpu: !!tpl.gpu } : {}).then(setScores).catch(() => {});
+    setScoresLoaded(false);
+    api.placement(tpl ? { memMb: tpl.memMb, needsGpu: !!tpl.gpu } : {})
+      .then((s) => { setScores(s ?? []); setScoresLoaded(true); })
+      .catch(() => setScoresLoaded(true));
   }, [tpl]);
 
   const filtered = useMemo(() => templates.filter((t) =>
@@ -77,7 +113,7 @@ export function DeployFlow() {
     setName(t.id);
     setContainerPort(t.composeYml ? '' : String(t.port));
     setHostTouched(false); // re-suggest a free host port for this template
-    setEnvVars((t.env ?? []).map((d) => ({ key: d.key, value: d.default, secret: d.secret })));
+    setEnvVars((t.env ?? []).map((d) => envRow({ key: d.key, value: d.default, secret: d.secret })));
     setStep(2);
   };
 
@@ -102,7 +138,21 @@ export function DeployFlow() {
 
   const best = scores.find((s) => s.viable);
 
+  // Radiogroup keyboard contract: arrows move both focus and selection.
+  const onSourceKey = (e: React.KeyboardEvent<HTMLButtonElement>, idx: number) => {
+    const dir = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1
+      : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0;
+    if (!dir) return;
+    e.preventDefault();
+    const next = (idx + dir + SOURCES.length) % SOURCES.length;
+    setSource(SOURCES[next].key);
+    sourceRefs.current[next]?.focus();
+  };
+
+  const advance = () => { if (sourceReady) setStep(2); };
+
   const launch = async () => {
+    if (busy) return;
     if (!name.trim()) { toast.err('Give the app a name.'); return; }
     const body: Record<string, unknown> = {
       name: name.trim(),
@@ -111,7 +161,7 @@ export function DeployFlow() {
       nodeId,
       port: hostPort ? parseInt(hostPort, 10) : 0,
       containerPort: isCompose ? 0 : (parseInt(containerPort, 10) || 0),
-      env: envVars.filter((v) => v.key),
+      env: envVars.filter((v) => v.key).map((v) => ({ key: v.key, value: v.value, secret: v.secret })),
     };
     if (source === 'template') {
       body.templateId = tpl!.id;
@@ -135,7 +185,10 @@ export function DeployFlow() {
   return (
     <div className="page" style={{ maxWidth: 760 }}>
       <div className="row" style={{ marginBottom: 4 }}>
-        <button className="btn sm ghost" onClick={() => (step === 1 ? navigate('/apps') : setStep((s) => (s - 1) as 1 | 2))} disabled={step === 3}>
+        <button className="btn sm ghost" disabled={step === 3}
+          aria-label={step === 1 ? 'Back to apps' : 'Back to the previous step'}
+          title={step === 1 ? 'Back to apps' : 'Back to the previous step'}
+          onClick={() => (step === 1 ? navigate('/apps') : setStep((s) => (s - 1) as 1 | 2))}>
           <ArrowLeft size={13} />
         </button>
         <div className="page-title" style={{ margin: 0 }}>Deploy an app</div>
@@ -147,7 +200,7 @@ export function DeployFlow() {
           <div key={label} className="row" style={{ gap: 10 }}>
             {i > 0 && <div className="step-rail" />}
             <div className={`step ${step === i + 1 ? 'active' : step > i + 1 ? 'done' : ''}`}>
-              <span className="step-dot">{step > i + 1 ? '✓' : i + 1}</span> {label}
+              <span className="step-dot">{step > i + 1 ? <Check size={12} aria-hidden /> : i + 1}</span> {label}
             </div>
           </div>
         ))}
@@ -155,52 +208,86 @@ export function DeployFlow() {
 
       {step === 1 && (
         <>
-          <div className="grid-2" style={{ gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginBottom: 18 }}>
-            {([
-              ['template', <Package size={16} key="t" />, 'Template', 'Ready-made apps'],
-              ['image', <Container size={16} key="i" />, 'Image', 'Any Docker image'],
-              ['git', <GitBranch size={16} key="g" />, 'Git repo', 'Build from source'],
-              ['compose', <Layers size={16} key="c" />, 'Compose', 'Multi-container stack'],
-            ] as [Source, React.ReactNode, string, string][]).map(([key, icon, label, sub]) => (
-              <button key={key} className="card clickable" style={{
-                textAlign: 'center', padding: '14px 8px', fontFamily: 'inherit',
-                borderColor: source === key ? 'var(--amber)' : undefined,
-              }} onClick={() => setSource(key)}>
-                <div style={{ color: source === key ? 'var(--amber)' : 'var(--dim)', marginBottom: 6 }}>{icon}</div>
-                <div style={{ fontWeight: 600, fontSize: 13 }}>{label}</div>
-                <div className="faint">{sub}</div>
-              </button>
-            ))}
+          <div role="radiogroup" aria-label="Deploy source"
+            style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8, marginBottom: 18 }}>
+            {SOURCES.map((s, i) => {
+              const selected = source === s.key;
+              return (
+                <button key={s.key} type="button" role="radio" aria-checked={selected}
+                  tabIndex={selected ? 0 : -1}
+                  ref={(el) => { sourceRefs.current[i] = el; }}
+                  className="card clickable"
+                  style={{
+                    textAlign: 'center', padding: '14px 8px', fontFamily: 'inherit',
+                    borderColor: selected ? 'var(--accent)' : undefined,
+                    background: selected ? 'var(--accent-dim)' : undefined,
+                  }}
+                  onClick={() => setSource(s.key)}
+                  onKeyDown={(e) => onSourceKey(e, i)}>
+                  <div style={{ color: selected ? 'var(--accent)' : 'var(--dim)', marginBottom: 6 }} aria-hidden>{s.icon}</div>
+                  <div style={{ fontWeight: 600, fontSize: 13 }}>{s.label}</div>
+                  <div className="faint">{s.sub}</div>
+                </button>
+              );
+            })}
           </div>
 
           {source === 'template' && (
             <>
               <div className="row wrap" style={{ marginBottom: 10 }} role="group" aria-label="Filter templates by category">
                 {CATEGORIES.map((c) => (
-                  <button key={c.key} className={`btn sm ${category === c.key ? 'primary' : ''}`}
+                  <button key={c.key} type="button" className={`btn sm ${category === c.key ? 'primary' : ''}`}
                     aria-pressed={category === c.key} onClick={() => setCategory(c.key)}>
                     {c.icon} {c.label}
                   </button>
                 ))}
               </div>
               <label className="sr-only" htmlFor={searchId}>Search templates</label>
-              <input className="input" id={searchId} placeholder={`Search ${templates.length || '45+'} templates…`} value={search}
-                onChange={(e) => setSearch(e.target.value)} style={{ marginBottom: 10 }} autoFocus />
-              <div style={{ maxHeight: 380, overflowY: 'auto', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                {filtered.map((t) => (
-                  <button key={t.id} className="card clickable" style={{
-                    textAlign: 'left', fontFamily: 'inherit', padding: 12,
-                  }} onClick={() => pickTemplate(t)}>
-                    <div className="row spread">
-                      <strong style={{ fontSize: 13, color: 'var(--text)' }}>{t.name}</strong>
-                      <span className="tag">{t.category}</span>
-                    </div>
-                    <div className="faint" style={{ marginTop: 4 }}>{t.description}</div>
-                    {t.gpu && <span className="badge purple" style={{ marginTop: 6 }}>needs GPU</span>}
-                  </button>
-                ))}
-                {filtered.length === 0 && <div className="faint" style={{ padding: 12 }}>No template matches.</div>}
+              <div className="search-input" style={{ marginBottom: 10 }}>
+                <Search size={14} aria-hidden />
+                <input className="input" id={searchId} placeholder={`Search ${templates.length || '45+'} templates…`}
+                  value={search} onChange={(e) => setSearch(e.target.value)} autoFocus />
               </div>
+
+              {tplState === 'loading' && (
+                <div style={TPL_GRID} aria-hidden>
+                  {Array.from({ length: 6 }, (_, i) => <Skeleton key={i} height={92} radius="var(--r-lg)" />)}
+                </div>
+              )}
+              {tplState === 'error' && (
+                <div className="card crit">
+                  <strong style={{ color: 'var(--crit)' }}>The template catalog didn&rsquo;t load.</strong>
+                  <div className="dim" style={{ margin: '4px 0 10px' }}>
+                    The server didn&rsquo;t answer — your machines and apps are unaffected.
+                  </div>
+                  <button type="button" className="btn sm" onClick={loadTemplates}>
+                    <RotateCw size={12} /> Try again
+                  </button>
+                </div>
+              )}
+              {tplState === 'ready' && (
+                <div style={{ ...TPL_GRID, maxHeight: 380, overflowY: 'auto', alignContent: 'start' }}>
+                  {filtered.map((t) => (
+                    <button key={t.id} type="button" className="card clickable" style={{
+                      textAlign: 'left', fontFamily: 'inherit', padding: 12,
+                    }} onClick={() => pickTemplate(t)}>
+                      <div className="row spread">
+                        <strong style={{ fontSize: 13, color: 'var(--text)' }}>{t.name}</strong>
+                        <span className="tag">{t.category}</span>
+                      </div>
+                      <div className="faint" style={{ marginTop: 4 }}>{t.description}</div>
+                      {t.gpu && <span className="tag" style={{ marginTop: 6, display: 'inline-block' }}>needs GPU</span>}
+                    </button>
+                  ))}
+                  {filtered.length === 0 && (
+                    <div style={{ gridColumn: '1 / -1' }}>
+                      <EmptyState icon={<Search size={18} />} title="No template matches">
+                        <div>Try different words or another category — or deploy from a Docker image instead.</div>
+                      </EmptyState>
+                    </div>
+                  )}
+                </div>
+              )}
             </>
           )}
 
@@ -209,7 +296,7 @@ export function DeployFlow() {
               hint="Anything public on Docker Hub, GHCR, or any registry your machines can reach.">
               {(p) => (
                 <input className="input mono" {...p} placeholder="nginx:alpine" value={image} autoFocus
-                  onChange={(e) => setImage(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && sourceReady && setStep(2)} />
+                  onChange={(e) => setImage(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && advance()} />
               )}
             </Field>
           )}
@@ -220,17 +307,20 @@ export function DeployFlow() {
                 hint="Dockerfile used if present; otherwise the stack (Node/Go/Python/static) is detected automatically.">
                 {(p) => (
                   <input className="input mono" {...p} placeholder="https://github.com/user/repo" value={gitRepo} autoFocus
-                    onChange={(e) => setGitRepo(e.target.value)} />
+                    onChange={(e) => setGitRepo(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && advance()} />
                 )}
               </Field>
               <div className="grid-2">
                 <Field label="Branch">
-                  {(p) => <input className="input mono" {...p} value={gitBranch} onChange={(e) => setGitBranch(e.target.value)} />}
+                  {(p) => (
+                    <input className="input mono" {...p} value={gitBranch}
+                      onChange={(e) => setGitBranch(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && advance()} />
+                  )}
                 </Field>
                 <Field label="Access token (private repos)">
                   {(p) => (
-                    <input className="input" {...p} type="password" placeholder="optional" value={gitToken}
-                      onChange={(e) => setGitToken(e.target.value)} />
+                    <PasswordInput {...p} value={gitToken} onChange={setGitToken}
+                      placeholder="optional" autoComplete="off" onEnter={advance} />
                   )}
                 </Field>
               </div>
@@ -248,8 +338,8 @@ export function DeployFlow() {
           )}
 
           {source !== 'template' && (
-            <button className="btn primary" style={{ marginTop: 6 }} disabled={!sourceReady}
-              onClick={() => { if (!name) setName(''); setStep(2); }}>
+            <button type="button" className="btn primary" style={{ marginTop: 6 }} disabled={!sourceReady}
+              onClick={() => setStep(2)}>
               Continue <ArrowRight size={13} />
             </button>
           )}
@@ -257,13 +347,13 @@ export function DeployFlow() {
       )}
 
       {step === 2 && (
-        <>
+        <form onSubmit={(e) => { e.preventDefault(); launch(); }}>
           {tpl && (
             <div className="card inset row" style={{ marginBottom: 16, padding: '10px 14px' }}>
-              <Package size={14} style={{ color: 'var(--amber)' }} />
+              <Package size={14} style={{ color: 'var(--accent)' }} aria-hidden />
               <strong>{tpl.name}</strong>
               <span className="dim">{tpl.description}</span>
-              {tpl.notes && <span className="badge yellow" style={{ marginLeft: 'auto' }}>{tpl.notes}</span>}
+              {tpl.notes && <span className="badge warn" style={{ marginLeft: 'auto' }}>{tpl.notes}</span>}
             </div>
           )}
 
@@ -319,18 +409,23 @@ export function DeployFlow() {
               </select>
             )}
           </Field>
-          {nodeId === 'auto' && best && (
-            <div className="card" style={{ marginBottom: 14, borderColor: 'var(--amber)' }}>
+          {nodeId === 'auto' && !scoresLoaded && (
+            <div style={{ marginBottom: 14 }}>
+              <Skeleton height={62} radius="var(--r-lg)" />
+            </div>
+          )}
+          {nodeId === 'auto' && scoresLoaded && best && (
+            <div className="card accent" style={{ marginBottom: 14 }}>
               <div className="row">
-                <Sparkles size={14} style={{ color: 'var(--amber)' }} />
+                <Sparkles size={14} style={{ color: 'var(--accent)' }} aria-hidden />
                 <strong>Will run on {nodeName(best.nodeId)}</strong>
-                <span className="badge amber">score {best.score}</span>
+                <span className="badge accent">score {best.score}</span>
               </div>
               <div className="faint" style={{ marginTop: 6 }}>{best.reasons.join(' · ')}</div>
             </div>
           )}
-          {nodeId === 'auto' && !best && scores.length > 0 && (
-            <div className="card" style={{ marginBottom: 14, borderColor: 'var(--crit)' }}>
+          {nodeId === 'auto' && scoresLoaded && !best && scores.length > 0 && (
+            <div className="card crit" style={{ marginBottom: 14 }}>
               <strong style={{ color: 'var(--crit)' }}>No machine can run this right now.</strong>
               <div className="dim" style={{ marginTop: 4 }}>
                 {scores[0]?.reasons.join(' · ') || 'Check that at least one machine is online with enough free memory.'}
@@ -343,33 +438,33 @@ export function DeployFlow() {
           <fieldset className="field field-set">
             <legend>Environment variables{tpl && (tpl.env ?? []).length > 0 ? ' — pre-filled from the template' : ' (optional)'}</legend>
             {envVars.map((v, i) => (
-              <div className="row" key={i}>
+              <div className="row" key={v._id}>
                 <input className="input mono" placeholder="KEY" value={v.key} aria-label={`Variable ${i + 1} name`}
-                  onChange={(e) => setEnvVars(envVars.map((x, j) => (j === i ? { ...x, key: e.target.value } : x)))} />
+                  onChange={(e) => setEnvVars(envVars.map((x) => (x._id === v._id ? { ...x, key: e.target.value } : x)))} />
                 <input className="input mono" placeholder={v.secret ? 'auto-generated if blank' : 'value'}
                   type={v.secret ? 'password' : 'text'} value={v.value}
                   aria-label={v.key ? `Value for ${v.key}` : `Variable ${i + 1} value`}
-                  onChange={(e) => setEnvVars(envVars.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))} />
-                <button className="btn sm" aria-pressed={v.secret}
+                  onChange={(e) => setEnvVars(envVars.map((x) => (x._id === v._id ? { ...x, value: e.target.value } : x)))} />
+                <button type="button" className="btn sm" aria-pressed={v.secret}
                   title={v.secret ? 'Shown as secret' : 'Mask as secret'}
                   aria-label={v.secret ? `Stop masking ${v.key || 'this variable'}` : `Mask ${v.key || 'this variable'} as secret`}
-                  onClick={() => setEnvVars(envVars.map((x, j) => (j === i ? { ...x, secret: !x.secret } : x)))}>
-                  <KeyRound size={12} style={v.secret ? { color: 'var(--amber)' } : undefined} />
+                  onClick={() => setEnvVars(envVars.map((x) => (x._id === v._id ? { ...x, secret: !x.secret } : x)))}>
+                  <KeyRound size={12} style={v.secret ? { color: 'var(--accent)' } : undefined} />
                 </button>
-                <button className="btn sm danger" aria-label={`Remove ${v.key || `variable ${i + 1}`}`}
-                  onClick={() => setEnvVars(envVars.filter((_, j) => j !== i))}><Trash2 size={12} /></button>
+                <button type="button" className="btn sm danger" aria-label={`Remove ${v.key || `variable ${i + 1}`}`}
+                  onClick={() => setEnvVars(envVars.filter((x) => x._id !== v._id))}><Trash2 size={12} /></button>
               </div>
             ))}
-            <button className="btn sm" style={{ alignSelf: 'flex-start' }}
-              onClick={() => setEnvVars([...envVars, { key: '', value: '', secret: false }])}>
+            <button type="button" className="btn sm" style={{ alignSelf: 'flex-start' }}
+              onClick={() => setEnvVars([...envVars, envRow({ key: '', value: '', secret: false })])}>
               <Plus size={12} /> Add variable
             </button>
           </fieldset>
 
-          <button className="btn primary" style={{ width: '100%' }} disabled={busy || !name.trim()} onClick={launch}>
+          <button type="submit" className="btn primary" style={{ width: '100%' }} disabled={busy || !name.trim()}>
             {busy ? <Spinner /> : <Rocket size={14} />} {busy ? 'Starting…' : 'Launch'}
           </button>
-        </>
+        </form>
       )}
 
       {step === 3 && svcId && <LaunchProgress serviceId={svcId} />}
@@ -386,7 +481,7 @@ function LaunchProgress({ serviceId }: { serviceId: string }) {
   const [deploys, setDeploys] = useState<Deployment[]>([]);
   const [liveLog, setLiveLog] = useState('');
   const logRef = useRef<HTMLDivElement>(null);
-  const settled = svc?.status === 'running' || svc?.status === 'failed';
+  const pinnedRef = useRef(true); // keep scrolling to the bottom unless the user scrolled up
 
   useEffect(() => {
     let alive = true;
@@ -416,10 +511,18 @@ function LaunchProgress({ serviceId }: { serviceId: string }) {
     return unsub;
   }, [serviceId]);
 
-  // keep the live log pinned to the bottom while building
+  // Auto-scroll to the newest line only while the reader is already at the
+  // bottom — scrolling up to reread an error must stick.
   useEffect(() => {
-    if (!settled && logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
-  }, [liveLog, deploys, settled]);
+    const el = logRef.current;
+    if (el && pinnedRef.current) el.scrollTop = el.scrollHeight;
+  }, [liveLog, deploys]);
+
+  const onScroll = () => {
+    const el = logRef.current;
+    if (!el) return;
+    pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+  };
 
   const latest = deploys[0];
   const node = nodes.find((n) => n.id === svc?.nodeId);
@@ -432,7 +535,7 @@ function LaunchProgress({ serviceId }: { serviceId: string }) {
           : svc?.status === 'failed' ? <Led lg status="failed" />
           : <Spinner size={16} />}
         <div style={{ flex: 1 }}>
-          <div style={{ fontFamily: 'var(--display)', fontWeight: 600, fontSize: 15 }}>
+          <div style={{ fontWeight: 600, fontSize: 15 }}>
             {!svc ? 'Provisioning…'
               : svc.status === 'running' ? `${svc.name} is live`
               : svc.status === 'failed' ? `${svc.name} failed to start`
@@ -448,9 +551,9 @@ function LaunchProgress({ serviceId }: { serviceId: string }) {
       </div>
 
       {svc?.status === 'running' && (
-        <div className="card" style={{ borderColor: 'var(--ok)', marginBottom: 14 }}>
+        <div className="card ok" style={{ marginBottom: 14 }}>
           <div className="row" style={{ marginBottom: 10 }}>
-            <CheckCircle2 size={15} style={{ color: 'var(--ok)' }} />
+            <CheckCircle2 size={15} style={{ color: 'var(--ok)' }} aria-hidden />
             <strong>Reach it</strong>
           </div>
           <div className="row wrap" style={{ marginBottom: 12 }}>
@@ -475,8 +578,16 @@ function LaunchProgress({ serviceId }: { serviceId: string }) {
       )}
 
       <div className="eyebrow" style={{ marginBottom: 6 }}>Deployment output</div>
-      <div className="terminal" ref={logRef} style={{ maxHeight: 400 }}>
+      <div className="terminal" ref={logRef} onScroll={onScroll} style={{ maxHeight: 400 }}>
         {liveLog || latest?.log || 'waiting for the machine to pick up the job…'}
+      </div>
+
+      {/* Leaving is always safe: the deploy runs on the server, not this tab. */}
+      <div style={{ marginTop: 14 }}>
+        <Link to="/apps" className="dim" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+          title="Leaving this page won't stop anything — the deploy keeps running on the server.">
+          <ArrowLeft size={12} aria-hidden /> Back to apps
+        </Link>
       </div>
     </>
   );

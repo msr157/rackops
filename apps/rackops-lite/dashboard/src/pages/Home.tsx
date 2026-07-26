@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { useData } from '../data';
 import { Rack } from '../components/Rack';
-import { InfoTip, Led, SkeletonRows, UrlChip, publicUrls, timeAgo } from '../components/ui';
+import { EmptyState, InfoTip, Led, SkeletonRows, UrlChip, publicUrls, timeAgo } from '../components/ui';
 
 // Home answers one question at a glance: is everything okay?
 // Anything that needs attention comes first; healthy detail follows.
@@ -15,8 +15,11 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
 
   const failing = services.filter((s) => s.status === 'failed');
   const openAlerts = alerts.filter((a) => !a.resolved);
-  const attention = failing.length + openAlerts.length;
   const nodesOffline = nodes.filter((n) => n.status === 'offline');
+  // An offline machine counts toward the headline — the banner must never
+  // say "all systems operational" over a red attention list.
+  const attention = failing.length + openAlerts.length + nodesOffline.length;
+  const troubled = loaded && attention > 0;
 
   const running = services.filter((s) => s.status === 'running').length;
 
@@ -25,13 +28,13 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
       {/* Status banner: the one-glance answer. It must never claim an empty
           rack while the fleet is still loading or the server is unreachable —
           that reads as data loss at the exact moment it would panic someone. */}
-      <div className="hero-banner">
+      <div className={`status-banner ${troubled ? 'crit' : ''}`}>
         <Led lg label
           status={!loaded ? 'pending'
-            : attention > 0 || nodesOffline.length > 0 ? 'failed'
+            : troubled ? 'failed'
             : nodes.length === 0 ? 'stopped' : 'running'} />
         <div style={{ flex: 1 }}>
-          <div style={{ fontFamily: 'var(--display)', fontWeight: 700, fontSize: 17, letterSpacing: '-0.01em' }}>
+          <div className="status-banner-title">
             {!loaded ? (reachable ? 'Reading the rack…' : 'Waiting for the server')
               : nodes.length === 0 ? 'Your rack is waiting for its first machine'
               : attention > 0 ? `${attention} thing${attention > 1 ? 's' : ''} need${attention > 1 ? '' : 's'} your attention`
@@ -56,7 +59,7 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
       {(failing.length > 0 || openAlerts.length > 0 || nodesOffline.length > 0) && (
         <>
           <div className="section-title">
-            <Bell size={15} style={{ color: 'var(--crit)' }} /> Needs attention
+            <Bell size={15} style={{ color: 'var(--crit)' }} aria-hidden /> Needs attention
             <InfoTip wide>
               Only real, ongoing problems appear here: an app that is down, a machine that stopped
               reporting, or an alert that has persisted for several readings. Each entry clears
@@ -65,11 +68,11 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
           </div>
           <div className="stack" style={{ marginBottom: 8 }}>
             {failing.map((s) => (
-              <div key={s.id} className="card row spread" style={{ borderColor: 'var(--crit)', padding: '12px 16px' }}>
+              <div key={s.id} className="card crit row spread" style={{ padding: '12px 16px' }}>
                 <div className="row">
                   <Led status="failed" />
                   <strong>{s.name}</strong>
-                  <span className="dim">app is down{s.status === 'failed' ? ' — auto-heal is retrying' : ''}</span>
+                  <span className="dim">app is down — auto-heal is retrying</span>
                 </div>
                 <div className="row">
                   <button className="btn sm" onClick={() => navigate(`/apps/${s.id}/logs`)}><ScrollText size={12} /> View logs</button>
@@ -78,7 +81,7 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
               </div>
             ))}
             {nodesOffline.map((n) => (
-              <div key={n.id} className="card row spread" style={{ borderColor: 'var(--crit)', padding: '12px 16px' }}>
+              <div key={n.id} className="card crit row spread" style={{ padding: '12px 16px' }}>
                 <div className="row">
                   <Led status="offline" />
                   <strong>{n.name}</strong>
@@ -88,7 +91,8 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
               </div>
             ))}
             {openAlerts.map((a) => (
-              <div key={a.id} className="card row spread" style={{ borderColor: a.level === 'critical' ? 'var(--crit)' : 'var(--warn)', padding: '12px 16px' }}>
+              <div key={a.id} className={`card row spread ${a.level === 'critical' ? 'crit' : 'warn'}`}
+                style={{ padding: '12px 16px' }}>
                 <div className="row">
                   <Led status={a.level === 'critical' ? 'failed' : 'pending'} />
                   <span>{a.message}</span>
@@ -103,7 +107,7 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
       <div className="grid-2" style={{ alignItems: 'start', marginTop: 10 }}>
         <div>
           <div className="section-title" style={{ marginTop: 12 }}>
-            <Boxes size={15} /> Your apps
+            <Boxes size={15} aria-hidden /> Your apps
             {services.length > 0 && <Link to="/apps" className="faint" style={{ marginLeft: 'auto', fontWeight: 400 }}>all {services.length} →</Link>}
           </div>
           <div className="stack" style={{ gap: 8 }}>
@@ -113,7 +117,7 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
                 <div key={s.id} className="card row-card row" style={{ padding: '11px 14px' }}>
                   <Led status={s.status} label />
                   <Link to={`/apps/${s.id}`} className="row-link"
-                    style={{ fontWeight: 700, minWidth: 90, maxWidth: 190, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    style={{ fontWeight: 600, minWidth: 90, maxWidth: 190, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {s.name}
                   </Link>
                   <span className="row-actions row" style={{ minWidth: 0 }}>
@@ -127,32 +131,28 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
             })}
             {!loaded && services.length === 0 && <SkeletonRows count={3} height={44} />}
             {loaded && services.length === 0 && nodes.length > 0 && (
-              <div className="empty">
-                <Rocket size={22} style={{ marginBottom: 8 }} />
-                <div className="empty-title">No apps yet</div>
+              <EmptyState icon={<Rocket size={18} />} title="No apps yet">
                 <div style={{ marginBottom: 14 }}>Deploy anything — Jellyfin, Postgres, your own code — in under a minute.</div>
                 <button className="btn primary" onClick={() => navigate('/apps/new')}><Rocket size={13} /> Deploy your first app</button>
-              </div>
+              </EmptyState>
             )}
             {loaded && nodes.length === 0 && (
-              <div className="empty">
-                <Server size={22} style={{ marginBottom: 8 }} />
-                <div className="empty-title">Apps run on machines</div>
+              <EmptyState icon={<Server size={18} />} title="Apps run on machines">
                 <div>Add a machine first — then deploy onto it.</div>
-              </div>
+              </EmptyState>
             )}
           </div>
 
           <div className="section-title">
-            <Radio size={15} /> Live activity
+            <Radio size={15} aria-hidden /> Live activity
             <InfoTip>
               A running log of everything the fleet does — deploys, self-healing, machines joining,
               alerts raising and resolving. It updates in real time.
             </InfoTip>
             {/* The badge tracks the stream, not the section — claiming LIVE
                 while the server is unreachable is the same lie in miniature. */}
-            <span className={`badge ${reachable ? 'amber' : 'gray'}`} style={{ marginLeft: 'auto' }}>
-              {reachable ? 'LIVE' : 'STALLED'}
+            <span className={`badge ${reachable ? 'accent' : 'neutral'}`} style={{ marginLeft: 'auto' }}>
+              {reachable ? 'live' : 'stalled'}
             </span>
           </div>
           <div className="terminal" style={{ maxHeight: 260 }}>
@@ -175,9 +175,9 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
 
         <div>
           <div className="section-title" style={{ marginTop: 12 }}>
-            <HardDrive size={15} /> The rack
+            <HardDrive size={15} aria-hidden /> The rack
             <InfoTip>
-              Every machine in this organization, drawn as rack units. The LED shows each
+              Every machine in this organization, one slot per machine. The dot shows each
               machine&rsquo;s health; click through for full hardware detail.
             </InfoTip>
             <Link to="/machines" className="faint" style={{ marginLeft: 'auto', fontWeight: 400 }}>details →</Link>
@@ -241,7 +241,7 @@ function SetupChecklist({ onAddMachine }: { onAddMachine: () => void }) {
   return (
     <div className="card" style={{ marginBottom: 20 }}>
       <div className="row spread" style={{ marginBottom: 12 }}>
-        <div style={{ fontFamily: 'var(--display)', fontWeight: 600, fontSize: 15 }}>Get your rack online</div>
+        <div style={{ fontWeight: 600, fontSize: 14.5 }}>Get your rack online</div>
         <button className="btn sm ghost" onClick={() => { localStorage.setItem('rackops-setup-done', '1'); setDismissed(true); }}>
           Skip setup
         </button>

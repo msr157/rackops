@@ -169,7 +169,7 @@ export function EmptyState({ icon, title, children }: {
 }) {
   return (
     <div className="empty">
-      {icon && <div style={{ marginBottom: 10, color: 'var(--faint)' }}>{icon}</div>}
+      {icon && <div className="empty-icon" aria-hidden>{icon}</div>}
       <div className="empty-title">{title}</div>
       {children}
     </div>
@@ -179,14 +179,25 @@ export function EmptyState({ icon, title, children }: {
 /* ---- Copy affordances ---- */
 
 export function CopyBtn({ text, label }: { text: string; label?: string }) {
-  const [done, setDone] = useState(false);
+  const [state, setState] = useState<'idle' | 'ok' | 'fail'>('idle');
+  const copy = async () => {
+    // clipboard is undefined on insecure origins (a LAN dashboard over http) —
+    // failing silently while flashing a success check would be a lie.
+    try {
+      await navigator.clipboard.writeText(text);
+      setState('ok');
+    } catch {
+      setState('fail');
+    }
+    setTimeout(() => setState('idle'), 1800);
+  };
   return (
-    <button className="btn sm" title="Copy" onClick={() => {
-      navigator.clipboard.writeText(text);
-      setDone(true); setTimeout(() => setDone(false), 1400);
-    }}>
-      {done ? <Check size={12} style={{ color: 'var(--ok)' }} /> : <Copy size={12} />}
-      {label}
+    <button className="btn sm" onClick={copy}
+      title={state === 'fail' ? 'Copy failed — select and copy it manually' : 'Copy'}>
+      {state === 'ok' && <Check size={12} style={{ color: 'var(--ok)' }} />}
+      {state === 'fail' && <X size={12} style={{ color: 'var(--crit)' }} />}
+      {state === 'idle' && <Copy size={12} />}
+      {state === 'fail' ? 'Copy failed' : label}
     </button>
   );
 }
@@ -227,7 +238,7 @@ export function Modal({ title, icon, width, onClose, children }: {
 }
 
 export function Spinner({ size = 14 }: { size?: number }) {
-  return <Loader size={size} className="spin" style={{ color: 'var(--amber)' }} />;
+  return <Loader size={size} className="spin" style={{ color: 'var(--accent)' }} />;
 }
 
 /* ---- Live URL chips: the payoff of the whole product ---- */

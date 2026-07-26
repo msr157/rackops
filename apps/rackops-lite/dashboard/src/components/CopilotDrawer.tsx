@@ -1,12 +1,20 @@
 import { createContext, useContext, useEffect, useId, useRef, useState } from 'react';
-import { Bot, Send, X } from 'lucide-react';
+import { Bot, RotateCw, Send, X } from 'lucide-react';
 import { api } from '../api';
 import { useData } from '../data';
 import { cleanError } from './toast';
 import { Spinner } from './ui';
 import { useDialogBehavior } from './useDialog';
 
-interface Msg { role: 'you' | 'copilot'; text: string; provider?: string }
+interface Msg {
+  id: number;
+  role: 'user' | 'bot';
+  text: string;
+  provider?: string;
+  /** Present on failed replies: the prompt Retry resends. */
+  prompt?: string;
+  error?: boolean;
+}
 
 interface CopilotApi { open: boolean; setOpen: (v: boolean) => void }
 
@@ -34,20 +42,40 @@ export function CopilotProvider({ children }: { children: React.ReactNode }) {
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [input, setInput] = useState('');
   const [thinking, setThinking] = useState(false);
+  const nextId = useRef(1);
+
+  // ask fires one request and appends the reply. A failure becomes an error
+  // bubble that remembers its prompt, so Retry can resend it.
+  const ask = async (q: string) => {
+    setThinking(true);
+    let reply: Msg;
+    try {
+      const r = await api.assistant(q);
+      reply = { id: nextId.current++, role: 'bot', text: r.answer, provider: r.provider };
+    } catch (e) {
+      reply = { id: nextId.current++, role: 'bot', text: cleanError(e), error: true, prompt: q };
+    }
+    setMsgs((m) => [...m, reply]);
+    setThinking(false);
+  };
 
   const send = async (text?: string) => {
     const q = (text ?? input).trim();
     if (!q || thinking) return;
     setInput('');
-    setMsgs((m) => [...m, { role: 'you', text: q }]);
-    setThinking(true);
-    try {
-      const r = await api.assistant(q);
-      setMsgs((m) => [...m, { role: 'copilot', text: r.answer, provider: r.provider }]);
-    } catch (e) {
-      setMsgs((m) => [...m, { role: 'copilot', text: cleanError(e) }]);
-    }
-    setThinking(false);
+    const mine: Msg = { id: nextId.current++, role: 'user', text: q };
+    setMsgs((m) => [...m, mine]);
+    await ask(q);
+  };
+
+  // Retry swaps the error bubble for a fresh attempt at the same prompt —
+  // the question stays in the thread without being repeated.
+  const retry = (id: number) => {
+    if (thinking) return;
+    const failed = msgs.find((m) => m.id === id);
+    if (!failed?.prompt) return;
+    setMsgs((m) => m.filter((x) => x.id !== id));
+    void ask(failed.prompt);
   };
 
   return (
@@ -55,41 +83,50 @@ export function CopilotProvider({ children }: { children: React.ReactNode }) {
       {children}
       {open && (
         <CopilotPanel msgs={msgs} input={input} thinking={thinking}
-          setInput={setInput} send={send} onClose={() => setOpen(false)} />
+          setInput={setInput} send={send} retry={retry} onClose={() => setOpen(false)} />
       )}
     </CopilotCtx.Provider>
   );
 }
 
-function CopilotPanel({ msgs, input, thinking, setInput, send, onClose }: {
+function CopilotPanel({ msgs, input, thinking, setInput, send, retry, onClose }: {
   msgs: Msg[]; input: string; thinking: boolean;
-  setInput: (v: string) => void; send: (text?: string) => void; onClose: () => void;
+  setInput: (v: string) => void; send: (text?: string) => void;
+  retry: (id: number) => void; onClose: () => void;
 }) {
   const { overview } = useData();
   const endRef = useRef<HTMLDivElement>(null);
-  const ref = useDialogBehavior<HTMLDivElement>(onClose, { initialFocus: 'container' });
+  // The input claims focus itself (autoFocus); the dialog hook sees that and
+  // leaves it, so typing can start the moment the drawer opens.
+  const ref = useDialogBehavior<HTMLDivElement>(onClose);
   const titleId = useId();
   const inputId = useId();
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [msgs, thinking]);
 
+  // Announce only what's new — the latest reply — instead of re-reading the
+  // whole thread on every change.
+  let lastBot: Msg | undefined;
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    if (msgs[i].role === 'bot') { lastBot = msgs[i]; break; }
+  }
+
   return (
     <>
       <div className="drawer-overlay" onClick={onClose} />
       <div ref={ref} className="drawer" tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={titleId}>
-        <div className="row spread" style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
-          <div className="row" style={{ gap: 8 }}>
-            <Bot size={16} style={{ color: 'var(--amber)' }} aria-hidden />
-            <strong id={titleId} style={{ fontFamily: 'var(--display)' }}>Copilot</strong>
-            <span className="faint">grounded in live telemetry</span>
-          </div>
-          <button className="btn sm ghost" onClick={onClose} aria-label="Close Copilot"><X size={14} /></button>
+        <div className="drawer-head">
+          <Bot size={16} style={{ color: 'var(--accent)' }} aria-hidden />
+          <strong id={titleId}>Copilot</strong>
+          <span className="faint">grounded in live telemetry</span>
+          <button className="btn sm ghost" style={{ marginLeft: 'auto' }}
+            onClick={onClose} aria-label="Close Copilot"><X size={14} /></button>
         </div>
 
-        <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
+        <div className="chat-list">
           {msgs.length === 0 && (
             <div style={{ textAlign: 'center', paddingTop: 24 }}>
-              <Bot size={26} style={{ color: 'var(--amber)', marginBottom: 10 }} aria-hidden />
+              <Bot size={26} style={{ color: 'var(--accent)', marginBottom: 10 }} aria-hidden />
               <div className="dim" style={{ marginBottom: 6 }}>
                 Ask anything about your rack.
               </div>
@@ -98,38 +135,47 @@ function CopilotPanel({ msgs, input, thinking, setInput, send, onClose }: {
               </div>
               <div className="stack" style={{ gap: 8 }}>
                 {STARTERS.map((s) => (
-                  <button key={s} className="btn sm" style={{ justifyContent: 'flex-start' }} onClick={() => send(s)}>{s}</button>
+                  <button key={s} className="btn sm" style={{ justifyContent: 'flex-start' }}
+                    disabled={thinking} onClick={() => send(s)}>{s}</button>
                 ))}
               </div>
             </div>
           )}
-          <div aria-live="polite">
-            {msgs.map((m, i) => (
-              <div key={i} style={{ marginBottom: 14 }}>
-                <div className="eyebrow" style={{ marginBottom: 5 }}>
-                  {m.role === 'you' ? 'You' : `Copilot${m.provider ? ` · ${m.provider}` : ''}`}
-                </div>
-                <div style={{
-                  background: m.role === 'you' ? 'var(--amber-dim)' : 'var(--bg-2)',
-                  border: '1px solid var(--border)', borderRadius: 10, padding: '10px 13px',
-                  whiteSpace: 'pre-wrap', lineHeight: 1.65, fontSize: 13,
-                }}>
-                  {m.text}
+          {msgs.map((m) => (
+            m.error ? (
+              <div key={m.id} className="chat-msg error">
+                {m.text}
+                <div style={{ marginTop: 8 }}>
+                  <button className="btn sm" disabled={thinking} onClick={() => retry(m.id)}>
+                    <RotateCw size={12} /> Retry
+                  </button>
                 </div>
               </div>
-            ))}
-            {thinking && <div className="row dim" style={{ padding: 6 }}><Spinner /> thinking…</div>}
-          </div>
+            ) : (
+              <div key={m.id} className={`chat-msg ${m.role === 'user' ? 'user' : 'bot'}`}>
+                {m.text}
+                {m.provider && <div className="faint" style={{ marginTop: 6 }}>Copilot · {m.provider}</div>}
+              </div>
+            )
+          ))}
+          {thinking && <div className="row dim" style={{ gap: 8 }}><Spinner size={13} /> thinking…</div>}
           <div ref={endRef} />
         </div>
 
-        <div className="row" style={{ padding: 12, borderTop: '1px solid var(--border)' }}>
+        {/* Live region scoped to the newest reply, not the whole thread. */}
+        <div className="sr-only" role="status">
+          {thinking ? 'Copilot is thinking…'
+            : lastBot ? (lastBot.error ? `Copilot error: ${lastBot.text}` : `Copilot: ${lastBot.text}`) : ''}
+        </div>
+
+        <div className="drawer-foot row">
           <label className="sr-only" htmlFor={inputId}>Ask Copilot</label>
-          <input className="input" id={inputId} placeholder="Ask Copilot…" value={input}
+          <input className="input" id={inputId} placeholder="Ask Copilot…" autoFocus value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && send()} />
-          <button className="btn primary" disabled={thinking || !input.trim()} onClick={() => send()} aria-label="Send">
-            <Send size={14} />
+          <button className="btn primary" disabled={thinking || !input.trim()}
+            onClick={() => send()} aria-label="Send" title="Send">
+            {thinking ? <Spinner size={14} /> : <Send size={14} />}
           </button>
         </div>
       </div>

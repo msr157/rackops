@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import {
-  ArrowLeft, Box, Cloud, Globe, History, KeyRound, Play, Plus, RotateCw, Save, ScrollText,
+  ArrowLeft, Box, Cloud, Globe, History, Info, KeyRound, Play, Plus, RotateCw, Save, ScrollText,
   Square, Trash2, TriangleAlert, Rocket, Folder, FolderOpen, Zap, Settings as SettingsIcon,
   ExternalLink,
 } from 'lucide-react';
@@ -10,7 +10,10 @@ import type { Service, ServiceUpdate, Mount, EnvVar, Deployment, Domain, DirEntr
 import { useData } from '../data';
 import { useToast, cleanError } from '../components/toast';
 import { useConfirm } from '../components/confirm';
-import { StatusBadge, Led, Modal, Spinner, UrlChip, publicUrls, dnsLabel, timeAgo, Field, InfoTip } from '../components/ui';
+import {
+  EmptyState, Field, InfoTip, Kpi, Led, Modal, Skeleton, SkeletonRows, Spinner, StatusBadge,
+  UrlChip, dnsLabel, publicUrls, timeAgo,
+} from '../components/ui';
 
 type Tab = 'overview' | 'networking' | 'logs' | 'deployments' | 'settings';
 
@@ -22,10 +25,14 @@ const TABS: { key: Tab; label: string; icon: React.ReactNode }[] = [
   { key: 'settings', label: 'Settings', icon: <SettingsIcon size={14} /> },
 ];
 
-// Draft holds the editable copy of a service; saved via PATCH.
+// Draft holds the editable copy of a service; saved via PATCH. Env and mount
+// rows carry a client-only `rid` so React keys stay stable while rows are
+// added and removed — the rid is stripped before anything is sent to the API.
+interface DraftEnv extends EnvVar { rid: string }
+interface DraftMount extends Mount { rid: string }
 interface Draft {
   image: string; command: string; port: string; containerPort: string; ports: string;
-  env: EnvVar[]; mounts: Mount[];
+  env: DraftEnv[]; mounts: DraftMount[];
   memLimitMb: string; cpuLimit: string; restartPolicy: string; gpu: boolean; nodeId: string;
 }
 
@@ -34,13 +41,55 @@ function toDraft(s: Service): Draft {
     image: s.image ?? '', command: s.command ?? '',
     port: s.port ? String(s.port) : '', containerPort: s.containerPort ? String(s.containerPort) : '',
     ports: (s.ports ?? []).join(', '),
-    env: (s.env ?? []).map((e) => ({ ...e })),
-    mounts: (s.mounts ?? []).map((m) => ({ ...m })),
+    env: (s.env ?? []).map((e) => ({ ...e, rid: crypto.randomUUID() })),
+    mounts: (s.mounts ?? []).map((m) => ({ ...m, rid: crypto.randomUUID() })),
     memLimitMb: s.memLimitMb ? String(s.memLimitMb) : '',
     cpuLimit: s.cpuLimit ? String(s.cpuLimit) : '',
     restartPolicy: s.restartPolicy || 'unless-stopped',
     gpu: !!s.gpu, nodeId: s.nodeId,
   };
+}
+
+// Client-side validation that runs before a save leaves the browser. It exists
+// so bad input fails loudly next to the field that caused it — never silently
+// dropped (the old behavior for a valued env row with no key).
+interface DraftErrors {
+  port?: string;
+  containerPort?: string;
+  ports?: string;
+  /** rid → message, for env rows whose value would be lost on save. */
+  env: Record<string, string>;
+}
+
+const NO_ERRORS: DraftErrors = { env: {} };
+
+function validPort(v: string): boolean {
+  const n = parseInt(v, 10);
+  return Number.isFinite(n) && n >= 1 && n <= 65535;
+}
+
+function validateDraft(d: Draft): DraftErrors {
+  const errs: DraftErrors = { env: {} };
+  if (d.containerPort && !validPort(d.containerPort)) errs.containerPort = 'Ports run from 1 to 65535.';
+  if (d.port && !validPort(d.port)) errs.port = 'Ports run from 1 to 65535.';
+  if (d.ports.trim()) {
+    const parts = d.ports.split(',').map((p) => p.trim()).filter(Boolean);
+    if (parts.length === 0 || parts.some((p) => !/^\d+$/.test(p) || !validPort(p))) {
+      errs.ports = 'Comma-separated port numbers, each between 1 and 65535.';
+    }
+  }
+  for (const row of d.env) {
+    // A fully blank row is dropped harmlessly on save; a valued row with no
+    // key would lose data, so it blocks the save instead of vanishing.
+    if (!row.key.trim() && row.value !== '') {
+      errs.env[row.rid] = 'This value has no name — add a KEY or remove the row.';
+    }
+  }
+  return errs;
+}
+
+function hasDraftErrors(e: DraftErrors): boolean {
+  return !!(e.port || e.containerPort || e.ports) || Object.keys(e.env).length > 0;
 }
 
 export function AppDetail() {
@@ -49,65 +98,96 @@ export function AppDetail() {
   const navigate = useNavigate();
   const toast = useToast();
   const confirm = useConfirm();
-  const { nodes, ingress, refresh, nodeName } = useData();
+  const { nodes, services, ingress, refresh, nodeName } = useData();
 
   const [svc, setSvc] = useState<Service | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [baseline, setBaseline] = useState('');
   // busyAction: which action ('start' | 'stop' | 'restart' | 'redeploy' |
-  // 'delete' | 'save') is in flight — all action buttons disable, the active
-  // one spins. Empty string = idle.
+  // 'delete' | 'save' | 'saveRedeploy') is in flight — all action buttons
+  // disable, only the active one spins. Empty string = idle.
   const [busyAction, setBusyAction] = useState('');
-  const [notFound, setNotFound] = useState(false);
+  // The raw error string from a failed load. Kept raw (not cleaned) so the
+  // render can tell a 404 (the app is gone) from a transient read failure.
+  const [loadFailed, setLoadFailed] = useState<string | null>(null);
+  // Validation errors stay invisible until a save is attempted, then update
+  // live as the user types (they derive from the draft).
+  const [showErrors, setShowErrors] = useState(false);
   // Actions stay locked through the whole deploy window: from the moment a
   // request is accepted until the machine reports the container running (or
   // failed). svc.status refreshes on a 4s poll, so the lock releases itself.
   const working = svc?.status === 'building' || svc?.status === 'pending';
   const busy = busyAction !== '' || working;
 
-  const load = useCallback(() => {
-    api.service(id).then((s) => {
-      setSvc(s);
-      const d = toDraft(s);
-      setDraft(d);
-      setBaseline(JSON.stringify(d));
-    }).catch(() => setNotFound(true));
-  }, [id]);
-  useEffect(load, [load]);
+  const hydrate = useCallback((s: Service) => {
+    setSvc(s);
+    setLoadFailed(null);
+    const d = toDraft(s);
+    setDraft(d);
+    setBaseline(JSON.stringify(d));
+  }, []);
 
-  // Live status refresh (never clobbers the draft being edited).
+  const load = useCallback(() => {
+    api.service(id).then(hydrate).catch((e) => setLoadFailed(String(e)));
+  }, [id, hydrate]);
+
+  // Reset everything when the route points at a different app, so the old
+  // app's data never flashes under the new one's URL.
+  useEffect(() => {
+    setSvc(null); setDraft(null); setBaseline('');
+    setLoadFailed(null); setShowErrors(false); setBusyAction('');
+    load();
+  }, [load]);
+
+  // Live status refresh (never clobbers the draft being edited). If the first
+  // load failed, the poll doubles as automatic recovery and seeds the page.
+  const draftRef = useRef<Draft | null>(null);
+  draftRef.current = draft;
   useEffect(() => {
     const t = setInterval(() => {
-      api.service(id).then((s) => setSvc(s)).catch(() => {});
+      api.service(id).then((s) => {
+        if (draftRef.current) { setSvc(s); setLoadFailed(null); } else { hydrate(s); }
+      }).catch(() => {});
     }, 4000);
     return () => clearInterval(t);
-  }, [id]);
+  }, [id, hydrate]);
 
   const dirty = useMemo(() => draft && JSON.stringify(draft) !== baseline, [draft, baseline]);
   const node = nodes.find((n) => n.id === svc?.nodeId);
   const urls = svc ? publicUrls(svc, ingress) : [];
 
+  const draftErrors = useMemo(() => (draft ? validateDraft(draft) : NO_ERRORS), [draft]);
+  const visibleErrors = showErrors ? draftErrors : NO_ERRORS;
+
   const save = async (redeploy: boolean) => {
     if (!draft || !svc) return;
-    setBusyAction('save');
+    if (hasDraftErrors(draftErrors)) {
+      setShowErrors(true);
+      const where = [
+        Object.keys(draftErrors.env).length > 0 && 'environment variables (Settings tab)',
+        (draftErrors.port || draftErrors.containerPort || draftErrors.ports) && 'ports (Networking tab)',
+      ].filter(Boolean).join(' and ');
+      toast.err(`Nothing was saved — fix the ${where} first.`);
+      return;
+    }
+    setBusyAction(redeploy ? 'saveRedeploy' : 'save');
     try {
       const upd: ServiceUpdate = {
         image: draft.image, command: draft.command,
         port: parseInt(draft.port, 10) || 0,
         containerPort: parseInt(draft.containerPort, 10) || 0,
         ports: draft.ports.split(',').map((p) => parseInt(p.trim(), 10)).filter((p) => p > 0),
-        env: draft.env.filter((e) => e.key),
-        mounts: draft.mounts.filter((m) => m.target),
+        env: draft.env.filter((e) => e.key).map((e) => ({ key: e.key, value: e.value, secret: e.secret })),
+        mounts: draft.mounts.filter((m) => m.target)
+          .map((m) => ({ type: m.type, source: m.source, target: m.target, readOnly: m.readOnly, drivePath: m.drivePath })),
         memLimitMb: parseInt(draft.memLimitMb, 10) || 0,
         cpuLimit: parseFloat(draft.cpuLimit) || 0,
         restartPolicy: draft.restartPolicy, gpu: draft.gpu,
         nodeId: draft.nodeId, redeploy,
       };
       const s = await api.updateService(svc.id, upd);
-      setSvc(s);
-      const d = toDraft(s);
-      setDraft(d);
-      setBaseline(JSON.stringify(d));
+      hydrate(s);
+      setShowErrors(false);
       refresh();
       toast.ok(redeploy ? 'Saved — redeploying now.' : 'Saved. Changes apply on the next redeploy.');
     } catch (e) { toast.err(cleanError(e)); }
@@ -122,7 +202,7 @@ export function AppDetail() {
         const yes = await confirm({
           title: `Remove ${svc.name}?`,
           body: 'The container is deleted from its machine. Data in managed volumes stays on disk under rackops-volumes/.',
-          confirmLabel: 'Remove app', danger: true,
+          confirmLabel: 'Remove app', danger: true, expect: svc.name,
         });
         if (yes) {
           await api.deleteService(svc.id);
@@ -140,33 +220,80 @@ export function AppDetail() {
     setBusyAction('');
   };
 
-  if (notFound) {
+  // Load failure before anything rendered. A 404 for an app the fleet no
+  // longer knows means it's really gone; everything else (network failure,
+  // 5xx, or a 404 the fleet contradicts) is a read problem worth retrying —
+  // telling someone their app "doesn't exist anymore" over a flaky connection
+  // is the one message this page must never get wrong.
+  if ((!svc || !draft) && loadFailed) {
+    const gone = /^Error:\s*404\b/.test(loadFailed) && !services.some((s) => s.id === id);
+    if (gone) {
+      return (
+        <div className="page">
+          <EmptyState icon={<Box size={18} />} title="This app doesn't exist anymore">
+            <div style={{ marginBottom: 14 }}>It was removed — from another session, or by someone else in this org.</div>
+            <Link to="/apps" className="btn">Back to apps</Link>
+          </EmptyState>
+        </div>
+      );
+    }
     return (
       <div className="page">
-        <div className="empty">
-          <div className="empty-title">This app doesn't exist anymore</div>
-          <Link to="/apps" className="btn" style={{ marginTop: 10 }}>Back to apps</Link>
+        <div className="card crit" style={{ maxWidth: 520 }}>
+          <div className="row" style={{ marginBottom: 8 }}>
+            <TriangleAlert size={15} style={{ color: 'var(--crit)' }} aria-hidden />
+            <strong>Couldn&rsquo;t load this app</strong>
+          </div>
+          <div className="dim" style={{ marginBottom: 14 }}>
+            {cleanError(loadFailed)} — the app itself is probably fine; this page just couldn&rsquo;t read its record.
+            It also retries on its own every few seconds.
+          </div>
+          <div className="row">
+            <button className="btn primary" onClick={() => { setLoadFailed(null); load(); }}>Retry now</button>
+            <Link to="/apps" className="btn ghost">Back to apps</Link>
+          </div>
         </div>
       </div>
     );
   }
-  if (!svc || !draft) return <div className="page"><div className="row dim"><Spinner /> loading…</div></div>;
+
+  if (!svc || !draft) {
+    return (
+      <div className="page">
+        <div className="row" style={{ marginBottom: 18 }} aria-hidden>
+          <Skeleton height={24} width={240} radius="var(--r-md)" />
+          <Skeleton height={18} width={84} radius={20} />
+        </div>
+        <SkeletonRows count={4} height={64} />
+        <span className="sr-only">Loading app…</span>
+      </div>
+    );
+  }
 
   return (
     <div className="page">
       <div className="row spread wrap" style={{ marginBottom: 4 }}>
         <div className="row">
-          <button className="btn sm ghost" onClick={() => navigate('/apps')} aria-label="Back to apps"><ArrowLeft size={14} /></button>
+          <button className="btn sm ghost" onClick={() => navigate('/apps')}
+            aria-label="Back to apps" title="Back to apps"><ArrowLeft size={14} /></button>
           <div className="page-title" style={{ margin: 0 }}>{svc.name}</div>
           <StatusBadge status={svc.status} />
-          {svc.adopted && <span className="tag" title="This container was already running on the machine — RackOps adopted it so you can manage it here.">adopted</span>}
+          {svc.adopted && (
+            <span className="tag">
+              adopted
+              <InfoTip wide>
+                This container was already running on the machine — RackOps adopted it so you can
+                manage it here. Start, stop, and remove work; its build configuration stays read-only.
+              </InfoTip>
+            </span>
+          )}
           {svc.templateId && <span className="tag">{svc.templateId}</span>}
         </div>
         <div className="row">
           <button className="btn sm" disabled={busy} onClick={() => act(svc.status === 'running' ? 'stop' : 'start')}>
             {busyAction === 'stop' || busyAction === 'start' ? <Spinner size={12} />
               : svc.status === 'running' ? <Square size={12} /> : <Play size={12} />}
-            {svc.status === 'running' ? ' Stop' : ' Start'}
+            {svc.status === 'running' ? 'Stop' : 'Start'}
           </button>
           <button className="btn sm" disabled={busy} onClick={() => act('restart')}>
             {busyAction === 'restart' ? <Spinner size={12} /> : <RotateCw size={12} />} Restart
@@ -184,11 +311,14 @@ export function AppDetail() {
       </div>
 
       {dirty && (
-        <div className="card row spread" style={{ borderColor: 'var(--warn)', marginBottom: 14, padding: '10px 16px' }}>
-          <span className="dim">
-            {svc.adopted
-              ? 'Adopted apps can’t be rebuilt from here — config edits won’t take effect. Manage this container where it was created.'
-              : 'Unsaved changes — the app keeps running until you apply them.'}
+        <div className="dirty-banner" role="status">
+          <span className="row" style={{ flex: 1, minWidth: 220, gap: 8 }}>
+            <TriangleAlert size={14} style={{ color: 'var(--warn)', flex: 'none' }} aria-hidden />
+            <span>
+              {svc.adopted
+                ? 'Adopted apps can’t be rebuilt from here — config edits won’t take effect. Manage this container where it was created.'
+                : 'Unsaved changes — the app keeps running until you apply them.'}
+            </span>
           </span>
           <div className="row">
             <button className="btn sm" disabled={busy} onClick={() => setDraft(JSON.parse(baseline))}>Discard</button>
@@ -199,7 +329,7 @@ export function AppDetail() {
             )}
             {!svc.adopted && (
               <button className="btn sm primary" disabled={busy} onClick={() => save(true)}>
-                {busyAction === 'save' ? <Spinner size={12} /> : <Rocket size={12} />} Save & redeploy
+                {busyAction === 'saveRedeploy' ? <Spinner size={12} /> : <Rocket size={12} />} Save &amp; redeploy
               </button>
             )}
           </div>
@@ -215,11 +345,12 @@ export function AppDetail() {
       </div>
 
       {tab === 'overview' && <OverviewTab svc={svc} nodeLabel={node?.name ?? svc.nodeId} urls={urls.map((u) => u.url)} />}
-      {tab === 'networking' && <NetworkingTab svc={svc} draft={draft} setDraft={setDraft} reload={load} />}
+      {tab === 'networking' && <NetworkingTab svc={svc} draft={draft} setDraft={setDraft} reload={load} errors={visibleErrors} />}
       {tab === 'logs' && <LogsTab svc={svc} />}
       {tab === 'deployments' && <DeploymentsTab serviceId={svc.id} />}
       {tab === 'settings' && (
-        <SettingsTab svc={svc} draft={draft} setDraft={setDraft} nodes={nodes} busy={busy} onDelete={() => act('delete')} />
+        <SettingsTab svc={svc} draft={draft} setDraft={setDraft} nodes={nodes} busy={busy}
+          deleting={busyAction === 'delete'} envErrors={visibleErrors.env} onDelete={() => act('delete')} />
       )}
     </div>
   );
@@ -231,30 +362,26 @@ function OverviewTab({ svc, nodeLabel, urls }: { svc: Service; nodeLabel: string
   return (
     <>
       <div className="kpi-row">
-        <div className="card"><div className="eyebrow">CPU</div><div className="kpi-value">{svc.cpuPct.toFixed(1)}<span className="unit">%</span></div></div>
-        <div className="card"><div className="eyebrow">Memory</div><div className="kpi-value">{svc.memUsedMb}<span className="unit">MB{svc.memLimitMb ? ` / ${svc.memLimitMb}` : ''}</span></div></div>
-        <div className="card"><div className="eyebrow">Port</div><div className="kpi-value">{svc.port || '—'}</div></div>
-        <div className="card"><div className="eyebrow">Machine</div><div className="kpi-value" style={{ fontSize: 16 }}>{nodeLabel}</div></div>
+        <Kpi label="CPU" value={svc.cpuPct.toFixed(1)} unit="%" />
+        <Kpi label="Memory" value={svc.memUsedMb} unit={`MB${svc.memLimitMb ? ` / ${svc.memLimitMb}` : ''}`} />
+        <Kpi label="Port" value={svc.port || '—'} />
+        <Kpi label="Machine" value={nodeLabel} />
       </div>
 
       <div className="card">
         <div className="eyebrow" style={{ marginBottom: 10 }}>Details</div>
-        <table style={{ borderCollapse: 'collapse', width: '100%' }}>
-          <tbody>
-            {[
-              ['Source', svc.image || svc.gitRepo || `${svc.kind} stack`],
-              ['Public URLs', urls.length ? urls.join('  ·  ') : 'none yet — set one up in Networking'],
-              ['Container', svc.containerId || 'not created yet'],
-              ['Restart policy', svc.restartPolicy || 'unless-stopped'],
-              ['Created', `${new Date(svc.createdAt).toLocaleString()} (${timeAgo(svc.createdAt)})`],
-            ].map(([k, v]) => (
-              <tr key={k as string}>
-                <td className="dim" style={{ padding: '7px 24px 7px 0', whiteSpace: 'nowrap', verticalAlign: 'top' }}>{k}</td>
-                <td className="mono" style={{ padding: '7px 0', fontSize: 12, wordBreak: 'break-all' }}>{v}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <dl className="kv">
+          <dt>Source</dt>
+          <dd>{svc.image || svc.gitRepo || `${svc.kind} stack`}</dd>
+          <dt>Public URLs</dt>
+          <dd>{urls.length ? urls.join(' · ') : 'none yet — set one up in Networking'}</dd>
+          <dt>Container</dt>
+          <dd>{svc.containerId || 'not created yet'}</dd>
+          <dt>Restart policy</dt>
+          <dd>{svc.restartPolicy || 'unless-stopped'}</dd>
+          <dt>Created</dt>
+          <dd>{new Date(svc.createdAt).toLocaleString()} ({timeAgo(svc.createdAt)})</dd>
+        </dl>
       </div>
     </>
   );
@@ -262,17 +389,22 @@ function OverviewTab({ svc, nodeLabel, urls }: { svc: Service; nodeLabel: string
 
 /* ---------- Networking: the make-it-public journey ---------- */
 
-function NetworkingTab({ svc, draft, setDraft, reload }: {
+function NetworkingTab({ svc, draft, setDraft, reload, errors }: {
   svc: Service; draft: Draft; setDraft: (d: Draft) => void; reload: () => void;
+  errors: DraftErrors;
 }) {
   const toast = useToast();
   const { nodes, ingress, refresh } = useData();
   const [domains, setDomains] = useState<Domain[]>([]);
+  const [domainsLoaded, setDomainsLoaded] = useState(false);
   const [tunnelBusy, setTunnelBusy] = useState(false);
   const [exposeBusy, setExposeBusy] = useState(false);
   const node = nodes.find((n) => n.id === svc.nodeId);
+  const readOnly = !!svc.adopted;
 
-  useEffect(() => { api.domains().then((d) => setDomains(d ?? [])).catch(() => {}); }, []);
+  useEffect(() => {
+    api.domains().then((d) => { setDomains(d ?? []); setDomainsLoaded(true); }).catch(() => {});
+  }, []);
 
   // While a tunnel is starting, its URL lands via the 4s status refresh.
   useEffect(() => { if (svc.quickTunnelUrl) setTunnelBusy(false); }, [svc.quickTunnelUrl]);
@@ -313,6 +445,10 @@ function NetworkingTab({ svc, draft, setDraft, reload }: {
 
   const edgeReady = ingress?.enabled && ingress.status === 'running';
   const currentIsWildcard = domains.find((d) => d.wildcard && (svc.domain || '').endsWith('.' + d.name.slice(2)));
+  // The domain the select currently points at (wildcard parent or exact
+  // match), so an unverified pick gets a visible warning instead of a route
+  // that silently never works.
+  const selectedDomain = currentIsWildcard ?? domains.find((d) => d.name === svc.domain);
 
   return (
     <>
@@ -342,7 +478,7 @@ function NetworkingTab({ svc, draft, setDraft, reload }: {
             {/* Option 1: instant URL */}
             <div className="row spread" style={{ alignItems: 'flex-start' }}>
               <div>
-                <div className="row" style={{ gap: 7 }}><Zap size={13} style={{ color: 'var(--amber)' }} /><strong>Instant URL</strong></div>
+                <div className="row" style={{ gap: 7 }}><Zap size={13} style={{ color: 'var(--accent)' }} aria-hidden /><strong>Instant URL</strong></div>
                 <div className="dim" style={{ marginTop: 3 }}>
                   A free {`<app>.<ip>.nip.io`} address through your own edge — no DNS setup.
                   {!edgeReady && ' Needs the edge proxy running (Network page).'}
@@ -357,7 +493,7 @@ function NetworkingTab({ svc, draft, setDraft, reload }: {
             {/* Option 2: quick tunnel */}
             <div className="row spread" style={{ alignItems: 'flex-start' }}>
               <div>
-                <div className="row" style={{ gap: 7 }}><Cloud size={13} style={{ color: 'var(--amber)' }} /><strong>Quick tunnel</strong></div>
+                <div className="row" style={{ gap: 7 }}><Cloud size={13} style={{ color: 'var(--accent)' }} aria-hidden /><strong>Quick tunnel</strong></div>
                 <div className="dim" style={{ marginTop: 3 }}>
                   Public HTTPS URL that works behind any router — no account, no port forwarding.
                   For demos and testing: the URL changes when it restarts.
@@ -381,13 +517,14 @@ function NetworkingTab({ svc, draft, setDraft, reload }: {
 
             {/* Option 3: own domain */}
             <div>
-              <div className="row" style={{ gap: 7 }}><Globe size={13} style={{ color: 'var(--amber)' }} /><strong>Your own domain</strong></div>
+              <div className="row" style={{ gap: 7 }}><Globe size={13} style={{ color: 'var(--accent)' }} aria-hidden /><strong>Your own domain</strong></div>
               <div className="dim" style={{ margin: '3px 0 10px' }}>
                 Route a domain you own to this app.
-                {domains.length === 0 && <> First <Link to="/network">add the domain</Link> so RackOps can give you the DNS record.</>}
+                {domainsLoaded && domains.length === 0 && <> First <Link to="/network">add the domain</Link> so RackOps can give you the DNS record.</>}
               </div>
               <div className="row wrap">
-                <select className="input" style={{ width: 320 }} aria-label={`Domain route for ${svc.name}`}
+                <select className="input" style={{ flex: '1 1 240px', maxWidth: 380 }}
+                  aria-label={`Domain route for ${svc.name}`}
                   value={currentIsWildcard?.name ?? (svc.domain || '')}
                   onChange={(e) => {
                     let host = e.target.value;
@@ -406,6 +543,12 @@ function NetworkingTab({ svc, draft, setDraft, reload }: {
                 </select>
                 {svc.domain && <span className="dim mono">current: {svc.domain}</span>}
               </div>
+              {selectedDomain && selectedDomain.status !== 'verified' && (
+                <div style={{ color: 'var(--warn)', fontSize: 12, marginTop: 6 }}>
+                  This domain hasn&rsquo;t verified yet — routing won&rsquo;t work until it does.{' '}
+                  <Link to="/network">Check its DNS on the Network page</Link>.
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -422,22 +565,28 @@ function NetworkingTab({ svc, draft, setDraft, reload }: {
             Save &amp; redeploy.
           </InfoTip>
         </div>
+        {readOnly && (
+          <div className="dim" style={{ marginBottom: 12 }}>
+            Adopted app — ports are managed where this container was created, so these fields are read-only.
+          </div>
+        )}
         <div className="grid-3">
-          <Field label="App listens on (container)" style={{ marginBottom: 0 }}>
+          <Field label="App listens on (container)" style={{ marginBottom: 0 }} error={errors.containerPort}>
             {(p) => (
-              <input className="input mono" {...p} inputMode="numeric" placeholder="e.g. 3000" value={draft.containerPort}
+              <input className="input mono" {...p} inputMode="numeric" placeholder="e.g. 3000"
+                value={draft.containerPort} readOnly={readOnly}
                 onChange={(e) => setDraft({ ...draft, containerPort: e.target.value.replace(/\D/g, '') })} />
             )}
           </Field>
-          <Field label="Reachable on host port" style={{ marginBottom: 0 }}>
+          <Field label="Reachable on host port" style={{ marginBottom: 0 }} error={errors.port}>
             {(p) => (
-              <input className="input mono" {...p} inputMode="numeric" value={draft.port}
+              <input className="input mono" {...p} inputMode="numeric" value={draft.port} readOnly={readOnly}
                 onChange={(e) => setDraft({ ...draft, port: e.target.value.replace(/\D/g, '') })} />
             )}
           </Field>
-          <Field label="Extra ports (comma-separated)" style={{ marginBottom: 0 }}>
+          <Field label="Extra ports (comma-separated)" style={{ marginBottom: 0 }} error={errors.ports}>
             {(p) => (
-              <input className="input mono" {...p} placeholder="9000, 5432" value={draft.ports}
+              <input className="input mono" {...p} placeholder="9000, 5432" value={draft.ports} readOnly={readOnly}
                 onChange={(e) => setDraft({ ...draft, ports: e.target.value })} />
             )}
           </Field>
@@ -534,8 +683,8 @@ function LogsTab({ svc }: { svc: Service }) {
             Untick it for a one-shot snapshot. &ldquo;Clear old&rdquo; only hides output before
             this moment in the dashboard — nothing is deleted from the machine.
           </InfoTip>
-          {follow && live && <span className="badge amber">live</span>}
-          {follow && !live && <span className="badge">connecting…</span>}
+          {follow && live && <span className="badge accent">live</span>}
+          {follow && !live && <span className="badge neutral">connecting…</span>}
         </div>
         <div className="row">
           <label className="check">
@@ -567,14 +716,26 @@ function LogsTab({ svc }: { svc: Service }) {
 
 function DeploymentsTab({ serviceId }: { serviceId: string }) {
   const [deployments, setDeployments] = useState<Deployment[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
   const [open, setOpen] = useState('');
   // Live build output per deployment id, streamed while a deploy is in flight.
   const [liveLogs, setLiveLogs] = useState<Record<string, string>>({});
 
-  const fetch = useCallback(() => {
-    api.serviceDeployments(serviceId).then((d) => setDeployments(d ?? [])).catch(() => {});
+  const fetchList = useCallback(async () => {
+    try {
+      const d = await api.serviceDeployments(serviceId);
+      setDeployments(d ?? []);
+      setLoaded(true);
+      setError('');
+    } catch (e) {
+      // Keep whatever list we already have; the error line + refresh button
+      // say why it may be stale. Never shown as an empty history.
+      setError(cleanError(e));
+    }
   }, [serviceId]);
-  useEffect(fetch, [fetch]);
+  useEffect(() => { fetchList(); }, [fetchList]);
 
   // Append deploy build output as it streams (stream id == deployment id).
   useEffect(() => {
@@ -582,89 +743,130 @@ function DeploymentsTab({ serviceId }: { serviceId: string }) {
       (c: LogChunk) => c.kind === 'deploy' && c.serviceId === serviceId,
       (c: LogChunk) => {
         if (c.text) setLiveLogs((prev) => ({ ...prev, [c.stream]: (prev[c.stream] || '') + c.text }));
-        if (c.end) fetch(); // pull the finalized record + status
+        if (c.end) fetchList(); // pull the finalized record + status
       },
     );
     return unsub;
-  }, [serviceId, fetch]);
+  }, [serviceId, fetchList]);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await fetchList();
+    setRefreshing(false);
+  };
 
   return (
     <div className="card">
       <div className="row spread" style={{ marginBottom: 10 }}>
-        <strong>Deployment history</strong>
-        <InfoTip>
-          Every build and deploy of this app, newest first, with its full output. A deploy in
-          progress streams its log live — click any row to expand it.
-        </InfoTip>
-        <button className="btn sm" onClick={fetch}><RotateCw size={12} /></button>
+        <div className="row" style={{ gap: 4 }}>
+          <strong>Deployment history</strong>
+          <InfoTip>
+            Every build and deploy of this app, newest first, with its full output. A deploy in
+            progress streams its log live — click any row to expand it.
+          </InfoTip>
+        </div>
+        <button className="btn sm" disabled={refreshing} onClick={onRefresh}
+          aria-label="Refresh deployment history" title="Refresh deployment history">
+          {refreshing ? <Spinner size={12} /> : <RotateCw size={12} />}
+        </button>
       </div>
-      {deployments.map((d) => {
-        const live = liveLogs[d.id];
-        const building = d.status === 'building' || d.status === 'pending';
-        return (
-          <div key={d.id} style={{ borderTop: '1px solid var(--border)', padding: '9px 0' }}>
-            <button type="button" className="row spread disclosure" style={{ width: '100%' }}
-              aria-expanded={open === d.id || building} aria-controls={`deploy-${d.id}`}
-              onClick={() => setOpen(open === d.id ? '' : d.id)}>
-              <div className="row">
-                <Led status={d.status} />
-                <span className="mono">v{d.version}</span>
-                <span className="tag">{d.trigger}</span>
-                <span className="dim">{d.status}</span>
-                {building && live && <span className="badge amber">live</span>}
+      {error && (
+        <div className="field-error" style={{ marginBottom: 8 }}>
+          couldn&rsquo;t {loaded ? 'refresh' : 'load'} deployments: {error}
+        </div>
+      )}
+      {!loaded && !error && <SkeletonRows count={3} height={38} />}
+      {loaded && deployments.length > 0 && (
+        <div className="list">
+          {deployments.map((d) => {
+            const live = liveLogs[d.id];
+            const building = d.status === 'building' || d.status === 'pending';
+            const expanded = open === d.id || building;
+            return (
+              <div key={d.id} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
+                <button type="button" className="row spread disclosure"
+                  aria-expanded={expanded} aria-controls={`deploy-${d.id}`}
+                  onClick={() => setOpen(open === d.id ? '' : d.id)}>
+                  <div className="row">
+                    <Led status={d.status} />
+                    <span className="mono">v{d.version}</span>
+                    <span className="tag">{d.trigger}</span>
+                    <span className="dim">{d.status}</span>
+                    {building && live && <span className="badge accent">live</span>}
+                  </div>
+                  <span className="faint">{new Date(d.startedAt).toLocaleString()} · {(d.durationMs / 1000).toFixed(1)}s</span>
+                </button>
+                {expanded && (
+                  <div className="terminal" id={`deploy-${d.id}`} style={{ maxHeight: 420 }}>
+                    {live || d.log || (building ? 'waiting for the machine to pick up the job…' : '(no build log)')}
+                  </div>
+                )}
               </div>
-              <span className="faint">{new Date(d.startedAt).toLocaleString()} · {(d.durationMs / 1000).toFixed(1)}s</span>
-            </button>
-            {(open === d.id || building) && (
-              <div className="terminal" id={`deploy-${d.id}`} style={{ marginTop: 8, maxHeight: 420 }}>
-                {live || d.log || (building ? 'waiting for the machine to pick up the job…' : '(no build log)')}
-              </div>
-            )}
-          </div>
-        );
-      })}
-      {deployments.length === 0 && <div className="faint">No deployments recorded yet.</div>}
+            );
+          })}
+        </div>
+      )}
+      {loaded && deployments.length === 0 && <div className="faint">No deployments recorded yet.</div>}
     </div>
   );
 }
 
 /* ---------- Settings (all editable config + danger zone) ---------- */
 
-function SettingsTab({ svc, draft, setDraft, nodes, busy, onDelete }: {
+function SettingsTab({ svc, draft, setDraft, nodes, busy, deleting, envErrors, onDelete }: {
   svc: Service; draft: Draft; setDraft: (d: Draft) => void;
-  nodes: ReturnType<typeof useData>['nodes']; busy: boolean; onDelete: () => void;
+  nodes: ReturnType<typeof useData>['nodes']; busy: boolean; deleting: boolean;
+  envErrors: Record<string, string>; onDelete: () => void;
 }) {
   const toast = useToast();
   const [scores, setScores] = useState<PlacementScore[]>([]);
-  const [browse, setBrowse] = useState<{ mountIdx: number; path: string; entries: DirEntry[] } | null>(null);
+  const [browse, setBrowse] = useState<{ mountRid: string; path: string; entries: DirEntry[] } | null>(null);
   const drives = (nodes.find((n) => n.id === draft.nodeId)?.hardware.drives ?? []).filter((d) => d.mountPoint);
+  // Adopted containers are managed where they were created: their config is
+  // shown read-only up front instead of accepting edits that could never
+  // apply. Lifecycle (start/stop/remove) still works from the header.
+  const readOnly = !!svc.adopted;
 
   useEffect(() => { api.placement({}).then(setScores).catch(() => {}); }, []);
 
-  const setMount = (i: number, patch: Partial<Mount>) =>
-    setDraft({ ...draft, mounts: draft.mounts.map((m, j) => (j === i ? { ...m, ...patch } : m)) });
+  const setEnv = (rid: string, patch: Partial<EnvVar>) =>
+    setDraft({ ...draft, env: draft.env.map((v) => (v.rid === rid ? { ...v, ...patch } : v)) });
 
-  const openBrowser = async (mountIdx: number, start?: string) => {
+  const setMount = (rid: string, patch: Partial<Mount>) =>
+    setDraft({ ...draft, mounts: draft.mounts.map((m) => (m.rid === rid ? { ...m, ...patch } : m)) });
+
+  const openBrowser = async (mountRid: string, start?: string) => {
     try {
       const r = await api.nodeFS(draft.nodeId, start ?? '/');
-      setBrowse({ mountIdx, path: r.path, entries: r.entries ?? [] });
+      setBrowse({ mountRid, path: r.path, entries: r.entries ?? [] });
     } catch (e) { toast.err(cleanError(e)); }
   };
 
   return (
     <div className="stack">
+      {readOnly && (
+        <div className="card inset row" style={{ gap: 10, padding: '10px 14px' }}>
+          <Info size={14} style={{ color: 'var(--accent)', flex: 'none' }} aria-hidden />
+          <span className="dim">
+            This container was adopted — it already existed on the machine. Start, stop, and remove
+            work here, but its configuration lives where it was created, so these settings are read-only.
+          </span>
+        </div>
+      )}
+
       <div className="card">
         <div className="eyebrow" style={{ marginBottom: 12 }}>Source</div>
         <div className="grid-2">
           <Field label="Image">
             {(p) => (
-              <input className="input mono" {...p} value={draft.image} placeholder={svc.gitRepo ? 'built from git' : 'image:tag'}
+              <input className="input mono" {...p} value={draft.image} readOnly={readOnly}
+                placeholder={svc.gitRepo ? 'built from git' : 'image:tag'}
                 onChange={(e) => setDraft({ ...draft, image: e.target.value })} />
             )}
           </Field>
           <Field label="Command override">
             {(p) => (
-              <input className="input mono" {...p} value={draft.command} placeholder="(image default)"
+              <input className="input mono" {...p} value={draft.command} readOnly={readOnly} placeholder="(image default)"
                 onChange={(e) => setDraft({ ...draft, command: e.target.value })} />
             )}
           </Field>
@@ -681,23 +883,34 @@ function SettingsTab({ svc, draft, setDraft, nodes, busy, onDelete }: {
           </InfoTip>
         </div>
         {draft.env.map((v, i) => (
-          <div className="row" key={i} style={{ marginBottom: 8 }}>
-            <input className="input mono" placeholder="KEY" value={v.key} aria-label={`Variable ${i + 1} name`}
-              onChange={(e) => setDraft({ ...draft, env: draft.env.map((x, j) => (j === i ? { ...x, key: e.target.value } : x)) })} />
-            <input className="input mono" placeholder="value" type={v.secret ? 'password' : 'text'} value={v.value}
-              aria-label={v.key ? `Value for ${v.key}` : `Variable ${i + 1} value`}
-              onChange={(e) => setDraft({ ...draft, env: draft.env.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)) })} />
-            <button className="btn sm" aria-pressed={v.secret}
-              title={v.secret ? 'Shown as secret' : 'Mask as secret'}
-              aria-label={v.secret ? `Stop masking ${v.key || 'this variable'}` : `Mask ${v.key || 'this variable'} as secret`}
-              onClick={() => setDraft({ ...draft, env: draft.env.map((x, j) => (j === i ? { ...x, secret: !x.secret } : x)) })}>
-              <KeyRound size={12} style={v.secret ? { color: 'var(--amber)' } : undefined} />
-            </button>
-            <button className="btn sm danger" aria-label={`Remove ${v.key || `variable ${i + 1}`}`}
-              onClick={() => setDraft({ ...draft, env: draft.env.filter((_, j) => j !== i) })}><Trash2 size={12} /></button>
+          <div key={v.rid} style={{ marginBottom: 8 }}>
+            <div className="row">
+              <input className="input mono" placeholder="KEY" value={v.key} readOnly={readOnly}
+                aria-label={`Variable ${i + 1} name`}
+                aria-invalid={!!envErrors[v.rid]}
+                aria-describedby={envErrors[v.rid] ? `env-err-${v.rid}` : undefined}
+                onChange={(e) => setEnv(v.rid, { key: e.target.value })} />
+              <input className="input mono" placeholder="value" type={v.secret ? 'password' : 'text'}
+                value={v.value} readOnly={readOnly}
+                aria-label={v.key ? `Value for ${v.key}` : `Variable ${i + 1} value`}
+                onChange={(e) => setEnv(v.rid, { value: e.target.value })} />
+              <button className="btn sm" aria-pressed={v.secret} disabled={readOnly}
+                title={v.secret ? 'Shown as secret' : 'Mask as secret'}
+                aria-label={v.secret ? `Stop masking ${v.key || 'this variable'}` : `Mask ${v.key || 'this variable'} as secret`}
+                onClick={() => setEnv(v.rid, { secret: !v.secret })}>
+                <KeyRound size={12} style={v.secret ? { color: 'var(--accent)' } : undefined} />
+              </button>
+              <button className="btn sm danger" disabled={readOnly}
+                aria-label={`Remove ${v.key || `variable ${i + 1}`}`}
+                onClick={() => setDraft({ ...draft, env: draft.env.filter((x) => x.rid !== v.rid) })}><Trash2 size={12} /></button>
+            </div>
+            {envErrors[v.rid] && (
+              <div className="field-error" id={`env-err-${v.rid}`} style={{ marginTop: 4 }}>{envErrors[v.rid]}</div>
+            )}
           </div>
         ))}
-        <button className="btn sm" onClick={() => setDraft({ ...draft, env: [...draft.env, { key: '', value: '', secret: false }] })}>
+        <button className="btn sm" disabled={readOnly}
+          onClick={() => setDraft({ ...draft, env: [...draft.env, { rid: crypto.randomUUID(), key: '', value: '', secret: false }] })}>
           <Plus size={12} /> Add variable
         </button>
       </div>
@@ -709,31 +922,32 @@ function SettingsTab({ svc, draft, setDraft, nodes, busy, onDelete }: {
           RackOps, optionally on a specific drive. Changes apply on Save & redeploy.
         </div>
         {draft.mounts.map((m, i) => (
-          <div className="card inset" key={i} style={{ marginBottom: 10 }}>
+          <div className="card inset" key={m.rid} style={{ marginBottom: 10 }}>
             <div className="row" style={{ marginBottom: 8 }}>
-              <select className="input" style={{ width: 150 }} value={m.type} aria-label={`Mount ${i + 1} type`}
-                onChange={(e) => setMount(i, { type: e.target.value as Mount['type'], source: '', drivePath: '' })}>
+              <select className="input" style={{ flex: '0 1 150px', minWidth: 120 }} value={m.type}
+                aria-label={`Mount ${i + 1} type`} disabled={readOnly}
+                onChange={(e) => setMount(m.rid, { type: e.target.value as Mount['type'], source: '', drivePath: '' })}>
                 <option value="bind">Host folder</option>
                 <option value="volume">Managed volume</option>
               </select>
               {m.type === 'bind' ? (
                 <>
-                  <input className="input mono" placeholder="/mnt/media/movies" value={m.source}
+                  <input className="input mono" placeholder="/mnt/media/movies" value={m.source} readOnly={readOnly}
                     aria-label={`Mount ${i + 1} host folder`}
-                    onChange={(e) => setMount(i, { source: e.target.value })} />
-                  <button className="btn sm" title="Browse host folders"
-                    aria-label={`Browse host folders for mount ${i + 1}`} onClick={() => openBrowser(i, m.source || '/')}>
+                    onChange={(e) => setMount(m.rid, { source: e.target.value })} />
+                  <button className="btn sm" title="Browse host folders" disabled={readOnly}
+                    aria-label={`Browse host folders for mount ${i + 1}`} onClick={() => openBrowser(m.rid, m.source || '/')}>
                     <FolderOpen size={12} />
                   </button>
                 </>
               ) : (
                 <>
-                  <input className="input mono" placeholder="volume name" value={m.source}
+                  <input className="input mono" placeholder="volume name" value={m.source} readOnly={readOnly}
                     aria-label={`Mount ${i + 1} volume name`}
-                    onChange={(e) => setMount(i, { source: e.target.value })} />
-                  <select className="input" style={{ width: 230 }} value={m.drivePath ?? ''}
-                    aria-label={`Mount ${i + 1} drive`}
-                    onChange={(e) => setMount(i, { drivePath: e.target.value })}>
+                    onChange={(e) => setMount(m.rid, { source: e.target.value })} />
+                  <select className="input" style={{ flex: '1 1 200px', minWidth: 140 }} value={m.drivePath ?? ''}
+                    aria-label={`Mount ${i + 1} drive`} disabled={readOnly}
+                    onChange={(e) => setMount(m.rid, { drivePath: e.target.value })}>
                     <option value="">Default docker storage</option>
                     {drives.map((d) => (
                       <option key={d.device} value={d.mountPoint}>
@@ -746,18 +960,20 @@ function SettingsTab({ svc, draft, setDraft, nodes, busy, onDelete }: {
             </div>
             <div className="row">
               <span className="dim" aria-hidden>→ container path:</span>
-              <input className="input mono" placeholder="/media" value={m.target}
+              <input className="input mono" placeholder="/media" value={m.target} readOnly={readOnly}
                 aria-label={`Mount ${i + 1} container path`}
-                onChange={(e) => setMount(i, { target: e.target.value })} />
+                onChange={(e) => setMount(m.rid, { target: e.target.value })} />
               <label className="check" style={{ whiteSpace: 'nowrap' }}>
-                <input type="checkbox" checked={m.readOnly} onChange={(e) => setMount(i, { readOnly: e.target.checked })} /> read-only
+                <input type="checkbox" checked={m.readOnly} disabled={readOnly}
+                  onChange={(e) => setMount(m.rid, { readOnly: e.target.checked })} /> read-only
               </label>
-              <button className="btn sm danger" aria-label={`Remove mount ${i + 1}`}
-                onClick={() => setDraft({ ...draft, mounts: draft.mounts.filter((_, j) => j !== i) })}><Trash2 size={12} /></button>
+              <button className="btn sm danger" disabled={readOnly} aria-label={`Remove mount ${i + 1}`}
+                onClick={() => setDraft({ ...draft, mounts: draft.mounts.filter((x) => x.rid !== m.rid) })}><Trash2 size={12} /></button>
             </div>
           </div>
         ))}
-        <button className="btn sm" onClick={() => setDraft({ ...draft, mounts: [...draft.mounts, { type: 'bind', source: '', target: '', readOnly: false }] })}>
+        <button className="btn sm" disabled={readOnly}
+          onClick={() => setDraft({ ...draft, mounts: [...draft.mounts, { rid: crypto.randomUUID(), type: 'bind', source: '', target: '', readOnly: false }] })}>
           <Plus size={12} /> Add mount
         </button>
         {(svc.volumes ?? []).length > 0 && (
@@ -779,19 +995,19 @@ function SettingsTab({ svc, draft, setDraft, nodes, busy, onDelete }: {
         <div className="grid-3">
           <Field label="Memory limit (MB, 0 = none)">
             {(p) => (
-              <input className="input mono" {...p} inputMode="numeric" value={draft.memLimitMb}
+              <input className="input mono" {...p} inputMode="numeric" value={draft.memLimitMb} readOnly={readOnly}
                 onChange={(e) => setDraft({ ...draft, memLimitMb: e.target.value.replace(/\D/g, '') })} />
             )}
           </Field>
           <Field label="CPU limit (cores, 0 = none)">
             {(p) => (
-              <input className="input mono" {...p} inputMode="decimal" placeholder="1.5" value={draft.cpuLimit}
+              <input className="input mono" {...p} inputMode="decimal" placeholder="1.5" value={draft.cpuLimit} readOnly={readOnly}
                 onChange={(e) => setDraft({ ...draft, cpuLimit: e.target.value.replace(/[^0-9.]/g, '') })} />
             )}
           </Field>
           <Field label="Restart policy">
             {(p) => (
-              <select className="input" {...p} value={draft.restartPolicy}
+              <select className="input" {...p} value={draft.restartPolicy} disabled={readOnly}
                 onChange={(e) => setDraft({ ...draft, restartPolicy: e.target.value })}>
                 <option value="unless-stopped">unless-stopped</option>
                 <option value="always">always</option>
@@ -802,13 +1018,15 @@ function SettingsTab({ svc, draft, setDraft, nodes, busy, onDelete }: {
           </Field>
         </div>
         <label className="check" style={{ marginBottom: 14 }}>
-          <input type="checkbox" checked={draft.gpu} onChange={(e) => setDraft({ ...draft, gpu: e.target.checked })} /> GPU access (--gpus all)
+          <input type="checkbox" checked={draft.gpu} disabled={readOnly}
+            onChange={(e) => setDraft({ ...draft, gpu: e.target.checked })} /> GPU access (--gpus all)
         </label>
         <Field label="Runs on"
           hint="Changing this migrates the app on Save &amp; redeploy; managed volumes don't move automatically."
           style={{ marginBottom: 0 }}>
           {(p) => (
-            <select className="input" {...p} value={draft.nodeId} onChange={(e) => setDraft({ ...draft, nodeId: e.target.value })}>
+            <select className="input" {...p} value={draft.nodeId} disabled={readOnly}
+              onChange={(e) => setDraft({ ...draft, nodeId: e.target.value })}>
               {nodes.map((n) => {
                 const sc = scores.find((s) => s.nodeId === n.id);
                 return <option key={n.id} value={n.id}>{n.name} {sc ? `(score ${sc.score})` : ''} {n.status !== 'online' ? '· OFFLINE' : ''}</option>;
@@ -818,14 +1036,18 @@ function SettingsTab({ svc, draft, setDraft, nodes, busy, onDelete }: {
         </Field>
       </div>
 
-      <div className="card" style={{ borderColor: 'var(--crit)' }}>
-        <div className="eyebrow" style={{ marginBottom: 8, color: 'var(--crit)' }}><TriangleAlert size={12} /> Danger zone</div>
-        <div className="row spread">
+      <div className="card crit">
+        <div className="eyebrow" style={{ marginBottom: 8, color: 'var(--crit)' }}>
+          <TriangleAlert size={12} aria-hidden /> Danger zone
+        </div>
+        <div className="row spread wrap">
           <div>
             <strong>Remove this app</strong>
             <div className="faint">Deletes the container. Managed volume data stays on disk.</div>
           </div>
-          <button className="btn danger" disabled={busy} onClick={onDelete}><Trash2 size={13} /> Remove app</button>
+          <button className="btn danger" disabled={busy} onClick={onDelete}>
+            {deleting ? <Spinner size={13} /> : <Trash2 size={13} />} Remove app
+          </button>
         </div>
       </div>
 
@@ -835,17 +1057,17 @@ function SettingsTab({ svc, draft, setDraft, nodes, busy, onDelete }: {
         <Modal title={browse.path} icon={<FolderOpen size={15} />} width={540} onClose={() => setBrowse(null)}>
           <div className="row" style={{ marginBottom: 10 }}>
             <button className="btn sm" disabled={browse.path === '/'}
-              onClick={() => openBrowser(browse.mountIdx, browse.path.split('/').slice(0, -1).join('/') || '/')}>
+              onClick={() => openBrowser(browse.mountRid, browse.path.split('/').slice(0, -1).join('/') || '/')}>
               <ArrowLeft size={12} /> Up
             </button>
-            <button className="btn sm primary" onClick={() => { setMount(browse.mountIdx, { source: browse.path }); setBrowse(null); }}>
+            <button className="btn sm primary" onClick={() => { setMount(browse.mountRid, { source: browse.path }); setBrowse(null); }}>
               Use this folder
             </button>
           </div>
           <div style={{ maxHeight: 340, overflowY: 'auto' }}>
             {browse.entries.filter((e) => e.isDir).map((e) => (
               <button key={e.name} className="nav-item" style={{ width: '100%' }}
-                onClick={() => openBrowser(browse.mountIdx, (browse.path === '/' ? '' : browse.path) + '/' + e.name)}>
+                onClick={() => openBrowser(browse.mountRid, (browse.path === '/' ? '' : browse.path) + '/' + e.name)}>
                 <Folder size={13} aria-hidden /> {e.name}
               </button>
             ))}

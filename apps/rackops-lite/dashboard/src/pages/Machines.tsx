@@ -1,11 +1,13 @@
 import { useEffect } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
-  ArrowLeft, Clock, Cpu, HardDrive, MemoryStick, Network as NetworkIcon, Plus, Thermometer, Zap,
+  ArrowLeft, Boxes, Clock, Cpu, HardDrive, MemoryStick, Network as NetworkIcon, Plus, Rocket, Server, Thermometer, Zap,
 } from 'lucide-react';
 import { useData } from '../data';
 import { Rack } from '../components/Rack';
-import { InfoTip, Led, StatusBadge, UsageBar, Kpi, EmptyState, formatUptime, shortGpu } from '../components/ui';
+import {
+  EmptyState, InfoTip, Kpi, Led, Skeleton, SkeletonRows, StatusBadge, UsageBar, formatUptime, shortGpu,
+} from '../components/ui';
 
 // MachinesPage: the physical rack, plus fleet-wide capacity.
 export function MachinesPage({ onAddMachine }: { onAddMachine: () => void }) {
@@ -15,33 +17,40 @@ export function MachinesPage({ onAddMachine }: { onAddMachine: () => void }) {
     <div className="page">
       <div className="row spread" style={{ marginBottom: 4 }}>
         <div className="page-title">Machines</div>
-        <button className="btn primary" onClick={onAddMachine}><Plus size={14} /> Add machine</button>
+        <button className="btn primary" onClick={onAddMachine}><Plus size={14} aria-hidden /> Add machine</button>
       </div>
       <div className="page-sub">Every box in your rack — hardware discovered automatically</div>
 
-      {nodes.length > 0 && overview && (
+      {/* Fleet KPIs: skeletons hold the row's shape until the overview arrives,
+          so numbers land without a layout jump. An empty (loaded) fleet has no
+          capacity to summarize, so the row disappears rather than showing zeros. */}
+      {loaded && nodes.length === 0 ? null : overview ? (
         <div className="kpi-row">
-          <Kpi icon={<HardDrive size={12} />} label="Machines" value={`${overview.nodesOnline}/${overview.nodesTotal}`} unit="online" />
-          <Kpi icon={<Cpu size={12} />} label="Fleet CPU" value={overview.avgCpuPct} unit="%" />
-          <Kpi icon={<MemoryStick size={12} />} label="Memory"
+          <Kpi icon={<HardDrive size={12} aria-hidden />} label="Machines" value={`${overview.nodesOnline}/${overview.nodesTotal}`} unit="online" />
+          <Kpi icon={<Cpu size={12} aria-hidden />} label="Fleet CPU" value={overview.avgCpuPct.toFixed(0)} unit="%" />
+          <Kpi icon={<MemoryStick size={12} aria-hidden />} label="Memory"
             value={(overview.usedMemMb / 1024).toFixed(1)} unit={`/ ${(overview.totalMemMb / 1024).toFixed(0)} GB`} />
-          <Kpi icon={<HardDrive size={12} />} label="Storage"
+          <Kpi icon={<HardDrive size={12} aria-hidden />} label="Storage"
             value={overview.usedStorageGb.toFixed(0)} unit={`/ ${overview.totalStorageGb.toFixed(0)} GB`} />
+        </div>
+      ) : (
+        <div className="kpi-row" aria-hidden>
+          {[0, 1, 2, 3].map((i) => <Skeleton key={i} height={90} radius="var(--r-lg)" />)}
         </div>
       )}
 
-      <Rack nodes={nodes} services={services} loading={!loaded} />
+      {/* The rack shows its own skeletons while loading; once the fleet is
+          confirmed empty, the single empty state below takes over. */}
+      {(!loaded || nodes.length > 0) && <Rack nodes={nodes} services={services} loading={!loaded} />}
 
       {loaded && nodes.length === 0 && (
-        <div style={{ marginTop: 16 }}>
-          <EmptyState title="One command turns any Linux box into part of your rack">
-            <div style={{ marginBottom: 14, lineHeight: 1.6 }}>
-              Old PC, Raspberry Pi, VPS — install the agent and it shows up here in seconds,<br />
-              hardware and all. Works behind CGNAT; only outbound connections.
-            </div>
-            <button className="btn primary" onClick={onAddMachine}><Plus size={13} /> Show the command</button>
-          </EmptyState>
-        </div>
+        <EmptyState icon={<Server size={18} />} title="One command turns any Linux box into part of your rack">
+          <div style={{ marginBottom: 14, lineHeight: 1.6 }}>
+            Old PC, Raspberry Pi, VPS — install the agent and it shows up here in seconds,<br />
+            hardware and all. Works behind CGNAT; only outbound connections.
+          </div>
+          <button className="btn primary" onClick={onAddMachine}><Plus size={13} aria-hidden /> Show the command</button>
+        </EmptyState>
       )}
     </div>
   );
@@ -51,10 +60,13 @@ export function MachinesPage({ onAddMachine }: { onAddMachine: () => void }) {
 // accumulates across re-renders and navigations).
 const histories = new Map<string, number[]>();
 
+// Drive health is a real status; anything unrecognized stays neutral.
+const healthBadge: Record<string, string> = { ok: 'ok', warning: 'warn', critical: 'crit' };
+
 export function MachineDetail() {
   const { id = '' } = useParams();
   const navigate = useNavigate();
-  const { nodes, services } = useData();
+  const { nodes, services, loaded } = useData();
   const node = nodes.find((n) => n.id === id);
 
   useEffect(() => {
@@ -66,10 +78,24 @@ export function MachineDetail() {
   }, [node, node?.metrics.timestamp]);
 
   if (!node) {
+    // The fleet hasn't answered yet — this is loading, not a missing machine.
+    if (!loaded) {
+      return (
+        <div className="page" aria-busy="true">
+          <Skeleton height={24} width={240} />
+          <div style={{ marginTop: 10 }}><Skeleton height={14} width={340} /></div>
+          <div className="kpi-row" style={{ marginTop: 22 }} aria-hidden>
+            {[0, 1, 2, 3].map((i) => <Skeleton key={i} height={140} radius="var(--r-lg)" />)}
+          </div>
+          <SkeletonRows count={3} height={76} />
+        </div>
+      );
+    }
     return (
       <div className="page">
         <EmptyState title="Machine not found">
-          <Link to="/machines" className="btn" style={{ marginTop: 10 }}>Back to machines</Link>
+          <div style={{ marginBottom: 12 }}>It may have been removed from the rack, or the link is stale.</div>
+          <Link to="/machines" className="btn">Back to machines</Link>
         </EmptyState>
       </div>
     );
@@ -79,11 +105,15 @@ export function MachineDetail() {
   const hw = node.hardware;
   const apps = services.filter((s) => s.nodeId === node.id);
   const history = histories.get(node.id);
+  const gpus = hw.gpus ?? [];
+  const drives = hw.drives ?? [];
+  const nics = hw.nics ?? [];
 
   return (
     <div className="page">
       <div className="row" style={{ marginBottom: 4 }}>
-        <button className="btn sm ghost" onClick={() => navigate('/machines')} aria-label="Back to machines"><ArrowLeft size={14} /></button>
+        <button className="btn sm ghost" onClick={() => navigate('/machines')}
+          aria-label="Back to machines" title="Back to machines"><ArrowLeft size={14} aria-hidden /></button>
         <div className="page-title" style={{ margin: 0 }}>{node.name}</div>
         <StatusBadge status={node.status} />
       </div>
@@ -93,11 +123,11 @@ export function MachineDetail() {
         <span className="tag">kernel {node.kernel}</span>
         <span className="dim mono">{node.ip}</span>
         {node.publicIp && <span className="dim mono">public {node.publicIp}</span>}
-        <span className="dim row" style={{ gap: 5 }}><Clock size={12} /> up {formatUptime(m.uptimeSec)}</span>
+        <span className="dim row" style={{ gap: 5 }}><Clock size={12} aria-hidden /> up {formatUptime(m.uptimeSec)}</span>
       </div>
 
       {node.status === 'offline' && (
-        <div className="card" style={{ borderColor: 'var(--crit)', marginBottom: 16 }}>
+        <div className="card crit" style={{ marginBottom: 16 }}>
           <strong style={{ color: 'var(--crit)' }}>This machine stopped reporting.</strong>
           <div className="dim" style={{ marginTop: 4 }}>
             Check that it's powered on and connected, then make sure the agent is running:
@@ -107,55 +137,56 @@ export function MachineDetail() {
       )}
 
       <div className="kpi-row">
-        <div className="card">
-          <div className="eyebrow"><Cpu size={12} /> CPU</div>
-          <div className="kpi-value">{m.cpuPct.toFixed(1)}<span className="unit">%</span></div>
+        <Kpi icon={<Cpu size={12} aria-hidden />} label="CPU" value={m.cpuPct.toFixed(0)} unit="%">
           <div className="faint">{hw.cpuCores}C/{hw.cpuThreads}T · load {m.load1.toFixed(2)}</div>
-          {history && history.length > 1 ? (
-            <div className="spark" style={{ marginTop: 8 }}>
-              {history.map((v, i) => <div key={i} style={{ height: `${Math.max(v, 3)}%` }} />)}
-            </div>
-          ) : <UsageBar pct={m.cpuPct} />}
-        </div>
-        <div className="card">
-          <div className="eyebrow"><MemoryStick size={12} /> Memory</div>
-          <div className="kpi-value">{(m.memUsedMb / 1024).toFixed(1)}<span className="unit">/ {(hw.memTotalMb / 1024).toFixed(1)} GB</span></div>
+          {/* Fixed-height slot: swapping the bar for the sparkline once history
+              accumulates must not move the card. */}
+          <div style={{ height: 34, marginTop: 8, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+            {history && history.length > 1 ? (
+              <div className="spark" aria-hidden>
+                {history.map((v, i) => <div key={i} style={{ height: `${Math.max(v, 3)}%` }} />)}
+              </div>
+            ) : (
+              <UsageBar pct={m.cpuPct} />
+            )}
+          </div>
+        </Kpi>
+        <Kpi icon={<MemoryStick size={12} aria-hidden />} label="Memory"
+          value={(m.memUsedMb / 1024).toFixed(1)} unit={`/ ${(hw.memTotalMb / 1024).toFixed(0)} GB`}>
           <div className="faint">{m.memPct.toFixed(0)}% used</div>
           <UsageBar pct={m.memPct} />
-        </div>
-        <div className="card">
-          <div className="eyebrow">
-            <Thermometer size={12} /> Package temp
+        </Kpi>
+        {/* Temperature is a reading, not a percentage — the number stands alone,
+            no meter bar. */}
+        <Kpi icon={<Thermometer size={12} aria-hidden />} label="Package temp" value={m.tempC.toFixed(0)} unit="°C">
+          <div className="faint">
+            {m.tempC > 85 ? 'throttling risk' : m.tempC > 70 ? 'warm' : 'healthy'}
             <InfoTip>
               The CPU package sensor, read straight from the hardware. Above ~85°C most CPUs slow
               themselves down to cool off — an alert opens if it stays there.
             </InfoTip>
           </div>
-          <div className="kpi-value">{m.tempC.toFixed(0)}<span className="unit">°C</span></div>
-          <div className="faint">{m.tempC > 85 ? 'throttling risk' : m.tempC > 70 ? 'warm' : 'healthy'}</div>
-          <UsageBar pct={m.tempC} />
-        </div>
-        <div className="card">
-          <div className="eyebrow"><Zap size={12} /> Workload</div>
-          <div className="kpi-value">{m.containers}<span className="unit">containers</span></div>
+        </Kpi>
+        <Kpi icon={<Zap size={12} aria-hidden />} label="Workload" value={m.containers} unit="containers">
           <div className="faint">{m.processCount} processes</div>
-        </div>
+        </Kpi>
       </div>
 
       <div className="card" style={{ marginBottom: 14 }}>
         <div className="eyebrow" style={{ marginBottom: 4 }}>Processor</div>
-        <strong style={{ fontFamily: 'var(--display)' }}>{hw.cpuModel}</strong>
+        <strong>{hw.cpuModel}</strong>
       </div>
 
-      {(hw.gpus ?? []).length > 0 && (
+      {gpus.length > 0 && (
         <>
           <div className="section-title">GPUs & accelerators</div>
           <div className="grid-2">
-            {(hw.gpus ?? []).map((g) => (
+            {gpus.map((g) => (
               <div className="card" key={g.index}>
                 <div className="row spread">
                   <strong>{shortGpu(g.model)}</strong>
-                  <span className={`badge ${g.vendor === 'nvidia' ? 'green' : 'purple'}`}>{g.vendor.toUpperCase()}</span>
+                  {/* Vendor is an identity fact, not a status — neutral tag. */}
+                  <span className="tag">{g.vendor.toUpperCase()}</span>
                 </div>
                 <div className="grid-3" style={{ marginTop: 12 }}>
                   <div>
@@ -167,8 +198,8 @@ export function MachineDetail() {
                     <UsageBar pct={g.utilPct} />
                   </div>
                   <div>
+                    {/* Temp and power are readings, not fill levels — no bar. */}
                     <div className="row spread dim"><span>Temp · power</span><span className="mono">{g.tempC.toFixed(0)}°C · {g.powerW.toFixed(0)}W</span></div>
-                    <UsageBar pct={g.tempC} />
                   </div>
                 </div>
               </div>
@@ -178,74 +209,96 @@ export function MachineDetail() {
       )}
 
       <div className="section-title">
-        <HardDrive size={15} /> Drives
+        <HardDrive size={15} aria-hidden /> Drives
         <InfoTip>
           Live read/write throughput and fill level per drive. The health badge warns at 85% full
           and turns critical at 95% — full disks are the top cause of failed deploys.
         </InfoTip>
       </div>
-      <div className="grid-2">
-        {(hw.drives ?? []).map((d) => {
-          const pct = d.sizeGb > 0 ? (d.usedGb / d.sizeGb) * 100 : 0;
-          return (
-            <div className="card" key={d.device}>
-              <div className="row spread">
-                <div className="row">
-                  <strong className="mono">{d.device}</strong>
-                  <span className={`badge ${d.type === 'nvme' ? 'amber' : d.type === 'ssd' ? 'purple' : 'gray'}`}>{d.type.toUpperCase()}</span>
-                  <span className={`badge ${{ ok: 'green', warning: 'yellow', critical: 'red' }[d.health] ?? 'gray'}`}>{d.health}</span>
+      {drives.length > 0 ? (
+        <div className="grid-2">
+          {drives.map((d) => {
+            const pct = d.sizeGb > 0 ? (d.usedGb / d.sizeGb) * 100 : 0;
+            return (
+              <div className="card" key={d.device}>
+                <div className="row spread">
+                  <div className="row wrap">
+                    <strong className="mono">{d.device}</strong>
+                    {/* Drive type is hardware identity — neutral tag, never a status hue. */}
+                    <span className="tag">{d.type.toUpperCase()}</span>
+                    <span className={`badge ${healthBadge[d.health] ?? 'neutral'}`}>{d.health}</span>
+                    {!d.mountPoint && <span className="badge warn">not mounted</span>}
+                  </div>
+                  {d.tempC ? (
+                    <span className="dim mono row" style={{ gap: 4 }}>
+                      <Thermometer size={12} aria-hidden />{d.tempC.toFixed(0)}°C
+                    </span>
+                  ) : null}
                 </div>
-                {d.tempC ? <span className="dim row" style={{ gap: 4 }}><Thermometer size={12} />{d.tempC.toFixed(0)}°C</span> : null}
+                <div className="faint" style={{ margin: '6px 0 10px' }}>
+                  {d.model || 'Unknown model'}{d.mountPoint && ` · mounted at ${d.mountPoint}`}
+                </div>
+                <div className="row spread dim">
+                  <span>{d.usedGb.toFixed(0)} GB used</span>
+                  <span className="mono">{d.sizeGb.toFixed(0)} GB · {pct.toFixed(0)}%</span>
+                </div>
+                <UsageBar pct={pct} thick />
+                <div className="row" style={{ marginTop: 10, gap: 16 }}>
+                  <span className="dim mono">R {d.readMbps.toFixed(1)} MB/s</span>
+                  <span className="dim mono">W {d.writeMbps.toFixed(1)} MB/s</span>
+                </div>
               </div>
-              <div className="faint" style={{ margin: '6px 0 10px' }}>
-                {d.model || 'Unknown model'}{d.mountPoint ? ` · mounted at ${d.mountPoint}` : ' · not mounted'}
-              </div>
-              <div className="row spread dim">
-                <span>{d.usedGb.toFixed(0)} GB used</span>
-                <span className="mono">{d.sizeGb.toFixed(0)} GB · {pct.toFixed(0)}%</span>
-              </div>
-              <UsageBar pct={pct} thick />
-              <div className="row" style={{ marginTop: 10, gap: 16 }}>
-                <span className="dim mono">R {d.readMbps.toFixed(1)} MB/s</span>
-                <span className="dim mono">W {d.writeMbps.toFixed(1)} MB/s</span>
-              </div>
-            </div>
-          );
-        })}
-        {(hw.drives ?? []).length === 0 && <div className="empty">No drives discovered.</div>}
-      </div>
+            );
+          })}
+        </div>
+      ) : (
+        <EmptyState icon={<HardDrive size={18} />} title="No drives discovered">
+          <div>The agent hasn't reported any block devices on this machine yet.</div>
+        </EmptyState>
+      )}
 
-      <div className="section-title"><NetworkIcon size={15} /> Network interfaces</div>
-      <div className="grid-3">
-        {(hw.nics ?? []).map((nic) => (
-          <div className="card" key={nic.name}>
-            <div className="row spread">
-              <strong className="mono">{nic.name}</strong>
-              <span className="faint mono">{nic.mac}</span>
+      <div className="section-title"><NetworkIcon size={15} aria-hidden /> Network interfaces</div>
+      {nics.length > 0 ? (
+        <div className="grid-3">
+          {nics.map((nic) => (
+            <div className="card" key={nic.name}>
+              <div className="row spread">
+                <strong className="mono">{nic.name}</strong>
+                <span className="faint mono">{nic.mac}</span>
+              </div>
+              <div className="row" style={{ marginTop: 8, gap: 16 }}>
+                <span className="dim mono">↓ {nic.rxMbps.toFixed(1)} MB/s</span>
+                <span className="dim mono">↑ {nic.txMbps.toFixed(1)} MB/s</span>
+                {nic.speedMb > 0 && <span className="faint">{nic.speedMb} Mb link</span>}
+              </div>
             </div>
-            <div className="row" style={{ marginTop: 8, gap: 16 }}>
-              <span className="dim mono">↓ {nic.rxMbps.toFixed(2)} MB/s</span>
-              <span className="dim mono">↑ {nic.txMbps.toFixed(2)} MB/s</span>
-              {nic.speedMb > 0 && <span className="faint">{nic.speedMb} Mb link</span>}
-            </div>
-          </div>
-        ))}
-        {(hw.nics ?? []).length === 0 && <div className="faint">No interfaces reported.</div>}
-      </div>
+          ))}
+        </div>
+      ) : (
+        <EmptyState icon={<NetworkIcon size={18} />} title="No interfaces reported">
+          <div>The agent hasn't reported any network interfaces for this machine yet.</div>
+        </EmptyState>
+      )}
 
-      <div className="section-title">Apps on this machine</div>
-      <div className="stack" style={{ gap: 8 }}>
-        {apps.map((s) => (
-          <Link key={s.id} to={`/apps/${s.id}`} className="card clickable row" style={{ padding: '10px 14px', color: 'var(--text)' }}>
-            <Led status={s.status} label />
-            <strong>{s.name}</strong>
-            <span className="faint mono" style={{ marginLeft: 'auto' }}>
-              {s.status === 'running' ? `${s.cpuPct.toFixed(1)}% cpu · ${s.memUsedMb} MB` : s.status}
-            </span>
-          </Link>
-        ))}
-        {apps.length === 0 && <span className="faint">Nothing deployed here yet.</span>}
-      </div>
+      <div className="section-title"><Boxes size={15} aria-hidden /> Apps on this machine</div>
+      {apps.length > 0 ? (
+        <div className="stack" style={{ gap: 8 }}>
+          {apps.map((s) => (
+            <Link key={s.id} to={`/apps/${s.id}`} className="card clickable row" style={{ padding: '10px 14px', color: 'var(--text)' }}>
+              <Led status={s.status} label />
+              <strong style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</strong>
+              <span className="faint mono" style={{ marginLeft: 'auto', flex: 'none' }}>
+                {s.status === 'running' ? `${s.cpuPct.toFixed(0)}% cpu · ${s.memUsedMb} MB` : s.status}
+              </span>
+            </Link>
+          ))}
+        </div>
+      ) : (
+        <EmptyState icon={<Boxes size={18} />} title="Nothing deployed here yet">
+          <div style={{ marginBottom: 14 }}>Deploy an app and choose this machine — or let auto-placement pick it.</div>
+          <Link to="/apps/new" className="btn"><Rocket size={13} aria-hidden /> Deploy an app</Link>
+        </EmptyState>
+      )}
     </div>
   );
 }
