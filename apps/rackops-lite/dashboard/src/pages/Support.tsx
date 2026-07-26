@@ -89,7 +89,7 @@ export function SupportPage() {
   const showNewTicket = !composing && !(loaded && tickets.length === 0 && !current);
 
   return (
-    <div className="page" style={{ maxWidth: 780 }}>
+    <div className="page" style={{ maxWidth: 760 }}>
       <div className="row spread" style={{ marginBottom: 4 }}>
         <div className="page-title">Support</div>
         {showNewTicket && (

@@ -9,7 +9,7 @@ import { useData } from '../data';
 import { Rack } from '../components/Rack';
 import { TrendChart, Seg, trendDelta } from '../components/charts';
 import {
-  Delta, EmptyState, IconChip, InfoTip, Led, SkeletonRows, UrlChip, UsageBar,
+  Delta, EmptyState, IconChip, InfoTip, Kpi, Led, SkeletonRows, UrlChip, UsageBar,
   publicUrls, timeAgo,
 } from '../components/ui';
 
@@ -25,6 +25,7 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
   const [win, setWin] = useState<'24h' | '7d'>('24h');
   const [metric, setMetric] = useState<'cpuPct' | 'memUsedMb'>('cpuPct');
   const [histErr, setHistErr] = useState(false);
+  const [showAllAttn, setShowAllAttn] = useState(false);
 
   useEffect(() => { api.me().then(setMe).catch(() => {}); }, []);
 
@@ -64,6 +65,17 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
   const troubled = loaded && attention > 0;
 
   const running = services.filter((s) => s.status === 'running').length;
+
+  // A 20-incident night must not bury the KPIs and chart under a wall of
+  // red: worst first (down apps, dark machines), alerts fill the rest of an
+  // 8-row budget, and one button discloses the full list.
+  const ATTN_CAP = 8;
+  const failingShown = showAllAttn ? failing : failing.slice(0, ATTN_CAP);
+  const offlineShown = showAllAttn ? nodesOffline
+    : nodesOffline.slice(0, Math.max(0, ATTN_CAP - failingShown.length));
+  const alertsShown = showAllAttn ? openAlerts
+    : openAlerts.slice(0, Math.max(0, ATTN_CAP - failingShown.length - offlineShown.length));
+  const hiddenAttn = attention - failingShown.length - offlineShown.length - alertsShown.length;
 
   const hour = new Date().getHours();
   const daypart = hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening';
@@ -142,8 +154,10 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
               itself automatically the moment the problem is fixed.
             </InfoTip>
           </div>
-          <div className="stack" style={{ marginBottom: 8 }}>
-            {failing.map((s) => (
+          {/* Closes with a generous gap: what follows is routine capacity
+              context, the most different neighbor on the page. */}
+          <div className="stack" style={{ marginBottom: 24 }}>
+            {failingShown.map((s) => (
               <div key={s.id} className="card crit row spread" style={{ padding: '12px 16px' }}>
                 <div className="row">
                   <Led status="failed" />
@@ -155,7 +169,7 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
                 </button>
               </div>
             ))}
-            {nodesOffline.map((n) => (
+            {offlineShown.map((n) => (
               <div key={n.id} className="card crit row spread" style={{ padding: '12px 16px' }}>
                 <div className="row">
                   <Led status="offline" />
@@ -165,7 +179,7 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
                 <button className="btn sm" onClick={() => navigate(`/machines/${n.id}`)}>View machine</button>
               </div>
             ))}
-            {openAlerts.map((a) => (
+            {alertsShown.map((a) => (
               <div key={a.id} className={`card row spread ${a.level === 'critical' ? 'crit' : 'warn'}`}
                 style={{ padding: '12px 16px' }}>
                 <div className="row">
@@ -178,6 +192,12 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
                 )}
               </div>
             ))}
+            {hiddenAttn > 0 && (
+              <button className="btn sm" style={{ alignSelf: 'flex-start' }}
+                onClick={() => setShowAllAttn(true)}>
+                Show all {attention} issues
+              </button>
+            )}
           </div>
         </>
       )}
@@ -189,16 +209,16 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
       {loaded && nodes.length > 0 && overview && (
         <>
           <div className="kpi-row" style={{ marginTop: 4 }}>
-            <StatTile label="Machines online" tone={nodesOffline.length > 0 ? 'crit' : 'ok'}
-              icon={<HardDrive size={15} />}
+            <Kpi label="Machines online"
+              chip={<IconChip sm tone={nodesOffline.length > 0 ? 'crit' : 'ok'}><HardDrive size={15} /></IconChip>}
               value={overview.nodesOnline} unit={`/ ${overview.nodesTotal}`} />
-            <StatTile label="Apps running" tone={failing.length > 0 ? 'crit' : services.length > 0 ? 'ok' : undefined}
-              icon={<Boxes size={15} />}
+            <Kpi label="Apps running"
+              chip={<IconChip sm tone={failing.length > 0 ? 'crit' : services.length > 0 ? 'ok' : undefined}><Boxes size={15} /></IconChip>}
               value={running} unit={`/ ${services.length}`} />
-            <StatTile label="Fleet CPU" icon={<Cpu size={15} />}
+            <Kpi label="Fleet CPU" chip={<IconChip sm><Cpu size={15} /></IconChip>}
               value={overview.avgCpuPct} unit="%"
               delta={<Delta pct={trendDelta(hist24, 'cpuPct')} />} />
-            <StatTile label="Fleet memory" icon={<MemoryStick size={15} />}
+            <Kpi label="Fleet memory" chip={<IconChip sm><MemoryStick size={15} /></IconChip>}
               value={(overview.usedMemMb / 1024).toFixed(1)} unit={`/ ${(overview.totalMemMb / 1024).toFixed(0)} GB`}
               delta={<Delta pct={trendDelta(hist24, 'memUsedMb')} />} />
           </div>
@@ -234,8 +254,14 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
         </>
       )}
 
-      <div className="grid-2" style={{ alignItems: 'start' }}>
-        <div>
+      {/* Main + rail (3:2): bounded content left, the unbounded rack right.
+          DOM order (apps, rail, feed) matches the single-column collapse,
+          where the machine list outranks the ambient feed. Hidden entirely
+          on an empty fleet — the banner and checklist own onboarding, not
+          two side-by-side empty panels. */}
+      {(!loaded || nodes.length > 0) && (
+      <div className="home-grid">
+        <div className="home-apps">
           <div className="section-title" style={{ marginTop: 12 }}>
             <Boxes size={15} aria-hidden /> Your apps
             {services.length > 0 && <Link to="/apps" className="faint" style={{ marginLeft: 'auto', fontWeight: 400 }}>View all →</Link>}
@@ -267,7 +293,37 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
               </EmptyState>
             )}
           </div>
+        </div>
 
+        <div className="home-rail">
+          <div className="section-title" style={{ marginTop: 12 }}>
+            <HardDrive size={15} aria-hidden /> The rack
+            <InfoTip>
+              Every machine in this organization, one row per machine. The dot shows each
+              machine&rsquo;s health; click through for full hardware detail.
+            </InfoTip>
+            <Link to="/machines" className="faint" style={{ marginLeft: 'auto', fontWeight: 400 }}>View all →</Link>
+          </div>
+          {/* No onAdd here: the greeting row already carries Add machine;
+              the rack panel stays quiet. */}
+          <Rack nodes={nodes} services={services} loading={!loaded} />
+
+          {overview && nodes.length > 0 && overview.totalStorageGb > 0 && (
+            <div className="card" style={{ marginTop: 14 }}>
+              <div className="row spread">
+                <span className="eyebrow">Pooled storage</span>
+                <IconChip sm><Database size={14} /></IconChip>
+              </div>
+              <div className="kpi-value">{overview.usedStorageGb.toFixed(0)} <span className="unit">/ {overview.totalStorageGb.toFixed(0)} GB</span></div>
+              <div className="row" style={{ gap: 8, marginTop: 8 }}>
+                <UsageBar pct={(overview.usedStorageGb / overview.totalStorageGb) * 100} thick />
+                <span className="faint mono">{((overview.usedStorageGb / overview.totalStorageGb) * 100).toFixed(0)}%</span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="home-feed">
           <div className="section-title">
             <Radio size={15} aria-hidden /> Live activity
             <InfoTip>
@@ -301,52 +357,8 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
             </div>
           </div>
         </div>
-
-        <div>
-          <div className="section-title" style={{ marginTop: 12 }}>
-            <HardDrive size={15} aria-hidden /> The rack
-            <InfoTip>
-              Every machine in this organization, one row per machine. The dot shows each
-              machine&rsquo;s health; click through for full hardware detail.
-            </InfoTip>
-            <Link to="/machines" className="faint" style={{ marginLeft: 'auto', fontWeight: 400 }}>View all →</Link>
-          </div>
-          {/* No onAdd here: the greeting row already carries Add machine;
-              the rack panel stays quiet. */}
-          <Rack nodes={nodes} services={services} loading={!loaded} />
-
-          {overview && nodes.length > 0 && overview.totalStorageGb > 0 && (
-            <div className="card" style={{ marginTop: 14 }}>
-              <div className="row spread">
-                <span className="eyebrow">Pooled storage</span>
-                <IconChip sm><Database size={14} /></IconChip>
-              </div>
-              <div className="kpi-value">{overview.usedStorageGb.toFixed(0)} <span className="unit">/ {overview.totalStorageGb.toFixed(0)} GB</span></div>
-              <div className="row" style={{ gap: 8, marginTop: 8 }}>
-                <UsageBar pct={(overview.usedStorageGb / overview.totalStorageGb) * 100} thick />
-                <span className="faint mono">{((overview.usedStorageGb / overview.totalStorageGb) * 100).toFixed(0)}%</span>
-              </div>
-            </div>
-          )}
-        </div>
       </div>
-    </div>
-  );
-}
-
-// StatTile: eyebrow + icon chip, big mono value, optional delta line.
-function StatTile({ label, icon, tone, value, unit, delta }: {
-  label: string; icon: React.ReactNode; tone?: 'ok' | 'warn' | 'crit' | 'accent';
-  value: React.ReactNode; unit?: string; delta?: React.ReactNode;
-}) {
-  return (
-    <div className="card">
-      <div className="row spread">
-        <span className="eyebrow">{label}</span>
-        <IconChip sm tone={tone}>{icon}</IconChip>
-      </div>
-      <div className="kpi-value">{value} {unit && <span className="unit">{unit}</span>}</div>
-      {delta && <div className="kpi-delta">{delta}</div>}
+      )}
     </div>
   );
 }

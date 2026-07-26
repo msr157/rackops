@@ -66,7 +66,7 @@ export function MachinesPage({ onAddMachine }: { onAddMachine: () => void }) {
         render: (n) => (
           <span className="row" style={{ gap: 8 }}>
             {/* Real link: the keyboard path into the row (see DataTable). */}
-            <Link to={`/machines/${n.id}`} style={{ fontWeight: 600 }} onClick={(e) => e.stopPropagation()}>
+            <Link to={`/machines/${n.id}`} className="t-name" style={{ fontWeight: 600 }} onClick={(e) => e.stopPropagation()}>
               {n.name}
             </Link>
             {/* Running the control plane is an identity fact: neutral tag. */}
@@ -458,7 +458,7 @@ export function MachineDetail() {
           })}
         </div>
       ) : (
-        <EmptyState icon={<HardDrive size={18} />} title="No drives discovered">
+        <EmptyState slim title="No drives discovered">
           <div>The agent hasn't reported any block devices on this machine yet.</div>
         </EmptyState>
       )}
@@ -481,7 +481,7 @@ export function MachineDetail() {
           ))}
         </div>
       ) : (
-        <EmptyState icon={<NetworkIcon size={18} />} title="No interfaces reported">
+        <EmptyState slim title="No interfaces reported">
           <div>The agent hasn't reported any network interfaces for this machine yet.</div>
         </EmptyState>
       )}

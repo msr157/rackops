@@ -65,6 +65,28 @@ gone — hardware facts wear neutral `.tag`s.
   12.5px · label 12px/500 (sentence case — the old tracked-uppercase eyebrow
   grammar is retired) · micro-mono 11px (kbd, timestamps, chart axes).
 
+### Space and width (layout pass, 2026-07-27)
+- Spacing scale: `--s-1..--s-7` (4/8/12/16/20/24/32). Authoritative for new
+  work; legacy one-offs migrate as surfaces get touched. Rhythm rule: the
+  gap from a header to its own content must never rival the gap between
+  sections (section break = 28px top, header-to-content ≤ 10px).
+- Page widths are roles, not per-page numbers: **operate** surfaces (Home,
+  Apps, Machines, detail pages, Network) run the full 1400px `.main`;
+  **focused task forms** (Deploy, Settings, Support, AppDetail's Settings
+  tab) cap at 760-820px; the **reading** surface (Changelog) at 850px.
+- Home is `.home-grid`: main 3fr (apps preview, then the ambient feed) +
+  rail 2fr (rack + storage), named grid areas so the single-column collapse
+  order is apps → rack → feed (priority, not DOM accident). The grid hides
+  entirely on an empty fleet — banner + checklist own onboarding.
+- Attention list caps at 8 rows (worst first: down apps, dark machines,
+  then alerts) with a "Show all N issues" disclosure, and closes with a
+  generous 24px before routine content.
+- Table name cells truncate (`.t-name`, 260px) instead of widening columns;
+  detail-page titles ellipsize. `.empty.slim` is the quiet variant for
+  routine per-section absences; full-size empties own whole pages.
+- Danger zones detach from routine card stacks with extra lead space.
+- Toasts hop above a pinned save bar (`body:has(.dirty-banner.pinned)`).
+
 ### Shape, depth, motion
 - Radius: 6 / 8 / 10 (`--r-sm/md/lg`). Cards 10, controls 8, chips/badges full.
 - Depth: cards are FLAT (border only, no shadow, no inset edge-light).

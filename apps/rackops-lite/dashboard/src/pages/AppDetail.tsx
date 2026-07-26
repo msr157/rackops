@@ -274,7 +274,7 @@ export function AppDetail() {
         <div className="row">
           <button className="btn sm ghost" onClick={() => navigate('/apps')}
             aria-label="Back to apps" title="Back to apps"><ArrowLeft size={14} /></button>
-          <div className="page-title" style={{ margin: 0 }}>{svc.name}</div>
+          <div className="page-title" style={{ margin: 0, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{svc.name}</div>
           <StatusBadge status={svc.status} />
           {svc.adopted && (
             <span className="tag">
@@ -402,8 +402,10 @@ function OverviewTab({ svc, nodeLabel, urls }: { svc: Service; nodeLabel: string
   return (
     <>
       {/* Two real metrics up top; identity facts (port, machine) are plain
-          key-values, so they live in Details instead of wearing KPI costume. */}
-      <div className="kpi-row">
+          key-values, so they live in Details instead of wearing KPI costume.
+          Two tiles cap their width — a lone number in a 660px card is air,
+          not emphasis. */}
+      <div className="kpi-row" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 320px))' }}>
         <Kpi label="CPU" value={svc.cpuPct.toFixed(1)} unit="%">
           <div className="kpi-delta"><Delta pct={trendDelta(points, 'cpuPct')} label="vs 24 hours ago" /></div>
         </Kpi>
@@ -933,7 +935,9 @@ function SettingsTab({ svc, draft, setDraft, nodes, busy, deleting, errors, onDe
   };
 
   return (
-    <div className="stack">
+    // A dense form column: reading width, not the full 1400px operating
+    // surface (matches the standalone Settings/Deploy pages' register).
+    <div className="stack" style={{ maxWidth: 820 }}>
       {readOnly && (
         <div className="card warn row" style={{ gap: 10, padding: '10px 14px' }}>
           <TriangleAlert size={14} style={{ color: 'var(--warn)', flex: 'none' }} aria-hidden />
@@ -1165,7 +1169,9 @@ function SettingsTab({ svc, draft, setDraft, nodes, busy, deleting, errors, onDe
         </Field>
       </div>
 
-      <div className="card crit">
+      {/* Detached from the routine stack rhythm: irreversible actions never
+          sit one uniform gap below an everyday card. */}
+      <div className="card crit" style={{ marginTop: 14 }}>
         <div className="eyebrow" style={{ marginBottom: 8, color: 'var(--crit)' }}>
           <TriangleAlert size={12} aria-hidden /> Danger zone
         </div>

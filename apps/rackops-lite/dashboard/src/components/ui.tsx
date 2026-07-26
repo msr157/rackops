@@ -154,13 +154,20 @@ export function Delta({ pct, goodWhenUp, label }: {
 
 /* ---- KPI + usage bars ---- */
 
-export function Kpi({ icon, label, value, unit, children }: {
-  icon?: React.ReactNode; label: string; value: React.ReactNode; unit?: string; children?: React.ReactNode;
+// The one KPI tile. `chip` puts an IconChip at the row's right edge (the
+// reference-register form); bare `icon` keeps the inline eyebrow glyph.
+// Both feed the same .kpi-row slot — one component, one structure.
+export function Kpi({ icon, label, chip, value, unit, delta, children }: {
+  icon?: React.ReactNode; label: string; chip?: React.ReactNode;
+  value: React.ReactNode; unit?: string; delta?: React.ReactNode; children?: React.ReactNode;
 }) {
   return (
     <div className="card">
-      <div className="eyebrow">{icon} {label}</div>
+      {chip
+        ? <div className="row spread"><span className="eyebrow">{label}</span>{chip}</div>
+        : <div className="eyebrow">{icon} {label}</div>}
       <div className="kpi-value">{value} {unit && <span className="unit">{unit}</span>}</div>
+      {delta && <div className="kpi-delta">{delta}</div>}
       {children}
     </div>
   );
@@ -198,11 +205,13 @@ export function SkeletonRows({ count = 3, height = 52 }: { count?: number; heigh
 
 /* ---- Empty state ---- */
 
-export function EmptyState({ icon, title, children }: {
-  icon?: React.ReactNode; title: string; children?: React.ReactNode;
+// slim: a one-line routine absence between dense regions — quiet aside,
+// not a 40px-tall event. Full size stays for empties that own their page.
+export function EmptyState({ icon, title, slim, children }: {
+  icon?: React.ReactNode; title: string; slim?: boolean; children?: React.ReactNode;
 }) {
   return (
-    <div className="empty">
+    <div className={`empty ${slim ? 'slim' : ''}`}>
       {icon && <div className="empty-icon" aria-hidden>{icon}</div>}
       <div className="empty-title">{title}</div>
       {children}

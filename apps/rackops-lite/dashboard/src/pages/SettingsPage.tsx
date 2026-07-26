@@ -204,7 +204,7 @@ export function SettingsPage() {
   );
 
   return (
-    <div className="page" style={{ maxWidth: 720 }}>
+    <div className="page" style={{ maxWidth: 760 }}>
       <div className="page-title">Settings</div>
       <div className="page-sub">Organization, Copilot providers, and notifications</div>
 

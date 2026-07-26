@@ -66,7 +66,7 @@ export function AppsPage() {
         <span className="row" style={{ gap: 8, minWidth: 0 }}>
           {/* A real link inside the clickable row: reachable by Tab, openable
               with Enter, middle-clickable into a new tab. */}
-          <Link to={`/apps/${s.id}`} style={{ color: 'inherit', fontWeight: 600 }}
+          <Link to={`/apps/${s.id}`} className="t-name" style={{ color: 'inherit', fontWeight: 600 }}
             onClick={(e) => e.stopPropagation()}>
             {s.name}
           </Link>
