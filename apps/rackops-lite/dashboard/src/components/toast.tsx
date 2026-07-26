@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useRef, useState } from 'react';
-import { CheckCircle2, AlertTriangle, Info } from 'lucide-react';
+import { CheckCircle2, AlertTriangle, Info, X } from 'lucide-react';
 
 type Kind = 'ok' | 'err' | 'info';
 interface Toast { id: number; kind: Kind; msg: string }
@@ -28,11 +28,17 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const nextId = useRef(1);
 
+  const dismiss = useCallback((id: number) => {
+    setToasts((ts) => ts.filter((t) => t.id !== id));
+  }, []);
+
+  // Errors stay until dismissed — the one message a user needs to re-read is
+  // the one explaining what just failed. Confirmations time out as usual.
   const push = useCallback((kind: Kind, msg: string) => {
     const id = nextId.current++;
     setToasts((ts) => [...ts.slice(-4), { id, kind, msg }]);
-    setTimeout(() => setToasts((ts) => ts.filter((t) => t.id !== id)), kind === 'err' ? 7000 : 4200);
-  }, []);
+    if (kind !== 'err') setTimeout(() => dismiss(id), 4200);
+  }, [dismiss]);
 
   const apiRef = useRef<ToastApi>({
     ok: (m) => push('ok', m),
@@ -57,7 +63,10 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         {toasts.map((t) => (
           <div key={t.id} className={`toast ${t.kind}`}>
             {icons[t.kind]}
-            <span>{t.msg}</span>
+            <span style={{ flex: 1 }}>{t.msg}</span>
+            <button className="toast-close" onClick={() => dismiss(t.id)} aria-label="Dismiss">
+              <X size={13} />
+            </button>
           </div>
         ))}
       </div>

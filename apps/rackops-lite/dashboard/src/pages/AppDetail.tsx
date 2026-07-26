@@ -3,14 +3,14 @@ import { useNavigate, useParams, Link } from 'react-router-dom';
 import {
   ArrowLeft, Box, Cloud, Globe, History, KeyRound, Play, Plus, RotateCw, Save, ScrollText,
   Square, Trash2, TriangleAlert, Rocket, Folder, FolderOpen, Zap, Settings as SettingsIcon,
-  ExternalLink, X,
+  ExternalLink,
 } from 'lucide-react';
 import { api, subscribeLogChunks } from '../api';
 import type { Service, ServiceUpdate, Mount, EnvVar, Deployment, Domain, DirEntry, PlacementScore, LogChunk } from '../api';
 import { useData } from '../data';
 import { useToast, cleanError } from '../components/toast';
 import { useConfirm } from '../components/confirm';
-import { StatusBadge, Led, Spinner, UrlChip, publicUrls, dnsLabel, timeAgo, InfoTip } from '../components/ui';
+import { StatusBadge, Led, Modal, Spinner, UrlChip, publicUrls, dnsLabel, timeAgo, Field, InfoTip } from '../components/ui';
 
 type Tab = 'overview' | 'networking' | 'logs' | 'deployments' | 'settings';
 
@@ -387,7 +387,7 @@ function NetworkingTab({ svc, draft, setDraft, reload }: {
                 {domains.length === 0 && <> First <Link to="/network">add the domain</Link> so RackOps can give you the DNS record.</>}
               </div>
               <div className="row wrap">
-                <select className="input" style={{ width: 320 }}
+                <select className="input" style={{ width: 320 }} aria-label={`Domain route for ${svc.name}`}
                   value={currentIsWildcard?.name ?? (svc.domain || '')}
                   onChange={(e) => {
                     let host = e.target.value;
@@ -423,21 +423,24 @@ function NetworkingTab({ svc, draft, setDraft, reload }: {
           </InfoTip>
         </div>
         <div className="grid-3">
-          <div className="field" style={{ marginBottom: 0 }}>
-            <label>App listens on (container)</label>
-            <input className="input mono" placeholder="e.g. 3000" value={draft.containerPort}
-              onChange={(e) => setDraft({ ...draft, containerPort: e.target.value.replace(/\D/g, '') })} />
-          </div>
-          <div className="field" style={{ marginBottom: 0 }}>
-            <label>Reachable on host port</label>
-            <input className="input mono" value={draft.port}
-              onChange={(e) => setDraft({ ...draft, port: e.target.value.replace(/\D/g, '') })} />
-          </div>
-          <div className="field" style={{ marginBottom: 0 }}>
-            <label>Extra ports (comma-separated)</label>
-            <input className="input mono" placeholder="9000, 5432" value={draft.ports}
-              onChange={(e) => setDraft({ ...draft, ports: e.target.value })} />
-          </div>
+          <Field label="App listens on (container)" style={{ marginBottom: 0 }}>
+            {(p) => (
+              <input className="input mono" {...p} inputMode="numeric" placeholder="e.g. 3000" value={draft.containerPort}
+                onChange={(e) => setDraft({ ...draft, containerPort: e.target.value.replace(/\D/g, '') })} />
+            )}
+          </Field>
+          <Field label="Reachable on host port" style={{ marginBottom: 0 }}>
+            {(p) => (
+              <input className="input mono" {...p} inputMode="numeric" value={draft.port}
+                onChange={(e) => setDraft({ ...draft, port: e.target.value.replace(/\D/g, '') })} />
+            )}
+          </Field>
+          <Field label="Extra ports (comma-separated)" style={{ marginBottom: 0 }}>
+            {(p) => (
+              <input className="input mono" {...p} placeholder="9000, 5432" value={draft.ports}
+                onChange={(e) => setDraft({ ...draft, ports: e.target.value })} />
+            )}
+          </Field>
         </div>
         {draft.containerPort && draft.port && draft.containerPort !== draft.port && (
           <div className="faint" style={{ marginTop: 8 }}>Publishes host <span className="mono">{draft.port}</span> → container <span className="mono">{draft.containerPort}</span>.</div>
@@ -600,7 +603,9 @@ function DeploymentsTab({ serviceId }: { serviceId: string }) {
         const building = d.status === 'building' || d.status === 'pending';
         return (
           <div key={d.id} style={{ borderTop: '1px solid var(--border)', padding: '9px 0' }}>
-            <div className="row spread" style={{ cursor: 'pointer' }} onClick={() => setOpen(open === d.id ? '' : d.id)}>
+            <button type="button" className="row spread disclosure" style={{ width: '100%' }}
+              aria-expanded={open === d.id || building} aria-controls={`deploy-${d.id}`}
+              onClick={() => setOpen(open === d.id ? '' : d.id)}>
               <div className="row">
                 <Led status={d.status} />
                 <span className="mono">v{d.version}</span>
@@ -609,9 +614,9 @@ function DeploymentsTab({ serviceId }: { serviceId: string }) {
                 {building && live && <span className="badge amber">live</span>}
               </div>
               <span className="faint">{new Date(d.startedAt).toLocaleString()} · {(d.durationMs / 1000).toFixed(1)}s</span>
-            </div>
+            </button>
             {(open === d.id || building) && (
-              <div className="terminal" style={{ marginTop: 8, maxHeight: 420 }}>
+              <div className="terminal" id={`deploy-${d.id}`} style={{ marginTop: 8, maxHeight: 420 }}>
                 {live || d.log || (building ? 'waiting for the machine to pick up the job…' : '(no build log)')}
               </div>
             )}
@@ -651,12 +656,18 @@ function SettingsTab({ svc, draft, setDraft, nodes, busy, onDelete }: {
       <div className="card">
         <div className="eyebrow" style={{ marginBottom: 12 }}>Source</div>
         <div className="grid-2">
-          <div className="field"><label>Image</label>
-            <input className="input mono" value={draft.image} placeholder={svc.gitRepo ? 'built from git' : 'image:tag'}
-              onChange={(e) => setDraft({ ...draft, image: e.target.value })} /></div>
-          <div className="field"><label>Command override</label>
-            <input className="input mono" value={draft.command} placeholder="(image default)"
-              onChange={(e) => setDraft({ ...draft, command: e.target.value })} /></div>
+          <Field label="Image">
+            {(p) => (
+              <input className="input mono" {...p} value={draft.image} placeholder={svc.gitRepo ? 'built from git' : 'image:tag'}
+                onChange={(e) => setDraft({ ...draft, image: e.target.value })} />
+            )}
+          </Field>
+          <Field label="Command override">
+            {(p) => (
+              <input className="input mono" {...p} value={draft.command} placeholder="(image default)"
+                onChange={(e) => setDraft({ ...draft, command: e.target.value })} />
+            )}
+          </Field>
         </div>
         {svc.gitRepo && <div className="dim mono">{svc.gitRepo} @ {svc.gitBranch || 'main'}</div>}
       </div>
@@ -671,15 +682,18 @@ function SettingsTab({ svc, draft, setDraft, nodes, busy, onDelete }: {
         </div>
         {draft.env.map((v, i) => (
           <div className="row" key={i} style={{ marginBottom: 8 }}>
-            <input className="input mono" placeholder="KEY" value={v.key}
+            <input className="input mono" placeholder="KEY" value={v.key} aria-label={`Variable ${i + 1} name`}
               onChange={(e) => setDraft({ ...draft, env: draft.env.map((x, j) => (j === i ? { ...x, key: e.target.value } : x)) })} />
             <input className="input mono" placeholder="value" type={v.secret ? 'password' : 'text'} value={v.value}
+              aria-label={v.key ? `Value for ${v.key}` : `Variable ${i + 1} value`}
               onChange={(e) => setDraft({ ...draft, env: draft.env.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)) })} />
-            <button className="btn sm" title={v.secret ? 'Shown as secret' : 'Mask as secret'}
+            <button className="btn sm" aria-pressed={v.secret}
+              title={v.secret ? 'Shown as secret' : 'Mask as secret'}
+              aria-label={v.secret ? `Stop masking ${v.key || 'this variable'}` : `Mask ${v.key || 'this variable'} as secret`}
               onClick={() => setDraft({ ...draft, env: draft.env.map((x, j) => (j === i ? { ...x, secret: !x.secret } : x)) })}>
               <KeyRound size={12} style={v.secret ? { color: 'var(--amber)' } : undefined} />
             </button>
-            <button className="btn sm danger" aria-label="Remove variable"
+            <button className="btn sm danger" aria-label={`Remove ${v.key || `variable ${i + 1}`}`}
               onClick={() => setDraft({ ...draft, env: draft.env.filter((_, j) => j !== i) })}><Trash2 size={12} /></button>
           </div>
         ))}
@@ -697,7 +711,7 @@ function SettingsTab({ svc, draft, setDraft, nodes, busy, onDelete }: {
         {draft.mounts.map((m, i) => (
           <div className="card inset" key={i} style={{ marginBottom: 10 }}>
             <div className="row" style={{ marginBottom: 8 }}>
-              <select className="input" style={{ width: 150 }} value={m.type}
+              <select className="input" style={{ width: 150 }} value={m.type} aria-label={`Mount ${i + 1} type`}
                 onChange={(e) => setMount(i, { type: e.target.value as Mount['type'], source: '', drivePath: '' })}>
                 <option value="bind">Host folder</option>
                 <option value="volume">Managed volume</option>
@@ -705,16 +719,20 @@ function SettingsTab({ svc, draft, setDraft, nodes, busy, onDelete }: {
               {m.type === 'bind' ? (
                 <>
                   <input className="input mono" placeholder="/mnt/media/movies" value={m.source}
+                    aria-label={`Mount ${i + 1} host folder`}
                     onChange={(e) => setMount(i, { source: e.target.value })} />
-                  <button className="btn sm" title="Browse host folders" onClick={() => openBrowser(i, m.source || '/')}>
+                  <button className="btn sm" title="Browse host folders"
+                    aria-label={`Browse host folders for mount ${i + 1}`} onClick={() => openBrowser(i, m.source || '/')}>
                     <FolderOpen size={12} />
                   </button>
                 </>
               ) : (
                 <>
                   <input className="input mono" placeholder="volume name" value={m.source}
+                    aria-label={`Mount ${i + 1} volume name`}
                     onChange={(e) => setMount(i, { source: e.target.value })} />
                   <select className="input" style={{ width: 230 }} value={m.drivePath ?? ''}
+                    aria-label={`Mount ${i + 1} drive`}
                     onChange={(e) => setMount(i, { drivePath: e.target.value })}>
                     <option value="">Default docker storage</option>
                     {drives.map((d) => (
@@ -727,13 +745,14 @@ function SettingsTab({ svc, draft, setDraft, nodes, busy, onDelete }: {
               )}
             </div>
             <div className="row">
-              <span className="dim">→ container path:</span>
+              <span className="dim" aria-hidden>→ container path:</span>
               <input className="input mono" placeholder="/media" value={m.target}
+                aria-label={`Mount ${i + 1} container path`}
                 onChange={(e) => setMount(i, { target: e.target.value })} />
               <label className="check" style={{ whiteSpace: 'nowrap' }}>
                 <input type="checkbox" checked={m.readOnly} onChange={(e) => setMount(i, { readOnly: e.target.checked })} /> read-only
               </label>
-              <button className="btn sm danger" aria-label="Remove mount"
+              <button className="btn sm danger" aria-label={`Remove mount ${i + 1}`}
                 onClick={() => setDraft({ ...draft, mounts: draft.mounts.filter((_, j) => j !== i) })}><Trash2 size={12} /></button>
             </div>
           </div>
@@ -758,32 +777,45 @@ function SettingsTab({ svc, draft, setDraft, nodes, busy, onDelete }: {
           </InfoTip>
         </div>
         <div className="grid-3">
-          <div className="field"><label>Memory limit (MB, 0 = none)</label>
-            <input className="input mono" value={draft.memLimitMb}
-              onChange={(e) => setDraft({ ...draft, memLimitMb: e.target.value.replace(/\D/g, '') })} /></div>
-          <div className="field"><label>CPU limit (cores, 0 = none)</label>
-            <input className="input mono" placeholder="1.5" value={draft.cpuLimit}
-              onChange={(e) => setDraft({ ...draft, cpuLimit: e.target.value.replace(/[^0-9.]/g, '') })} /></div>
-          <div className="field"><label>Restart policy</label>
-            <select className="input" value={draft.restartPolicy} onChange={(e) => setDraft({ ...draft, restartPolicy: e.target.value })}>
-              <option value="unless-stopped">unless-stopped</option>
-              <option value="always">always</option>
-              <option value="on-failure">on-failure</option>
-              <option value="no">no</option>
-            </select></div>
+          <Field label="Memory limit (MB, 0 = none)">
+            {(p) => (
+              <input className="input mono" {...p} inputMode="numeric" value={draft.memLimitMb}
+                onChange={(e) => setDraft({ ...draft, memLimitMb: e.target.value.replace(/\D/g, '') })} />
+            )}
+          </Field>
+          <Field label="CPU limit (cores, 0 = none)">
+            {(p) => (
+              <input className="input mono" {...p} inputMode="decimal" placeholder="1.5" value={draft.cpuLimit}
+                onChange={(e) => setDraft({ ...draft, cpuLimit: e.target.value.replace(/[^0-9.]/g, '') })} />
+            )}
+          </Field>
+          <Field label="Restart policy">
+            {(p) => (
+              <select className="input" {...p} value={draft.restartPolicy}
+                onChange={(e) => setDraft({ ...draft, restartPolicy: e.target.value })}>
+                <option value="unless-stopped">unless-stopped</option>
+                <option value="always">always</option>
+                <option value="on-failure">on-failure</option>
+                <option value="no">no</option>
+              </select>
+            )}
+          </Field>
         </div>
         <label className="check" style={{ marginBottom: 14 }}>
           <input type="checkbox" checked={draft.gpu} onChange={(e) => setDraft({ ...draft, gpu: e.target.checked })} /> GPU access (--gpus all)
         </label>
-        <div className="field" style={{ marginBottom: 0 }}>
-          <label>Runs on (changing = migrate on Save & redeploy; managed volumes don't move automatically)</label>
-          <select className="input" value={draft.nodeId} onChange={(e) => setDraft({ ...draft, nodeId: e.target.value })}>
-            {nodes.map((n) => {
-              const sc = scores.find((s) => s.nodeId === n.id);
-              return <option key={n.id} value={n.id}>{n.name} {sc ? `(score ${sc.score})` : ''} {n.status !== 'online' ? '· OFFLINE' : ''}</option>;
-            })}
-          </select>
-        </div>
+        <Field label="Runs on"
+          hint="Changing this migrates the app on Save &amp; redeploy; managed volumes don't move automatically."
+          style={{ marginBottom: 0 }}>
+          {(p) => (
+            <select className="input" {...p} value={draft.nodeId} onChange={(e) => setDraft({ ...draft, nodeId: e.target.value })}>
+              {nodes.map((n) => {
+                const sc = scores.find((s) => s.nodeId === n.id);
+                return <option key={n.id} value={n.id}>{n.name} {sc ? `(score ${sc.score})` : ''} {n.status !== 'online' ? '· OFFLINE' : ''}</option>;
+              })}
+            </select>
+          )}
+        </Field>
       </div>
 
       <div className="card" style={{ borderColor: 'var(--crit)' }}>
@@ -797,33 +829,29 @@ function SettingsTab({ svc, draft, setDraft, nodes, busy, onDelete }: {
         </div>
       </div>
 
+      {/* Shared Modal, so the folder browser gets Escape, a focus trap, and
+          focus return like every other dialog in the product. */}
       {browse && (
-        <div className="modal-overlay" onClick={() => setBrowse(null)}>
-          <div className="modal" style={{ width: 540 }} onClick={(e) => e.stopPropagation()}>
-            <div className="row spread" style={{ marginBottom: 12 }}>
-              <h2 style={{ margin: 0 }} className="row"><FolderOpen size={15} /> {browse.path}</h2>
-              <button className="btn sm ghost" onClick={() => setBrowse(null)} aria-label="Close"><X size={14} /></button>
-            </div>
-            <div className="row" style={{ marginBottom: 10 }}>
-              <button className="btn sm" disabled={browse.path === '/'}
-                onClick={() => openBrowser(browse.mountIdx, browse.path.split('/').slice(0, -1).join('/') || '/')}>
-                <ArrowLeft size={12} /> Up
-              </button>
-              <button className="btn sm primary" onClick={() => { setMount(browse.mountIdx, { source: browse.path }); setBrowse(null); }}>
-                Use this folder
-              </button>
-            </div>
-            <div style={{ maxHeight: 340, overflowY: 'auto' }}>
-              {browse.entries.filter((e) => e.isDir).map((e) => (
-                <button key={e.name} className="nav-item" style={{ width: '100%' }}
-                  onClick={() => openBrowser(browse.mountIdx, (browse.path === '/' ? '' : browse.path) + '/' + e.name)}>
-                  <Folder size={13} /> {e.name}
-                </button>
-              ))}
-              {browse.entries.filter((e) => e.isDir).length === 0 && <div className="faint" style={{ padding: 10 }}>no subfolders</div>}
-            </div>
+        <Modal title={browse.path} icon={<FolderOpen size={15} />} width={540} onClose={() => setBrowse(null)}>
+          <div className="row" style={{ marginBottom: 10 }}>
+            <button className="btn sm" disabled={browse.path === '/'}
+              onClick={() => openBrowser(browse.mountIdx, browse.path.split('/').slice(0, -1).join('/') || '/')}>
+              <ArrowLeft size={12} /> Up
+            </button>
+            <button className="btn sm primary" onClick={() => { setMount(browse.mountIdx, { source: browse.path }); setBrowse(null); }}>
+              Use this folder
+            </button>
           </div>
-        </div>
+          <div style={{ maxHeight: 340, overflowY: 'auto' }}>
+            {browse.entries.filter((e) => e.isDir).map((e) => (
+              <button key={e.name} className="nav-item" style={{ width: '100%' }}
+                onClick={() => openBrowser(browse.mountIdx, (browse.path === '/' ? '' : browse.path) + '/' + e.name)}>
+                <Folder size={13} aria-hidden /> {e.name}
+              </button>
+            ))}
+            {browse.entries.filter((e) => e.isDir).length === 0 && <div className="faint" style={{ padding: 10 }}>no subfolders</div>}
+          </div>
+        </Modal>
       )}
     </div>
   );

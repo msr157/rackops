@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
-import { CheckCircle2, LifeBuoy, MessageSquareText, Plus, Send } from 'lucide-react';
+import { useCallback, useEffect, useId, useState } from 'react';
+import { ArrowLeft, CheckCircle2, LifeBuoy, MessageSquareText, Plus, Send } from 'lucide-react';
 import { api, subscribe } from '../api';
 import type { SupportTicket } from '../api';
 import { useToast, cleanError } from '../components/toast';
-import { InfoTip, Led, Spinner, timeAgo } from '../components/ui';
+import { Field, InfoTip, Led, Spinner, timeAgo } from '../components/ui';
 
 const CATEGORIES = [
   ['general', 'General question'],
@@ -97,8 +97,11 @@ function TicketList({ title, items, onOpen }: {
     <>
       <div className="section-title">{title}</div>
       <div className="stack" style={{ gap: 8, marginBottom: 18 }}>
+        {/* Opening a ticket is a state change, not navigation — so it's a
+            button, which Tab reaches and Enter activates. */}
         {items.map((t) => (
-          <div key={t.id} className="card clickable row spread" style={{ padding: '12px 16px' }} onClick={() => onOpen(t.id)}>
+          <button key={t.id} type="button" className="card clickable row spread ticket-row"
+            style={{ padding: '12px 16px' }} onClick={() => onOpen(t.id)}>
             <div className="row" style={{ minWidth: 0 }}>
               <Led status={ticketLed(t.status)} />
               <strong style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.subject}</strong>
@@ -108,7 +111,7 @@ function TicketList({ title, items, onOpen }: {
             <span className="faint" style={{ whiteSpace: 'nowrap' }}>
               {statusLabel(t.status)} · {timeAgo(t.updatedAt)}
             </span>
-          </div>
+          </button>
         ))}
       </div>
     </>
@@ -136,31 +139,35 @@ function Compose({ onDone, onCancel }: { onDone: (id: string) => void; onCancel:
   return (
     <div className="card" style={{ marginBottom: 18 }}>
       <div className="eyebrow" style={{ marginBottom: 12 }}><LifeBuoy size={12} /> New support ticket</div>
-      <div className="field">
-        <label>Subject</label>
-        <input className="input" value={subject} placeholder="One line: what's wrong?"
-          onChange={(e) => setSubject(e.target.value)} autoFocus />
-      </div>
+      <Field label="Subject">
+        {(p) => (
+          <input className="input" {...p} value={subject} placeholder="One line: what's wrong?"
+            onChange={(e) => setSubject(e.target.value)} autoFocus />
+        )}
+      </Field>
       <div className="grid-2">
-        <div className="field">
-          <label>Category</label>
-          <select className="input" value={category} onChange={(e) => setCategory(e.target.value)}>
-            {CATEGORIES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-          </select>
-        </div>
-        <div className="field">
-          <label>Severity</label>
-          <select className="input" value={severity} onChange={(e) => setSeverity(e.target.value)}>
-            {SEVERITIES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-          </select>
-        </div>
+        <Field label="Category">
+          {(p) => (
+            <select className="input" {...p} value={category} onChange={(e) => setCategory(e.target.value)}>
+              {CATEGORIES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          )}
+        </Field>
+        <Field label="Severity">
+          {(p) => (
+            <select className="input" {...p} value={severity} onChange={(e) => setSeverity(e.target.value)}>
+              {SEVERITIES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          )}
+        </Field>
       </div>
-      <div className="field">
-        <label>What happened?</label>
-        <textarea className="input" rows={6} value={body}
-          placeholder="What did you try, what did you expect, what happened instead? Error messages and logs help a lot."
-          onChange={(e) => setBody(e.target.value)} />
-      </div>
+      <Field label="What happened?">
+        {(p) => (
+          <textarea className="input" {...p} rows={6} value={body}
+            placeholder="What did you try, what did you expect, what happened instead? Error messages and logs help a lot."
+            onChange={(e) => setBody(e.target.value)} />
+        )}
+      </Field>
       <div className="row">
         <button className="btn primary" disabled={busy} onClick={submit}>
           {busy ? <Spinner size={13} /> : <Send size={13} />} Send ticket
@@ -177,6 +184,7 @@ function Thread({ ticket, onBack, onChanged }: {
   const toast = useToast();
   const [reply, setReply] = useState('');
   const [busy, setBusy] = useState(false);
+  const replyId = useId();
 
   const send = async () => {
     if (!reply.trim()) return;
@@ -201,7 +209,7 @@ function Thread({ ticket, onBack, onChanged }: {
     <div className="card">
       <div className="row spread wrap" style={{ marginBottom: 4 }}>
         <div className="row" style={{ minWidth: 0 }}>
-          <button className="btn sm ghost" onClick={onBack}>←</button>
+          <button className="btn sm ghost" onClick={onBack} aria-label="Back to all tickets"><ArrowLeft size={14} /></button>
           <strong style={{ fontSize: 14.5 }}>{ticket.subject}</strong>
           <span className="tag">{ticket.category}</span>
           <span className="tag">{ticket.severity}</span>
@@ -236,10 +244,11 @@ function Thread({ ticket, onBack, onChanged }: {
       </div>
 
       <div className="row" style={{ alignItems: 'flex-end' }}>
-        <textarea className="input" rows={3} style={{ flex: 1 }} value={reply}
+        <label className="sr-only" htmlFor={replyId}>Reply to this ticket</label>
+        <textarea className="input" id={replyId} rows={3} style={{ flex: 1 }} value={reply}
           placeholder={ticket.status === 'resolved' ? 'Reply to reopen this ticket…' : 'Write a reply…'}
           onChange={(e) => setReply(e.target.value)} />
-        <button className="btn primary" disabled={busy || !reply.trim()} onClick={send}>
+        <button className="btn primary" disabled={busy || !reply.trim()} onClick={send} aria-label="Send reply">
           {busy ? <Spinner size={13} /> : <Send size={13} />}
         </button>
       </div>

@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import { api, getActiveOrg, setActiveOrg } from '../api';
 import type { Organization, User } from '../api';
 import { useToast, cleanError } from './toast';
-import { Modal } from './ui';
+import { Field, Modal } from './ui';
 
 // OrgSwitcher: the Dokploy-style dropdown at the top of the sidebar. The
 // active org scopes everything the dashboard shows; switching reloads data
@@ -86,11 +86,12 @@ export function OrgSwitcher({ me }: { me: User | null }) {
             An organization has its own projects, machines, domains, and members — a clean
             boundary between teams or clients.
           </div>
-          <div className="field">
-            <label>Name</label>
-            <input className="input" autoFocus value={newName} placeholder="e.g. Homelab, Acme Corp"
-              onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && create()} />
-          </div>
+          <Field label="Name">
+            {(p) => (
+              <input className="input" {...p} autoFocus value={newName} placeholder="e.g. Homelab, Acme Corp"
+                onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && create()} />
+            )}
+          </Field>
           <button className="btn primary" style={{ width: '100%' }} onClick={create}>
             <Plus size={13} /> Create organization
           </button>

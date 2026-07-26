@@ -253,8 +253,13 @@ export const api = {
     req<SupportTicket>(`/api/support/tickets/${id}/resolve`, { method: 'POST' }),
 };
 
-// subscribe opens the SSE stream and dispatches typed events.
-export function subscribe(handlers: Record<string, (data: unknown) => void>): () => void {
+// subscribe opens the SSE stream and dispatches typed events. onOpen/onError
+// report the live connection state so the UI can tell "nothing is happening"
+// apart from "we lost the server".
+export function subscribe(
+  handlers: Record<string, (data: unknown) => void>,
+  opts?: { onOpen?: () => void; onError?: () => void },
+): () => void {
   const tok = getToken();
   const org = getActiveOrg();
   const params = new URLSearchParams();
@@ -265,6 +270,9 @@ export function subscribe(handlers: Record<string, (data: unknown) => void>): ()
   for (const [event, fn] of Object.entries(handlers)) {
     es.addEventListener(event, (e) => fn(JSON.parse((e as MessageEvent).data)));
   }
+  if (opts?.onOpen) es.addEventListener('open', opts.onOpen);
+  // EventSource retries on its own; this only reports that it is currently down.
+  if (opts?.onError) es.addEventListener('error', opts.onError);
   return () => es.close();
 }
 

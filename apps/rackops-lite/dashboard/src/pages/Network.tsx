@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useId, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Globe, Shield, Waypoints, Boxes, AlertTriangle, Plus, Trash2, RefreshCw, ChevronDown,
@@ -9,7 +9,7 @@ import type { Domain, IngressConfig, MeshStatus, ClusterStatus, NetworkDiagnosis
 import { useData } from '../data';
 import { useToast, cleanError } from '../components/toast';
 import { useConfirm } from '../components/confirm';
-import { InfoTip, Led, CopyBtn, CopyField, Modal, Spinner, UrlChip, publicUrls } from '../components/ui';
+import { Field, InfoTip, Led, CopyBtn, CopyField, Modal, Spinner, UrlChip, publicUrls } from '../components/ui';
 
 // recordHost: what goes in the registrar's "Host/Name" field.
 function recordHost(domain: string): string {
@@ -51,6 +51,7 @@ export function NetworkPage() {
   const [httpPort, setHttpPort] = useState('80');
   const [httpsPort, setHttpsPort] = useState('443');
   const [busy, setBusy] = useState(false);
+  const newDomainId = useId();
 
   const load = useCallback(() => {
     api.domains().then((d) => setDomains(d ?? [])).catch(() => {});
@@ -184,30 +185,38 @@ export function NetworkPage() {
               {ingress.statusMsg}
             </div>
           )}
-          <div className="field">
-            <label>Run the edge on</label>
-            <select className="input" value={ingressNode} onChange={(e) => setIngressNode(e.target.value)}>
-              <option value="">— select a machine —</option>
-              {nodes.map((n) => <option key={n.id} value={n.id}>{n.name} ({n.publicIp || n.ip})</option>)}
-            </select>
-          </div>
+          <Field label="Run the edge on">
+            {(p) => (
+              <select className="input" {...p} value={ingressNode} onChange={(e) => setIngressNode(e.target.value)}>
+                <option value="">— select a machine —</option>
+                {nodes.map((n) => <option key={n.id} value={n.id}>{n.name} ({n.publicIp || n.ip})</option>)}
+              </select>
+            )}
+          </Field>
           <div className="grid-2">
-            <div className="field">
-              <label>HTTP port</label>
-              <input className="input mono" value={httpPort} onChange={(e) => setHttpPort(e.target.value.replace(/\D/g, ''))} />
-            </div>
-            <div className="field">
-              <label>HTTPS port</label>
-              <input className="input mono" value={httpsPort} onChange={(e) => setHttpsPort(e.target.value.replace(/\D/g, ''))} />
-            </div>
+            <Field label="HTTP port">
+              {(p) => (
+                <input className="input mono" {...p} inputMode="numeric" value={httpPort}
+                  onChange={(e) => setHttpPort(e.target.value.replace(/\D/g, ''))} />
+              )}
+            </Field>
+            <Field label="HTTPS port">
+              {(p) => (
+                <input className="input mono" {...p} inputMode="numeric" value={httpsPort}
+                  onChange={(e) => setHttpsPort(e.target.value.replace(/\D/g, ''))} />
+              )}
+            </Field>
           </div>
-          <div className="field">
-            <label>Let's Encrypt email {tlsOn ? '' : '(optional — enables automatic HTTPS)'}</label>
-            <input className="input" placeholder="you@example.com" value={acmeEmail} onChange={(e) => setAcmeEmail(e.target.value)} />
-            {tlsOn && <span className="faint">
-              HTTPS on: certificates issue automatically. Port {httpPort} must be reachable from the internet; HTTP redirects to HTTPS.
-            </span>}
-          </div>
+          <Field
+            label={`Let's Encrypt email ${tlsOn ? '' : '(optional — enables automatic HTTPS)'}`}
+            hint={tlsOn
+              ? `HTTPS on: certificates issue automatically. Port ${httpPort} must be reachable from the internet; HTTP redirects to HTTPS.`
+              : undefined}>
+            {(p) => (
+              <input className="input" {...p} type="email" placeholder="you@example.com" value={acmeEmail}
+                onChange={(e) => setAcmeEmail(e.target.value)} />
+            )}
+          </Field>
           <div className="row">
             <button className="btn primary" disabled={busy || edgeDeploying || !ingressNode} onClick={() => applyIngress(true)}>
               {busy || edgeDeploying ? <Spinner size={13} /> : null}
@@ -273,7 +282,9 @@ export function NetworkPage() {
       </div>
       <div className="card">
         <div className="row" style={{ marginBottom: 12 }}>
-          <input className="input" placeholder="app.example.com — or *.example.com to give every app its own subdomain"
+          <label className="sr-only" htmlFor={newDomainId}>Domain to add</label>
+          <input className="input" id={newDomainId}
+            placeholder="app.example.com — or *.example.com to give every app its own subdomain"
             value={newDomain} onChange={(e) => setNewDomain(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && addDomain()} />
           <button className="btn primary" disabled={addingDomain} onClick={addDomain}>
@@ -283,18 +294,22 @@ export function NetworkPage() {
 
         {domains.map((d) => {
           const open = expanded === d.id;
+          const panelId = `domain-${d.id}`;
           return (
             <div key={d.id} style={{ borderTop: '1px solid var(--border)' }}>
-              <div className="row spread" style={{ padding: '9px 0', cursor: 'pointer' }} onClick={() => setExpanded(open ? '' : d.id)}>
-                <span className="row" style={{ gap: 8 }}>
-                  {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+              <div className="row spread" style={{ padding: '9px 0' }}>
+                <button type="button" className="row disclosure" style={{ gap: 8 }}
+                  aria-expanded={open} aria-controls={panelId}
+                  onClick={() => setExpanded(open ? '' : d.id)}>
+                  {open ? <ChevronDown size={13} aria-hidden /> : <ChevronRight size={13} aria-hidden />}
                   <span className="mono">{d.name}</span>
                   {d.wildcard && <span className="badge purple">wildcard</span>}
                   <DomainBadge d={d} />
-                  {d.certOk && <span className="badge green"><Lock size={10} /> TLS</span>}
-                </span>
-                <span className="row" onClick={(e) => e.stopPropagation()}>
-                  <button className="btn sm" disabled={checking === d.id} onClick={() => verify(d.id)}>
+                  {d.certOk && <span className="badge green"><Lock size={10} aria-hidden /> TLS</span>}
+                </button>
+                <span className="row">
+                  <button className="btn sm" disabled={checking === d.id}
+                    aria-label={`Verify ${d.name} now`} onClick={() => verify(d.id)}>
                     <RefreshCw size={11} className={checking === d.id ? 'spin' : ''} /> {checking === d.id ? 'Checking…' : 'Verify now'}
                   </button>
                   <button className="btn sm danger" aria-label={`Remove ${d.name}`} onClick={() => removeDomain(d)}>
@@ -304,7 +319,7 @@ export function NetworkPage() {
               </div>
 
               {open && (
-                <div className="card inset" style={{ margin: '0 0 12px 21px' }}>
+                <div className="card inset" id={panelId} style={{ margin: '0 0 12px 21px' }}>
                   <div className="dim" style={{ marginBottom: 8 }}>
                     Create this record at your registrar (GoDaddy, Namecheap, Cloudflare DNS, …):
                   </div>

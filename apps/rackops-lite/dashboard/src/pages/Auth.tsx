@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Server, LogIn, UserPlus, KeyRound, ArrowLeft, MailQuestion } from 'lucide-react';
 import { api, setToken } from '../api';
-import { InfoTip, PasswordInput } from '../components/ui';
+import { cleanError } from '../components/toast';
+import { Field, InfoTip, PasswordInput } from '../components/ui';
 
 type Mode = 'login' | 'signup' | 'forgot' | 'reset';
 
@@ -40,7 +41,7 @@ export function AuthScreen({ onAuthed }: { onAuthed: () => void }) {
       try {
         const r = await api.forgotPassword(email);
         setNotice(r.message);
-      } catch (e) { setError(String(e).replace(/^Error: \d+: /, '')); }
+      } catch (e) { setError(cleanError(e)); }
       setBusy(false);
       return;
     }
@@ -60,7 +61,7 @@ export function AuthScreen({ onAuthed }: { onAuthed: () => void }) {
       if (mode === 'reset') window.history.replaceState(null, '', '/');
       onAuthed();
     } catch (e) {
-      setError(String(e).replace(/^Error: \d+: /, ''));
+      setError(cleanError(e));
       setBusy(false);
     }
   };
@@ -117,38 +118,44 @@ export function AuthScreen({ onAuthed }: { onAuthed: () => void }) {
         )}
 
         {mode === 'signup' && (
-          <div className="field">
-            <label>Full name</label>
-            <input className="input" value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Chief Operator" />
-          </div>
+          <Field label="Full name">
+            {(p) => (
+              <input className="input" {...p} value={fullName} autoComplete="name"
+                onChange={(e) => setFullName(e.target.value)} placeholder="Chief Operator" />
+            )}
+          </Field>
         )}
         {mode !== 'reset' && (
-          <div className="field">
-            <label>Email address</label>
-            <input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@lab.local"
-              onKeyDown={(e) => e.key === 'Enter' && submit()} />
-          </div>
+          <Field label="Email address">
+            {(p) => (
+              <input className="input" {...p} type="email" value={email} autoComplete="email"
+                onChange={(e) => setEmail(e.target.value)} placeholder="you@lab.local"
+                onKeyDown={(e) => e.key === 'Enter' && submit()} />
+            )}
+          </Field>
         )}
         {mode !== 'forgot' && (
-          <div className="field">
-            <label>{mode === 'reset' ? 'New password' : 'Password'}</label>
-            <PasswordInput value={password} onChange={setPassword} placeholder="8+ characters"
-              autoComplete={mode === 'login' ? 'current-password' : 'new-password'} onEnter={submit} />
-          </div>
+          <Field label={mode === 'reset' ? 'New password' : 'Password'}>
+            {(p) => (
+              <PasswordInput {...p} value={password} onChange={setPassword} placeholder="8+ characters"
+                autoComplete={mode === 'login' ? 'current-password' : 'new-password'} onEnter={submit} />
+            )}
+          </Field>
         )}
         {(mode === 'signup' || mode === 'reset') && (
-          <div className="field">
-            <label>Confirm password</label>
-            <PasswordInput value={confirm} onChange={setConfirm} placeholder="same password again"
-              autoComplete="new-password" onEnter={submit} />
-            {confirm.length > 0 && confirm !== password && (
-              <span className="faint" style={{ color: 'var(--warn)' }}>Passwords don&rsquo;t match yet.</span>
+          <Field label="Confirm password"
+            hint={confirm.length > 0 && confirm !== password
+              ? <span style={{ color: 'var(--warn)' }}>Passwords don&rsquo;t match yet.</span>
+              : undefined}>
+            {(p) => (
+              <PasswordInput {...p} value={confirm} onChange={setConfirm} placeholder="same password again"
+                autoComplete="new-password" onEnter={submit} />
             )}
-          </div>
+          </Field>
         )}
 
-        {error && <div className="badge red" style={{ width: '100%', marginBottom: 12 }}>{error}</div>}
-        {notice && <div className="badge amber" style={{ width: '100%', marginBottom: 12, lineHeight: 1.5 }}>{notice}</div>}
+        {error && <div className="badge red" role="alert" style={{ width: '100%', marginBottom: 12 }}>{error}</div>}
+        {notice && <div className="badge amber" role="status" style={{ width: '100%', marginBottom: 12, lineHeight: 1.5 }}>{notice}</div>}
 
         <button className="btn primary" style={{ width: '100%' }} disabled={busy} onClick={submit}>
           {mode === 'signup' ? <><UserPlus size={14} /> Create account</>

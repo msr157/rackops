@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { Copy, Check, X, ExternalLink, Loader, Info, Eye, EyeOff } from 'lucide-react';
 import type { Service, IngressConfig } from '../api';
+import { useDialogBehavior } from './useDialog';
 
 /* ---- InfoTip: the ⓘ that explains anything non-obvious ---- */
 
@@ -8,32 +9,69 @@ import type { Service, IngressConfig } from '../api';
 // touch users aren't left out. Content is plain language, never jargon.
 export function InfoTip({ children, wide }: { children: React.ReactNode; wide?: boolean }) {
   const [open, setOpen] = useState(false);
+  const id = useId();
   return (
-    <span
+    <button
+      type="button"
       className={`infotip ${wide ? 'wide' : ''} ${open ? 'open' : ''}`}
-      tabIndex={0}
       aria-label="More information"
-      onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+      aria-describedby={id}
+      aria-expanded={open}
+      // preventDefault keeps a tip inside a <label> from also toggling its field.
+      onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpen((v) => !v); }}
       onBlur={() => setOpen(false)}
-      onKeyDown={(e) => { if (e.key === 'Escape') setOpen(false); }}
     >
       <Info size={12} aria-hidden />
-      <span className="infotip-bubble" role="tooltip">{children}</span>
-    </span>
+      <span className="infotip-bubble" role="tooltip" id={id}>{children}</span>
+    </button>
+  );
+}
+
+/* ---- Field: the one labelled-input pattern ---- */
+
+// Field owns the label/control association every form in the product depends
+// on: it mints an id, points the <label> at it, and hands the id to the
+// control. Screen readers announce a real name instead of "edit text".
+export function Field({ label, info, hint, error, style, children }: {
+  label: React.ReactNode;
+  info?: React.ReactNode;
+  hint?: React.ReactNode;
+  error?: string;
+  style?: React.CSSProperties;
+  children: (props: { id: string; 'aria-describedby'?: string }) => React.ReactNode;
+}) {
+  const id = useId();
+  const hintId = `${id}-hint`;
+  const describedBy = error || hint ? hintId : undefined;
+  return (
+    <div className="field" style={style}>
+      {/* The tip sits beside the <label>, never inside it: label content
+          becomes the field's accessible name, and a paragraph of help text
+          buried in that name is worse than no tip at all. */}
+      <div className="field-label">
+        <label htmlFor={id}>{label}</label>
+        {info && <InfoTip wide>{info}</InfoTip>}
+      </div>
+      {children({ id, 'aria-describedby': describedBy })}
+      {error
+        ? <span className="field-error" id={hintId}>{error}</span>
+        : hint && <span className="faint" id={hintId}>{hint}</span>}
+    </div>
   );
 }
 
 /* ---- PasswordInput: input with a show/hide eye toggle ---- */
 
-export function PasswordInput({ value, onChange, placeholder, autoComplete, onEnter }: {
-  value: string; onChange: (v: string) => void;
+export function PasswordInput({ id, value, onChange, placeholder, autoComplete, onEnter, ...rest }: {
+  id?: string; value: string; onChange: (v: string) => void;
   placeholder?: string; autoComplete?: string; onEnter?: () => void;
+  'aria-describedby'?: string;
 }) {
   const [show, setShow] = useState(false);
   return (
     <div className="pw-wrap">
-      <input className="input" type={show ? 'text' : 'password'} value={value}
-        placeholder={placeholder} autoComplete={autoComplete}
+      <input className="input" id={id} type={show ? 'text' : 'password'} value={value}
+        placeholder={placeholder} autoComplete={autoComplete} {...rest}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => e.key === 'Enter' && onEnter?.()} />
       <button type="button" className="pw-eye" tabIndex={-1}
@@ -61,8 +99,12 @@ export function ledClass(status: string): 'ok' | 'warn' | 'crit' | 'off' {
   }
 }
 
-export function Led({ status, lg }: { status: string; lg?: boolean }) {
-  return <span className={`led ${ledClass(status)} ${lg ? 'lg' : ''}`} aria-hidden />;
+// The LED is colour-only, so anything that carries status by LED alone passes
+// `label` to emit the word for screen readers.
+export function Led({ status, lg, label }: { status: string; lg?: boolean; label?: boolean }) {
+  const dot = <span className={`led ${ledClass(status)} ${lg ? 'lg' : ''}`} aria-hidden />;
+  if (!label) return dot;
+  return <>{dot}<span className="sr-only">{status}</span></>;
 }
 
 // StatusBadge: LED + plain-word label. Used everywhere a status appears.
@@ -90,11 +132,32 @@ export function Kpi({ icon, label, value, unit, children }: {
   );
 }
 
+// Every usage sits beside its own numeric readout, so the bar itself is
+// decoration. It scales rather than animating width — no layout work per tick.
 export function UsageBar({ pct, thick }: { pct: number; thick?: boolean }) {
   const cls = pct > 90 ? 'crit' : pct > 75 ? 'warn' : 'ok';
+  const safe = Math.max(0, Math.min(Number.isFinite(pct) ? pct : 0, 100));
   return (
-    <div className={`bar ${thick ? 'thick' : ''}`}>
-      <div className={`bar-fill ${cls}`} style={{ width: `${Math.min(pct, 100)}%` }} />
+    <div className={`bar ${thick ? 'thick' : ''}`} aria-hidden>
+      <div className={`bar-fill ${cls}`} style={{ transform: `scaleX(${safe / 100})` }} />
+    </div>
+  );
+}
+
+/* ---- Loading placeholders ---- */
+
+// Skeletons stand in for content that is on its way. They exist so a list that
+// is still loading never renders as a list that is empty.
+export function Skeleton({ height = 14, width, radius }: {
+  height?: number | string; width?: number | string; radius?: number | string;
+}) {
+  return <span className="skeleton" style={{ height, width, borderRadius: radius }} />;
+}
+
+export function SkeletonRows({ count = 3, height = 52 }: { count?: number; height?: number }) {
+  return (
+    <div className="stack" style={{ gap: 8 }} aria-hidden>
+      {Array.from({ length: count }, (_, i) => <Skeleton key={i} height={height} radius="var(--r-md)" />)}
     </div>
   );
 }
@@ -143,11 +206,18 @@ export function Modal({ title, icon, width, onClose, children }: {
   title: React.ReactNode; icon?: React.ReactNode; width?: number;
   onClose: () => void; children: React.ReactNode;
 }) {
+  // container: a modal that opens on its Close button reads as "Close" first;
+  // focusing the box announces the title. Modals whose own field asks for
+  // focus keep it.
+  const ref = useDialogBehavior<HTMLDivElement>(onClose, { initialFocus: 'container' });
+  const titleId = useId();
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" style={width ? { width } : undefined} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+      <div ref={ref} className="modal" tabIndex={-1} style={width ? { width } : undefined}
+        onClick={(e) => e.stopPropagation()}
+        role="dialog" aria-modal="true" aria-labelledby={titleId}>
         <div className="row spread" style={{ marginBottom: 16 }}>
-          <h2 style={{ margin: 0 }} className="row">{icon} {title}</h2>
+          <h2 id={titleId} style={{ margin: 0 }} className="row">{icon} {title}</h2>
           <button className="btn sm ghost" onClick={onClose} aria-label="Close"><X size={14} /></button>
         </div>
         {children}

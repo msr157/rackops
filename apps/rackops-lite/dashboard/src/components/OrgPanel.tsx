@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useId, useState } from 'react';
 import {
   Building2, Check, Copy, Link2, Pencil, Plus, Shield, Trash2, UserPlus, UsersRound, X,
 } from 'lucide-react';
@@ -6,7 +6,7 @@ import { api, getActiveOrg, setActiveOrg } from '../api';
 import type { Invitation, Organization, OrgMember, OrgPermissions, Project, User } from '../api';
 import { useToast, cleanError } from './toast';
 import { useConfirm } from './confirm';
-import { InfoTip, Modal, Spinner, timeAgo } from './ui';
+import { Field, InfoTip, Modal, Spinner, timeAgo } from './ui';
 
 // OrgPanel: the Settings → Organization tab. Rename/delete the active org,
 // manage members (role + granular permissions), and mint invitation links.
@@ -22,6 +22,7 @@ export function OrgPanel() {
   const [name, setName] = useState('');
   const [editing, setEditing] = useState<OrgMember | null>(null);
   const [inviting, setInviting] = useState(false);
+  const renameId = useId();
 
   const load = useCallback(() => {
     api.orgs().then((orgs) => {
@@ -112,10 +113,16 @@ export function OrgPanel() {
         <div className="row spread wrap">
           {renaming ? (
             <div className="row" style={{ flex: 1 }}>
-              <input className="input" style={{ maxWidth: 280 }} value={name} autoFocus
-                onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && rename()} />
-              <button className="btn sm primary" onClick={rename}><Check size={12} /></button>
-              <button className="btn sm ghost" onClick={() => { setRenaming(false); setName(org.name); }}><X size={12} /></button>
+              <label className="sr-only" htmlFor={renameId}>Organization name</label>
+              <input className="input" id={renameId} style={{ maxWidth: 280 }} value={name} autoFocus
+                onChange={(e) => setName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') rename();
+                  if (e.key === 'Escape') { setRenaming(false); setName(org.name); }
+                }} />
+              <button className="btn sm primary" onClick={rename} aria-label="Save name"><Check size={12} /></button>
+              <button className="btn sm ghost" aria-label="Cancel rename"
+                onClick={() => { setRenaming(false); setName(org.name); }}><X size={12} /></button>
             </div>
           ) : (
             <div className="row">
@@ -161,6 +168,7 @@ export function OrgPanel() {
             <div className="row">
               {canManage && me?.id !== m.userId ? (
                 <select className="input" style={{ width: 110, padding: '5px 8px' }} value={m.role}
+                  aria-label={`Role for ${userLabel(m.userId)}`}
                   onChange={(e) => setRole(m, e.target.value)}>
                   <option value="owner">owner</option>
                   <option value="admin">admin</option>
@@ -170,7 +178,7 @@ export function OrgPanel() {
                 <span className="badge">{m.role}</span>
               )}
               {canManage && m.role === 'member' && (
-                <button className="btn sm" onClick={() => setEditing(m)}>
+                <button className="btn sm" aria-label={`Edit permissions for ${userLabel(m.userId)}`} onClick={() => setEditing(m)}>
                   <Shield size={12} /> Permissions
                 </button>
               )}
@@ -326,18 +334,20 @@ function InviteModal({ org, onClose, onDone }: { org: Organization; onClose: () 
             You&rsquo;ll get a link to send them — it lets them create their account already
             inside this organization. Links expire after 48 hours.
           </div>
-          <div className="field">
-            <label>Email</label>
-            <input className="input" type="email" value={email} placeholder="teammate@example.com" autoFocus
-              onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && create()} />
-          </div>
-          <div className="field">
-            <label>Role</label>
-            <select className="input" value={role} onChange={(e) => setRole(e.target.value)}>
-              <option value="member">member — works within granted permissions</option>
-              <option value="admin">admin — manages members and settings</option>
-            </select>
-          </div>
+          <Field label="Email">
+            {(p) => (
+              <input className="input" {...p} type="email" value={email} placeholder="teammate@example.com" autoFocus
+                onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && create()} />
+            )}
+          </Field>
+          <Field label="Role">
+            {(p) => (
+              <select className="input" {...p} value={role} onChange={(e) => setRole(e.target.value)}>
+                <option value="member">member — works within granted permissions</option>
+                <option value="admin">admin — manages members and settings</option>
+              </select>
+            )}
+          </Field>
           <button className="btn primary" style={{ width: '100%' }} disabled={busy} onClick={create}>
             {busy ? <Spinner size={13} /> : <Plus size={13} />} Create invitation link
           </button>

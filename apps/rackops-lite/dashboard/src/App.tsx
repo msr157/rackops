@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Routes, Route, NavLink, Navigate, useNavigate } from 'react-router-dom';
 import {
   LayoutGrid, Boxes, HardDrive, Network as NetworkIcon, Settings, LogOut, Rocket, Bot, Search, Plus,
-  ArrowUpCircle, X, UserRound, LifeBuoy,
+  ArrowUpCircle, X, UserRound, LifeBuoy, CloudOff, RotateCw,
 } from 'lucide-react';
 import { api, getToken, clearToken, getActiveOrg } from './api';
 import type { VersionInfo, User } from './api';
@@ -13,7 +13,7 @@ import { CopilotProvider, useCopilot } from './components/CopilotDrawer';
 import { CommandPalette } from './components/CommandPalette';
 import { AddMachineModal } from './components/AddMachineModal';
 import { OrgSwitcher } from './components/OrgSwitcher';
-import { Led, Spinner } from './components/ui';
+import { Led, Spinner, timeAgo } from './components/ui';
 import { AuthScreen } from './pages/Auth';
 import { InvitationPage } from './pages/Invitation';
 import { HomePage } from './pages/Home';
@@ -53,7 +53,7 @@ export default function App() {
     return <ToastProvider><InvitationPage /></ToastProvider>;
   }
 
-  if (authed === null) return null;
+  if (authed === null) return <BootScreen />;
   if (!authed) return <AuthScreen onAuthed={() => setAuthed(true)} />;
 
   return (
@@ -69,8 +69,43 @@ export default function App() {
   );
 }
 
+// BootScreen fills the gap between load and the auth answer. The rack-unit
+// mark with a warming LED says "this is RackOps, and it is starting" — the
+// blank frame it replaced said nothing at all.
+function BootScreen() {
+  return (
+    <div className="boot" role="status">
+      <div className="brand-unit boot-unit"><span className="led warn" /></div>
+      <div className="boot-name">RackOps</div>
+      <div className="faint">Starting up…</div>
+    </div>
+  );
+}
+
+// ConnectionBanner is the difference between "you have nothing" and "we can't
+// see your rack right now". It stays until the poll gets an answer back.
+function ConnectionBanner() {
+  const { reachable, lastSync, refresh } = useData();
+  if (reachable) return null;
+  return (
+    <div className="offline-banner" role="alert">
+      <CloudOff size={16} style={{ color: 'var(--crit)', flexShrink: 0 }} aria-hidden />
+      <span style={{ flex: 1 }}>
+        <strong>Can&rsquo;t reach the RackOps server</strong>
+        <span className="dim">
+          {' — retrying every few seconds. '}
+          {lastSync
+            ? `Showing the last known state from ${timeAgo(lastSync)}; your apps keep running.`
+            : 'Nothing has loaded yet, so this page may be blank.'}
+        </span>
+      </span>
+      <button className="btn sm" onClick={refresh}><RotateCw size={12} /> Retry now</button>
+    </div>
+  );
+}
+
 function Shell({ onLogout }: { onLogout: () => void }) {
-  const { overview, services, nodes, alerts } = useData();
+  const { overview, services, nodes, alerts, loaded } = useData();
   const { setOpen: setCopilotOpen } = useCopilot();
   const navigate = useNavigate();
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -94,6 +129,9 @@ function Shell({ onLogout }: { onLogout: () => void }) {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
+
+  // This audience is mostly on Linux, where advertising ⌘K is just wrong.
+  const shortcutHint = /Mac|iPhone|iPad/.test(navigator.userAgent) ? '⌘K' : 'Ctrl K';
 
   const failing = services.filter((s) => s.status === 'failed').length;
   const openAlerts = alerts.filter((a) => !a.resolved).length;
@@ -124,8 +162,10 @@ function Shell({ onLogout }: { onLogout: () => void }) {
         <OrgSwitcher me={me} />
 
         <div className="nav-section">Your rack</div>
+        {/* aria-label carries the name at narrow widths, where the visible
+            label is hidden and the item would otherwise be an unnamed icon. */}
         {nav.map((n) => (
-          <NavLink key={n.to} to={n.to} end={n.end}
+          <NavLink key={n.to} to={n.to} end={n.end} aria-label={n.label}
             className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
             {n.icon} <span className="nav-label">{n.label}</span>
             {n.count !== undefined && n.count > 0 && <span className="count">{n.count}</span>}
@@ -133,24 +173,30 @@ function Shell({ onLogout }: { onLogout: () => void }) {
         ))}
 
         <div className="sidebar-footer">
+          {/* Before anything has loaded there is no count to report — "0/0"
+              would be an assertion the dashboard cannot yet make. */}
           <div className="dim row" style={{ gap: 8, padding: '0 6px' }}>
-            <Led status={overview && overview.nodesOnline === overview.nodesTotal && overview.nodesTotal > 0 ? 'running' : overview?.nodesOnline ? 'building' : 'stopped'} />
-            <span className="nav-label">{overview?.nodesOnline ?? 0}/{overview?.nodesTotal ?? 0} machines online</span>
+            <Led status={!loaded ? 'pending'
+              : overview && overview.nodesOnline === overview.nodesTotal && overview.nodesTotal > 0 ? 'running'
+              : overview?.nodesOnline ? 'building' : 'stopped'} />
+            <span className="nav-label">
+              {loaded && overview ? `${overview.nodesOnline}/${overview.nodesTotal} machines online` : 'checking machines…'}
+            </span>
           </div>
-          <button className="btn" onClick={() => setAddMachine(true)}>
+          <button className="btn" onClick={() => setAddMachine(true)} aria-label="Add machine">
             <Plus size={14} /> <span className="nav-label">Add machine</span>
           </button>
           <div className="row">
-            <NavLink to="/profile" className="btn sm" style={{ flex: 1 }} title="Profile">
+            <NavLink to="/profile" className="btn sm" style={{ flex: 1 }} title="Profile" aria-label="Profile">
               <UserRound size={13} />
             </NavLink>
-            <NavLink to="/support" className="btn sm" style={{ flex: 1 }} title="Support">
+            <NavLink to="/support" className="btn sm" style={{ flex: 1 }} title="Support" aria-label="Support">
               <LifeBuoy size={13} />
             </NavLink>
-            <NavLink to="/settings" className="btn sm" style={{ flex: 1 }} title="Settings">
+            <NavLink to="/settings" className="btn sm" style={{ flex: 1 }} title="Settings" aria-label="Settings">
               <Settings size={13} />
             </NavLink>
-            <button className="btn sm" style={{ flex: 1 }} title="Log out" onClick={onLogout}>
+            <button className="btn sm" style={{ flex: 1 }} title="Log out" aria-label="Log out" onClick={onLogout}>
               <LogOut size={13} />
             </button>
           </div>
@@ -160,8 +206,8 @@ function Shell({ onLogout }: { onLogout: () => void }) {
       <div className="shell-right">
         <header className="topbar">
           <button className="search-trigger" onClick={() => setPaletteOpen(true)}>
-            <Search size={14} /> Jump to app, machine, action…
-            <kbd>⌘K</kbd>
+            <Search size={14} aria-hidden /> Jump to app, machine, action…
+            <kbd>{shortcutHint}</kbd>
           </button>
           <div style={{ marginLeft: 'auto' }} className="row">
             <button className="btn" onClick={() => setCopilotOpen(true)}>
@@ -174,6 +220,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
         </header>
 
         <main className="main">
+          <ConnectionBanner />
           <UpdateBanner />
           <Routes>
             <Route path="/" element={<HomePage onAddMachine={() => setAddMachine(true)} />} />
@@ -228,7 +275,9 @@ function UpdateBanner() {
     try {
       await api.applyUpdate();
       toast.info('Updating — the server restarts shortly, this page will reconnect.');
-      // Poll until the new version answers, then reload onto fresh assets.
+      // Poll until the new version answers, then reload onto fresh assets. If
+      // it never answers, say so instead of reloading onto an unchanged server
+      // and leaving the operator to guess whether the update took.
       const target = info.latest.replace(/^v/, '');
       const poll = setInterval(async () => {
         try {
@@ -236,7 +285,12 @@ function UpdateBanner() {
           if (v.current === target) { clearInterval(poll); window.location.reload(); }
         } catch { /* server restarting */ }
       }, 2000);
-      setTimeout(() => { clearInterval(poll); window.location.reload(); }, 60000);
+      setTimeout(() => {
+        clearInterval(poll);
+        setUpdating(false);
+        toast.err(`The server hasn't come back on ${info.latest} yet. It may still be restarting — `
+          + 'check the server log (journalctl -u rackops) and reload this page.');
+      }, 60000);
     } catch (e) {
       toast.err(cleanError(e));
       setUpdating(false);

@@ -9,7 +9,7 @@ import { InfoTip, Led, StatusBadge, UsageBar, Kpi, EmptyState, formatUptime, sho
 
 // MachinesPage: the physical rack, plus fleet-wide capacity.
 export function MachinesPage({ onAddMachine }: { onAddMachine: () => void }) {
-  const { nodes, services, overview } = useData();
+  const { nodes, services, overview, loaded } = useData();
 
   return (
     <div className="page">
@@ -30,9 +30,9 @@ export function MachinesPage({ onAddMachine }: { onAddMachine: () => void }) {
         </div>
       )}
 
-      <Rack nodes={nodes} services={services} />
+      <Rack nodes={nodes} services={services} loading={!loaded} />
 
-      {nodes.length === 0 && (
+      {loaded && nodes.length === 0 && (
         <div style={{ marginTop: 16 }}>
           <EmptyState title="One command turns any Linux box into part of your rack">
             <div style={{ marginBottom: 14, lineHeight: 1.6 }}>
@@ -237,7 +237,7 @@ export function MachineDetail() {
       <div className="stack" style={{ gap: 8 }}>
         {apps.map((s) => (
           <Link key={s.id} to={`/apps/${s.id}`} className="card clickable row" style={{ padding: '10px 14px', color: 'var(--text)' }}>
-            <Led status={s.status} />
+            <Led status={s.status} label />
             <strong>{s.name}</strong>
             <span className="faint mono" style={{ marginLeft: 'auto' }}>
               {s.status === 'running' ? `${s.cpuPct.toFixed(1)}% cpu · ${s.memUsedMb} MB` : s.status}

@@ -5,12 +5,12 @@ import {
 } from 'lucide-react';
 import { useData } from '../data';
 import { Rack } from '../components/Rack';
-import { InfoTip, Led, UrlChip, publicUrls, timeAgo } from '../components/ui';
+import { InfoTip, Led, SkeletonRows, UrlChip, publicUrls, timeAgo } from '../components/ui';
 
 // Home answers one question at a glance: is everything okay?
 // Anything that needs attention comes first; healthy detail follows.
 export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
-  const { overview, nodes, services, events, alerts, ingress } = useData();
+  const { overview, nodes, services, events, alerts, ingress, loaded, reachable } = useData();
   const navigate = useNavigate();
 
   const failing = services.filter((s) => s.status === 'failed');
@@ -22,19 +22,27 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
 
   return (
     <div className="page">
-      {/* Status banner: the one-glance answer */}
+      {/* Status banner: the one-glance answer. It must never claim an empty
+          rack while the fleet is still loading or the server is unreachable —
+          that reads as data loss at the exact moment it would panic someone. */}
       <div className="hero-banner">
-        <Led lg status={attention > 0 || nodesOffline.length > 0 ? 'failed' : nodes.length === 0 ? 'stopped' : 'running'} />
+        <Led lg label
+          status={!loaded ? 'pending'
+            : attention > 0 || nodesOffline.length > 0 ? 'failed'
+            : nodes.length === 0 ? 'stopped' : 'running'} />
         <div style={{ flex: 1 }}>
           <div style={{ fontFamily: 'var(--display)', fontWeight: 700, fontSize: 17, letterSpacing: '-0.01em' }}>
-            {nodes.length === 0 ? 'Your rack is waiting for its first machine'
+            {!loaded ? (reachable ? 'Reading the rack…' : 'Waiting for the server')
+              : nodes.length === 0 ? 'Your rack is waiting for its first machine'
               : attention > 0 ? `${attention} thing${attention > 1 ? 's' : ''} need${attention > 1 ? '' : 's'} your attention`
               : 'All systems operational'}
           </div>
           <div className="dim" style={{ marginTop: 2 }}>
-            {overview
-              ? `${overview.nodesOnline}/${overview.nodesTotal} machines online · ${running}/${services.length} apps running · fleet CPU ${overview.avgCpuPct}%`
-              : 'connecting…'}
+            {!loaded
+              ? (reachable ? 'connecting…' : 'the control plane is not answering yet')
+              : overview
+                ? `${overview.nodesOnline}/${overview.nodesTotal} machines online · ${running}/${services.length} apps running · fleet CPU ${overview.avgCpuPct}%`
+                : 'connecting…'}
           </div>
         </div>
         {services.length > 0 && (
@@ -102,17 +110,23 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
             {services.slice(0, 6).map((s) => {
               const urls = publicUrls(s, ingress);
               return (
-                <div key={s.id} className="card clickable row" style={{ padding: '11px 14px' }} onClick={() => navigate(`/apps/${s.id}`)}>
-                  <Led status={s.status} />
-                  <strong style={{ minWidth: 90 }}>{s.name}</strong>
-                  {urls.length > 0
-                    ? <UrlChip url={urls[0].url} />
-                    : <span className="faint">not public yet</span>}
+                <div key={s.id} className="card row-card row" style={{ padding: '11px 14px' }}>
+                  <Led status={s.status} label />
+                  <Link to={`/apps/${s.id}`} className="row-link"
+                    style={{ fontWeight: 700, minWidth: 90, maxWidth: 190, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {s.name}
+                  </Link>
+                  <span className="row-actions row" style={{ minWidth: 0 }}>
+                    {urls.length > 0
+                      ? <UrlChip url={urls[0].url} />
+                      : <span className="faint">not public yet</span>}
+                  </span>
                   <span className="faint mono" style={{ marginLeft: 'auto' }}>{s.status === 'running' ? `${s.cpuPct.toFixed(0)}% cpu` : s.status}</span>
                 </div>
               );
             })}
-            {services.length === 0 && nodes.length > 0 && (
+            {!loaded && services.length === 0 && <SkeletonRows count={3} height={44} />}
+            {loaded && services.length === 0 && nodes.length > 0 && (
               <div className="empty">
                 <Rocket size={22} style={{ marginBottom: 8 }} />
                 <div className="empty-title">No apps yet</div>
@@ -120,7 +134,7 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
                 <button className="btn primary" onClick={() => navigate('/apps/new')}><Rocket size={13} /> Deploy your first app</button>
               </div>
             )}
-            {nodes.length === 0 && (
+            {loaded && nodes.length === 0 && (
               <div className="empty">
                 <Server size={22} style={{ marginBottom: 8 }} />
                 <div className="empty-title">Apps run on machines</div>
@@ -135,7 +149,11 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
               A running log of everything the fleet does — deploys, self-healing, machines joining,
               alerts raising and resolving. It updates in real time.
             </InfoTip>
-            <span className="badge amber" style={{ marginLeft: 'auto' }}>LIVE</span>
+            {/* The badge tracks the stream, not the section — claiming LIVE
+                while the server is unreachable is the same lie in miniature. */}
+            <span className={`badge ${reachable ? 'amber' : 'gray'}`} style={{ marginLeft: 'auto' }}>
+              {reachable ? 'LIVE' : 'STALLED'}
+            </span>
           </div>
           <div className="terminal" style={{ maxHeight: 260 }}>
             {events.map((e) => (
@@ -145,7 +163,13 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
                 {e.message}
               </div>
             ))}
-            {events.length === 0 && <span className="faint">quiet so far — activity from deploys, heals, and machines appears here</span>}
+            {events.length === 0 && (
+              <span className="faint">
+                {loaded
+                  ? 'quiet so far — activity from deploys, heals, and machines appears here'
+                  : 'waiting for the server…'}
+              </span>
+            )}
           </div>
         </div>
 
@@ -158,7 +182,7 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
             </InfoTip>
             <Link to="/machines" className="faint" style={{ marginLeft: 'auto', fontWeight: 400 }}>details →</Link>
           </div>
-          <Rack nodes={nodes} services={services} />
+          <Rack nodes={nodes} services={services} loading={!loaded} />
 
           {overview && nodes.length > 0 && (
             <div className="kpi-row" style={{ marginTop: 14 }}>
@@ -181,7 +205,7 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
 // SetupChecklist guides the first-run journey: machine → app → public URL.
 // It ticks off live via SSE updates and disappears once complete (or skipped).
 function SetupChecklist({ onAddMachine }: { onAddMachine: () => void }) {
-  const { nodes, services, ingress } = useData();
+  const { nodes, services, ingress, loaded } = useData();
   const navigate = useNavigate();
   const [dismissed, setDismissed] = useState(() => localStorage.getItem('rackops-setup-done') === '1');
 
@@ -190,7 +214,9 @@ function SetupChecklist({ onAddMachine }: { onAddMachine: () => void }) {
   const hasPublic = services.some((s) => publicUrls(s, ingress).length > 0);
   const allDone = hasMachine && hasApp && hasPublic;
 
-  if (dismissed || allDone) return null;
+  // Never greet an established operator with first-run steps because the
+  // fleet hasn't arrived yet.
+  if (!loaded || dismissed || allDone) return null;
 
   const firstApp = services[0];
   const steps = [

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Building2, LogIn, UserPlus } from 'lucide-react';
 import { api, setToken } from '../api';
-import { PasswordInput } from '../components/ui';
+import { cleanError } from '../components/toast';
+import { Field, PasswordInput } from '../components/ui';
 
 // InvitationPage: the landing for /invitation?token=… copy-links. The invitee
 // sets a name and password and lands in the org — no admin round-trip.
@@ -19,7 +20,7 @@ export function InvitationPage() {
     if (!token) { setInvalid('This invitation link is incomplete — ask for a new one.'); return; }
     api.invitationInfo(token)
       .then(setInfo)
-      .catch((e) => setInvalid(String(e).replace(/^Error: \d+: /, '')));
+      .catch((e) => setInvalid(cleanError(e)));
   }, [token]);
 
   const submit = async () => {
@@ -32,7 +33,7 @@ export function InvitationPage() {
       setToken(r.token);
       window.location.href = '/'; // fresh boot into the authed shell
     } catch (e) {
-      setError(String(e).replace(/^Error: \d+: /, ''));
+      setError(cleanError(e));
       setBusy(false);
     }
   };
@@ -68,37 +69,39 @@ export function InvitationPage() {
 
         {invalid && (
           <>
-            <div className="badge red" style={{ width: '100%', marginBottom: 14, lineHeight: 1.5 }}>{invalid}</div>
+            <div className="badge red" role="alert" style={{ width: '100%', marginBottom: 14, lineHeight: 1.5 }}>{invalid}</div>
             <a className="btn" style={{ width: '100%' }} href="/"><LogIn size={13} /> Go to sign in</a>
           </>
         )}
 
         {info && (
           <>
-            <div className="field">
-              <label>Email</label>
-              <input className="input" value={info.email} disabled />
-            </div>
-            <div className="field">
-              <label>Full name</label>
-              <input className="input" value={fullName} placeholder="Your name"
-                onChange={(e) => setFullName(e.target.value)} />
-            </div>
-            <div className="field">
-              <label>Password</label>
-              <PasswordInput value={password} onChange={setPassword} placeholder="8+ characters"
-                autoComplete="new-password" onEnter={submit} />
-            </div>
-            <div className="field">
-              <label>Confirm password</label>
-              <PasswordInput value={confirm} onChange={setConfirm} placeholder="same password again"
-                autoComplete="new-password" onEnter={submit} />
-              {confirm.length > 0 && confirm !== password && (
-                <span className="faint" style={{ color: 'var(--warn)' }}>Passwords don&rsquo;t match yet.</span>
+            <Field label="Email">
+              {(p) => <input className="input" {...p} value={info.email} disabled />}
+            </Field>
+            <Field label="Full name">
+              {(p) => (
+                <input className="input" {...p} value={fullName} placeholder="Your name" autoComplete="name"
+                  onChange={(e) => setFullName(e.target.value)} />
               )}
-            </div>
+            </Field>
+            <Field label="Password">
+              {(p) => (
+                <PasswordInput {...p} value={password} onChange={setPassword} placeholder="8+ characters"
+                  autoComplete="new-password" onEnter={submit} />
+              )}
+            </Field>
+            <Field label="Confirm password"
+              hint={confirm.length > 0 && confirm !== password
+                ? <span style={{ color: 'var(--warn)' }}>Passwords don&rsquo;t match yet.</span>
+                : undefined}>
+              {(p) => (
+                <PasswordInput {...p} value={confirm} onChange={setConfirm} placeholder="same password again"
+                  autoComplete="new-password" onEnter={submit} />
+              )}
+            </Field>
 
-            {error && <div className="badge red" style={{ width: '100%', marginBottom: 12 }}>{error}</div>}
+            {error && <div className="badge red" role="alert" style={{ width: '100%', marginBottom: 12 }}>{error}</div>}
 
             <button className="btn primary" style={{ width: '100%' }} disabled={busy} onClick={submit}>
               <UserPlus size={14} /> Create account & join

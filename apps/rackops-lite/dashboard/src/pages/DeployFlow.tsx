@@ -1,14 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Rocket, Package, Container, GitBranch, Layers, Sparkles, Plus, Trash2, ArrowLeft, ArrowRight,
-  Globe, CheckCircle2, ScrollText, Bot, Server, Home, Wrench, Gamepad2, Database,
+  Globe, CheckCircle2, ScrollText, Bot, Server, Home, Wrench, Gamepad2, Database, KeyRound,
 } from 'lucide-react';
 import { api, subscribeLogChunks } from '../api';
 import type { Template, EnvVar, PlacementScore, Service, Deployment, LogChunk } from '../api';
 import { useData } from '../data';
 import { useToast, cleanError } from '../components/toast';
-import { InfoTip, Led, Spinner, UrlChip, publicUrls } from '../components/ui';
+import { Field, Led, Spinner, UrlChip, dnsLabel, publicUrls } from '../components/ui';
 
 type Source = 'template' | 'image' | 'git' | 'compose';
 
@@ -32,6 +32,7 @@ export function DeployFlow() {
 
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [source, setSource] = useState<Source>('template');
+  const searchId = useId();
 
   // step 1 state
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -174,14 +175,16 @@ export function DeployFlow() {
 
           {source === 'template' && (
             <>
-              <div className="row wrap" style={{ marginBottom: 10 }}>
+              <div className="row wrap" style={{ marginBottom: 10 }} role="group" aria-label="Filter templates by category">
                 {CATEGORIES.map((c) => (
-                  <button key={c.key} className={`btn sm ${category === c.key ? 'primary' : ''}`} onClick={() => setCategory(c.key)}>
+                  <button key={c.key} className={`btn sm ${category === c.key ? 'primary' : ''}`}
+                    aria-pressed={category === c.key} onClick={() => setCategory(c.key)}>
                     {c.icon} {c.label}
                   </button>
                 ))}
               </div>
-              <input className="input" placeholder={`Search ${templates.length || '45+'} templates…`} value={search}
+              <label className="sr-only" htmlFor={searchId}>Search templates</label>
+              <input className="input" id={searchId} placeholder={`Search ${templates.length || '45+'} templates…`} value={search}
                 onChange={(e) => setSearch(e.target.value)} style={{ marginBottom: 10 }} autoFocus />
               <div style={{ maxHeight: 380, overflowY: 'auto', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                 {filtered.map((t) => (
@@ -202,41 +205,46 @@ export function DeployFlow() {
           )}
 
           {source === 'image' && (
-            <div className="field">
-              <label>Container image</label>
-              <input className="input mono" placeholder="nginx:alpine" value={image} autoFocus
-                onChange={(e) => setImage(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && sourceReady && setStep(2)} />
-              <span className="faint">Anything public on Docker Hub, GHCR, or any registry your machines can reach.</span>
-            </div>
+            <Field label="Container image"
+              hint="Anything public on Docker Hub, GHCR, or any registry your machines can reach.">
+              {(p) => (
+                <input className="input mono" {...p} placeholder="nginx:alpine" value={image} autoFocus
+                  onChange={(e) => setImage(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && sourceReady && setStep(2)} />
+              )}
+            </Field>
           )}
 
           {source === 'git' && (
             <>
-              <div className="field">
-                <label>Repository URL</label>
-                <input className="input mono" placeholder="https://github.com/user/repo" value={gitRepo} autoFocus
-                  onChange={(e) => setGitRepo(e.target.value)} />
-                <span className="faint">Dockerfile used if present; otherwise the stack (Node/Go/Python/static) is detected automatically.</span>
-              </div>
+              <Field label="Repository URL"
+                hint="Dockerfile used if present; otherwise the stack (Node/Go/Python/static) is detected automatically.">
+                {(p) => (
+                  <input className="input mono" {...p} placeholder="https://github.com/user/repo" value={gitRepo} autoFocus
+                    onChange={(e) => setGitRepo(e.target.value)} />
+                )}
+              </Field>
               <div className="grid-2">
-                <div className="field">
-                  <label>Branch</label>
-                  <input className="input mono" value={gitBranch} onChange={(e) => setGitBranch(e.target.value)} />
-                </div>
-                <div className="field">
-                  <label>Access token (private repos)</label>
-                  <input className="input" type="password" placeholder="optional" value={gitToken} onChange={(e) => setGitToken(e.target.value)} />
-                </div>
+                <Field label="Branch">
+                  {(p) => <input className="input mono" {...p} value={gitBranch} onChange={(e) => setGitBranch(e.target.value)} />}
+                </Field>
+                <Field label="Access token (private repos)">
+                  {(p) => (
+                    <input className="input" {...p} type="password" placeholder="optional" value={gitToken}
+                      onChange={(e) => setGitToken(e.target.value)} />
+                  )}
+                </Field>
               </div>
             </>
           )}
 
           {source === 'compose' && (
-            <div className="field">
-              <label>docker-compose.yml</label>
-              <textarea className="input mono" rows={10} placeholder={'services:\n  web:\n    image: nginx:alpine\n    ports:\n      - "8088:80"'}
-                value={composeYml} onChange={(e) => setComposeYml(e.target.value)} style={{ resize: 'vertical' }} autoFocus />
-            </div>
+            <Field label="docker-compose.yml">
+              {(p) => (
+                <textarea className="input mono" {...p} rows={10}
+                  placeholder={'services:\n  web:\n    image: nginx:alpine\n    ports:\n      - "8088:80"'}
+                  value={composeYml} onChange={(e) => setComposeYml(e.target.value)} style={{ resize: 'vertical' }} autoFocus />
+              )}
+            </Field>
           )}
 
           {source !== 'template' && (
@@ -259,53 +267,58 @@ export function DeployFlow() {
             </div>
           )}
 
-          <div className="field">
-            <label>App name</label>
-            <input className="input" placeholder="my-app" value={name} autoFocus
-              onChange={(e) => setName(e.target.value)} />
-          </div>
+          <Field label="App name"
+            error={name.trim() !== '' && dnsLabel(name) !== name.trim().toLowerCase()
+              ? `Will be published as "${dnsLabel(name)}" — URLs only allow lowercase letters, numbers, and dashes.`
+              : undefined}>
+            {(p) => (
+              <input className="input" {...p} placeholder="my-app" value={name} autoFocus
+                onChange={(e) => setName(e.target.value)} />
+            )}
+          </Field>
 
           {isCompose ? (
-            <div className="field">
-              <label>Web port {suggesting && <span className="faint">· finding a free one…</span>}</label>
-              <input className="input mono" placeholder="8080" value={hostPort}
-                onChange={(e) => { setHostPort(e.target.value.replace(/\D/g, '')); setHostTouched(true); }} />
-              <span className="faint">The stack publishes its own ports; RackOps routes to this one. Auto-picked to avoid clashes.</span>
-            </div>
+            <Field
+              label={<>Web port {suggesting && <span className="faint">· finding a free one…</span>}</>}
+              hint="The stack publishes its own ports; RackOps routes to this one. Auto-picked to avoid clashes.">
+              {(p) => (
+                <input className="input mono" {...p} placeholder="8080" value={hostPort}
+                  onChange={(e) => { setHostPort(e.target.value.replace(/\D/g, '')); setHostTouched(true); }} />
+              )}
+            </Field>
           ) : (
             <div className="grid-2">
-              <div className="field">
-                <label>App listens on port</label>
-                <input className="input mono" placeholder="8080" value={containerPort}
-                  onChange={(e) => setContainerPort(e.target.value.replace(/\D/g, ''))} />
-                <span className="faint">{tpl ? 'From the template — the port inside the container.' : "The port your app listens on inside the container."}</span>
-              </div>
-              <div className="field">
-                <label>Reachable on host port {suggesting && <span className="faint">· finding a free one…</span>}</label>
-                <input className="input mono" placeholder="auto" value={hostPort}
-                  onChange={(e) => { setHostPort(e.target.value.replace(/\D/g, '')); setHostTouched(true); }} />
-                <span className="faint">
-                  How you'll reach it — auto-picked to avoid clashes.
-                  {containerPort && hostPort && ` Maps ${hostPort} → ${containerPort}.`}
-                </span>
-              </div>
+              <Field label="App listens on port"
+                hint={tpl ? 'From the template — the port inside the container.' : 'The port your app listens on inside the container.'}>
+                {(p) => (
+                  <input className="input mono" {...p} placeholder="8080" value={containerPort}
+                    onChange={(e) => setContainerPort(e.target.value.replace(/\D/g, ''))} />
+                )}
+              </Field>
+              <Field
+                label={<>Reachable on host port {suggesting && <span className="faint">· finding a free one…</span>}</>}
+                hint={<>How you&rsquo;ll reach it — auto-picked to avoid clashes.
+                  {containerPort && hostPort && ` Maps ${hostPort} → ${containerPort}.`}</>}>
+                {(p) => (
+                  <input className="input mono" {...p} placeholder="auto" value={hostPort}
+                    onChange={(e) => { setHostPort(e.target.value.replace(/\D/g, '')); setHostTouched(true); }} />
+                )}
+              </Field>
             </div>
           )}
 
-          <div className="field">
-            <label>
-              Machine
-              <InfoTip wide>
-                &ldquo;Auto&rdquo; scores every online machine in this organization on CPU, memory,
-                thermal, and storage headroom (plus GPU when the app needs one) and picks the
-                winner — you&rsquo;ll see the choice and why before anything deploys.
-              </InfoTip>
-            </label>
-            <select className="input" value={nodeId} onChange={(e) => setNodeId(e.target.value)}>
-              <option value="auto">Auto — pick the best machine for me</option>
-              {nodes.map((n) => <option key={n.id} value={n.id}>{n.name}{n.status !== 'online' ? ' — offline' : ''}</option>)}
-            </select>
-          </div>
+          <Field label="Machine" info={<>
+            &ldquo;Auto&rdquo; scores every online machine in this organization on CPU, memory,
+            thermal, and storage headroom (plus GPU when the app needs one) and picks the
+            winner — you&rsquo;ll see the choice and why before anything deploys.
+          </>}>
+            {(p) => (
+              <select className="input" {...p} value={nodeId} onChange={(e) => setNodeId(e.target.value)}>
+                <option value="auto">Auto — pick the best machine for me</option>
+                {nodes.map((n) => <option key={n.id} value={n.id}>{n.name}{n.status !== 'online' ? ' — offline' : ''}</option>)}
+              </select>
+            )}
+          </Field>
           {nodeId === 'auto' && best && (
             <div className="card" style={{ marginBottom: 14, borderColor: 'var(--amber)' }}>
               <div className="row">
@@ -325,16 +338,25 @@ export function DeployFlow() {
             </div>
           )}
 
-          <div className="field">
-            <label>Environment variables{tpl && (tpl.env ?? []).length > 0 ? ' — pre-filled from the template' : ' (optional)'}</label>
+          {/* A repeating row can't use one <label>, so each input names itself
+              and its own variable — "value for POSTGRES_PASSWORD", not "edit text". */}
+          <fieldset className="field field-set">
+            <legend>Environment variables{tpl && (tpl.env ?? []).length > 0 ? ' — pre-filled from the template' : ' (optional)'}</legend>
             {envVars.map((v, i) => (
               <div className="row" key={i}>
-                <input className="input mono" placeholder="KEY" value={v.key}
+                <input className="input mono" placeholder="KEY" value={v.key} aria-label={`Variable ${i + 1} name`}
                   onChange={(e) => setEnvVars(envVars.map((x, j) => (j === i ? { ...x, key: e.target.value } : x)))} />
                 <input className="input mono" placeholder={v.secret ? 'auto-generated if blank' : 'value'}
                   type={v.secret ? 'password' : 'text'} value={v.value}
+                  aria-label={v.key ? `Value for ${v.key}` : `Variable ${i + 1} value`}
                   onChange={(e) => setEnvVars(envVars.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))} />
-                <button className="btn sm danger" aria-label="Remove variable"
+                <button className="btn sm" aria-pressed={v.secret}
+                  title={v.secret ? 'Shown as secret' : 'Mask as secret'}
+                  aria-label={v.secret ? `Stop masking ${v.key || 'this variable'}` : `Mask ${v.key || 'this variable'} as secret`}
+                  onClick={() => setEnvVars(envVars.map((x, j) => (j === i ? { ...x, secret: !x.secret } : x)))}>
+                  <KeyRound size={12} style={v.secret ? { color: 'var(--amber)' } : undefined} />
+                </button>
+                <button className="btn sm danger" aria-label={`Remove ${v.key || `variable ${i + 1}`}`}
                   onClick={() => setEnvVars(envVars.filter((_, j) => j !== i))}><Trash2 size={12} /></button>
               </div>
             ))}
@@ -342,7 +364,7 @@ export function DeployFlow() {
               onClick={() => setEnvVars([...envVars, { key: '', value: '', secret: false }])}>
               <Plus size={12} /> Add variable
             </button>
-          </div>
+          </fieldset>
 
           <button className="btn primary" style={{ width: '100%' }} disabled={busy || !name.trim()} onClick={launch}>
             {busy ? <Spinner /> : <Rocket size={14} />} {busy ? 'Starting…' : 'Launch'}

@@ -1,19 +1,20 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useId, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { Play, Square, RotateCw, Rocket, Search } from 'lucide-react';
 import { api } from '../api';
 import type { Service } from '../api';
 import { useData } from '../data';
 import { useToast, cleanError } from '../components/toast';
-import { InfoTip, Led, Spinner, StatusBadge, UrlChip, publicUrls } from '../components/ui';
+import { InfoTip, Led, SkeletonRows, Spinner, StatusBadge, UrlChip, publicUrls } from '../components/ui';
 
 // AppsPage: every workload, its health, and where it's reachable — with the
 // full detail one click away.
 export function AppsPage() {
-  const { services, nodes, ingress, refresh, nodeName } = useData();
+  const { services, nodes, ingress, refresh, nodeName, loaded } = useData();
   const navigate = useNavigate();
   const toast = useToast();
   const [search, setSearch] = useState('');
+  const searchId = useId();
   // busy = "serviceId:action" — disables every action button on that service
   // while one is running, and spins the one that's running.
   const [busy, setBusy] = useState('');
@@ -45,11 +46,12 @@ export function AppsPage() {
       </div>
       <div className="page-sub">Everything running on your rack, and where it's reachable</div>
 
-      {services.length > 5 && (
+      {services.length > 1 && (
         <div className="row" style={{ marginBottom: 16 }}>
           <div style={{ position: 'relative', width: 280 }}>
-            <Search size={13} style={{ position: 'absolute', left: 11, top: 10, color: 'var(--faint)' }} />
-            <input className="input" style={{ paddingLeft: 32 }} placeholder="Filter apps…"
+            <Search size={13} style={{ position: 'absolute', left: 11, top: 10, color: 'var(--faint)' }} aria-hidden />
+            <label className="sr-only" htmlFor={searchId}>Filter apps</label>
+            <input className="input" id={searchId} style={{ paddingLeft: 32 }} placeholder="Filter apps…"
               value={search} onChange={(e) => setSearch(e.target.value)} />
           </div>
         </div>
@@ -65,29 +67,39 @@ export function AppsPage() {
           const working = s.status === 'building' || s.status === 'pending';
           const locked = busy.startsWith(`${s.id}:`) || working;
           return (
-            <div key={s.id} className="card clickable" style={{ padding: '13px 16px' }} onClick={() => navigate(`/apps/${s.id}`)}>
+            // The app name is the real link, stretched across the card: the
+            // whole surface stays clickable, and the row is reachable by Tab,
+            // openable with Enter, and middle-clickable into a new tab.
+            <div key={s.id} className="card row-card" style={{ padding: '13px 16px' }}>
               <div className="row spread">
                 <div className="row" style={{ minWidth: 0 }}>
-                  <strong style={{ fontFamily: 'var(--display)', fontSize: 14.5 }}>{s.name}</strong>
+                  <Link to={`/apps/${s.id}`} className="row-link"
+                    style={{ fontFamily: 'var(--display)', fontSize: 14.5, fontWeight: 700 }}>
+                    {s.name}
+                  </Link>
                   <StatusBadge status={s.status} />
                   {s.kind === 'compose' && <span className="tag">stack</span>}
                 </div>
-                <div className="row" onClick={(e) => e.stopPropagation()}>
+                <div className="row row-actions">
                   {s.status === 'running' ? (
-                    <button className="btn sm" disabled={locked} title="Stop" onClick={(e) => act(e, s, 'stop')}>
+                    <button className="btn sm" disabled={locked} title="Stop" aria-label={`Stop ${s.name}`} onClick={(e) => act(e, s, 'stop')}>
                       {busy === `${s.id}:stop` ? <Spinner size={12} /> : <Square size={12} />}
                     </button>
                   ) : (
-                    <button className="btn sm" disabled={locked} title={working ? 'Working — hang tight' : 'Start'} onClick={(e) => act(e, s, 'start')}>
+                    <button className="btn sm" disabled={locked}
+                      title={working ? 'Working — hang tight' : 'Start'}
+                      aria-label={working ? `${s.name} is working` : `Start ${s.name}`}
+                      onClick={(e) => act(e, s, 'start')}>
                       {busy === `${s.id}:start` || working ? <Spinner size={12} /> : <Play size={12} />}
                     </button>
                   )}
-                  <button className="btn sm" disabled={locked} title="Restart" onClick={(e) => act(e, s, 'restart')}>
+                  <button className="btn sm" disabled={locked} title="Restart" aria-label={`Restart ${s.name}`} onClick={(e) => act(e, s, 'restart')}>
                     {busy === `${s.id}:restart` ? <Spinner size={12} /> : <RotateCw size={12} />}
                   </button>
                 </div>
               </div>
-              <div className="row wrap" style={{ marginTop: 9, gap: 10 }}>
+              {/* row-actions: keeps the live URLs clickable above the stretched link */}
+              <div className="row wrap row-actions" style={{ marginTop: 9, gap: 10 }}>
                 {urls.map((u) => <UrlChip key={u.url} url={u.url} />)}
                 {urls.length === 0 && s.port > 0 && node && s.status === 'running' && (
                   <UrlChip url={`http://${node.ip}:${s.port}`} />
@@ -104,7 +116,10 @@ export function AppsPage() {
           );
         })}
 
-        {services.length === 0 && (
+        {/* Waiting for the first load is not the same as having no apps. */}
+        {!loaded && services.length === 0 && <SkeletonRows count={3} height={78} />}
+
+        {loaded && services.length === 0 && (
           <div className="empty" style={{ padding: '60px 20px' }}>
             <Rocket size={26} style={{ marginBottom: 10 }} />
             <div className="empty-title">Nothing deployed yet</div>

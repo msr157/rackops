@@ -54,7 +54,8 @@ export function ChangelogPage() {
             <div className="release-rail"><span className={index === 0 ? 'live' : ''} /></div>
             <div className="card release-card">
               <div className="row spread wrap">
-                <div className="row"><GitBranch size={14} /><strong>{release.version}</strong><span className="badge amber">{release.date}</span></div>
+                {/* A date is metadata, not status — amber is reserved for the LED language. */}
+                <div className="row"><GitBranch size={14} aria-hidden /><strong>{release.version}</strong><span className="tag">{release.date}</span></div>
               </div>
               <h2>{release.title}</h2>
               <ul>{release.changes.map((change) => <li key={change}>{change}</li>)}</ul>

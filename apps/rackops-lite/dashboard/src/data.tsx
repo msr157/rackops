@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { api, subscribe } from './api';
 import type { Node, Overview, EventItem, Alert, Service, Project, Environment, IngressConfig } from './api';
 
@@ -15,6 +15,12 @@ interface Data {
   ingress: IngressConfig | null;
   refresh: () => void;
   nodeName: (id: string) => string;
+  /** True once the fleet has loaded at least once. Empty states must wait for it. */
+  loaded: boolean;
+  /** Whether the control plane answered the last time we asked. */
+  reachable: boolean;
+  /** When the fleet last loaded successfully — the age of what's on screen. */
+  lastSync: string | null;
 }
 
 const DataCtx = createContext<Data | null>(null);
@@ -34,15 +40,37 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [envs, setEnvs] = useState<Environment[]>([]);
   const [ingress, setIngress] = useState<IngressConfig | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [reachable, setReachable] = useState(true);
+  const [lastSync, setLastSync] = useState<string | null>(null);
 
-  const refresh = useCallback(() => {
-    api.overview().then(setOverview).catch(() => {});
-    api.nodes().then((n) => setNodes(n ?? [])).catch(() => {});
-    api.services().then((s) => setServices(s ?? [])).catch(() => {});
+  // The three calls that make up the fleet picture. When they fail together the
+  // control plane is unreachable, and the UI has to say so — an unanswered
+  // fetch rendered as an empty rack reads as "you have nothing", which is the
+  // worst possible lie to tell an operator mid-outage.
+  const refresh = useCallback(async () => {
+    try {
+      const [ov, ns, ss] = await Promise.all([api.overview(), api.nodes(), api.services()]);
+      setOverview(ov);
+      setNodes(ns ?? []);
+      setServices(ss ?? []);
+      setReachable(true);
+      setLoaded(true);
+      setLastSync(new Date().toISOString());
+    } catch {
+      setReachable(false);
+    }
+    // Secondary detail — a failure here leaves the last known values in place.
     api.events().then((e) => setEvents((e ?? []).slice(0, 80))).catch(() => {});
     api.alerts().then((a) => setAlerts(a ?? [])).catch(() => {});
     api.ingress().then(setIngress).catch(() => {});
   }, []);
+
+  // Held in refs so the subscription and poll below never re-arm on each tick.
+  const refreshRef = useRef(refresh);
+  refreshRef.current = refresh;
+  const reachableRef = useRef(reachable);
+  reachableRef.current = reachable;
 
   useEffect(() => {
     refresh();
@@ -62,8 +90,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
           return next;
         });
       },
-      node_joined: () => refresh(),
-      node_down: () => refresh(),
+      node_joined: () => refreshRef.current(),
+      node_down: () => refreshRef.current(),
       service_update: (data) => {
         const s = data as Service;
         setServices((prev) => {
@@ -93,9 +121,14 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
     // Slow poll as SSE fallback for aggregates. Alerts are included so a
     // missed alert_resolved event can never leave a stale "needs attention"
-    // card — the poll converges the UI to the server's truth.
+    // card — the poll converges the UI to the server's truth. While the server
+    // is unreachable it doubles as the reconnect probe, so recovery needs no
+    // action from the operator.
     const t = setInterval(() => {
-      api.overview().then(setOverview).catch(() => {});
+      if (!reachableRef.current) { refreshRef.current(); return; }
+      api.overview()
+        .then((o) => { setOverview(o); setReachable(true); setLastSync(new Date().toISOString()); })
+        .catch(() => setReachable(false));
       api.alerts().then((a) => setAlerts(a ?? [])).catch(() => {});
     }, 8000);
     return () => { off(); clearInterval(t); };
@@ -104,7 +137,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo<Data>(() => ({
     overview, nodes, services, events, alerts, projects, envs, ingress, refresh,
     nodeName: (id: string) => nodes.find((n) => n.id === id)?.name ?? id,
-  }), [overview, nodes, services, events, alerts, projects, envs, ingress, refresh]);
+    loaded, reachable, lastSync,
+  }), [overview, nodes, services, events, alerts, projects, envs, ingress, refresh, loaded, reachable, lastSync]);
 
   return <DataCtx.Provider value={value}>{children}</DataCtx.Provider>;
 }

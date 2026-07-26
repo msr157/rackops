@@ -4,7 +4,7 @@ import { api } from '../api';
 import type { APIToken, User } from '../api';
 import { useToast, cleanError } from '../components/toast';
 import { useConfirm } from '../components/confirm';
-import { CopyBtn, CopyField, InfoTip, PasswordInput, Spinner, timeAgo } from '../components/ui';
+import { CopyBtn, CopyField, Field, InfoTip, PasswordInput, Spinner, timeAgo } from '../components/ui';
 
 // Profile: the signed-in operator's own account — identity, password, and the
 // API keys that act on their behalf. Fleet-wide settings live in Settings.
@@ -75,16 +75,19 @@ function ChangePasswordCard() {
     <div className="card">
       <div className="eyebrow" style={{ marginBottom: 12 }}><ShieldCheck size={12} /> Change password</div>
       <div className="grid-3">
-        <div className="field"><label>Current password</label>
-          <PasswordInput value={current} onChange={setCurrent} autoComplete="current-password" /></div>
-        <div className="field"><label>New password</label>
-          <PasswordInput value={next} onChange={setNext} placeholder="8+ characters" autoComplete="new-password" /></div>
-        <div className="field"><label>Confirm new password</label>
-          <PasswordInput value={confirm} onChange={setConfirm} autoComplete="new-password" onEnter={submit} /></div>
+        <Field label="Current password">
+          {(p) => <PasswordInput {...p} value={current} onChange={setCurrent} autoComplete="current-password" />}
+        </Field>
+        <Field label="New password">
+          {(p) => <PasswordInput {...p} value={next} onChange={setNext} placeholder="8+ characters" autoComplete="new-password" />}
+        </Field>
+        <Field label="Confirm new password"
+          hint={confirm.length > 0 && confirm !== next
+            ? <span style={{ color: 'var(--warn)' }}>Passwords don&rsquo;t match yet.</span>
+            : undefined}>
+          {(p) => <PasswordInput {...p} value={confirm} onChange={setConfirm} autoComplete="new-password" onEnter={submit} />}
+        </Field>
       </div>
-      {confirm.length > 0 && confirm !== next && (
-        <div className="faint" style={{ color: 'var(--warn)', marginBottom: 10 }}>Passwords don&rsquo;t match yet.</div>
-      )}
       <button className="btn" disabled={busy || !current || !next || !confirm} onClick={submit}>
         {busy ? <Spinner size={12} /> : <ShieldCheck size={12} />} Update password
       </button>
@@ -154,12 +157,20 @@ function ApiKeysCard() {
         Keys act with your role and are shown once at creation — store them somewhere safe.
       </div>
 
-      <div className="row wrap" style={{ marginBottom: 14 }}>
-        <input className="input" style={{ width: 220 }} placeholder="what will use it? e.g. vscode-mcp"
-          value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && create()} />
-        <select className="input" style={{ width: 160 }} value={expiresIn} onChange={(e) => setExpiresIn(e.target.value)}>
-          {EXPIRY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </select>
+      <div className="row wrap" style={{ alignItems: 'flex-end', marginBottom: 14 }}>
+        <Field label="Key name" style={{ width: 220, marginBottom: 0 }}>
+          {(p) => (
+            <input className="input" {...p} placeholder="what will use it? e.g. vscode-mcp"
+              value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && create()} />
+          )}
+        </Field>
+        <Field label="Expires" style={{ width: 160, marginBottom: 0 }}>
+          {(p) => (
+            <select className="input" {...p} value={expiresIn} onChange={(e) => setExpiresIn(e.target.value)}>
+              {EXPIRY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          )}
+        </Field>
         <button className="btn primary" disabled={busy} onClick={create}>
           {busy ? <Spinner size={12} /> : <Plus size={12} />} Create key
         </button>
