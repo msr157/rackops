@@ -1,17 +1,58 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Boxes, HardDrive, Radio, Bell, Rocket, Globe, Check, ScrollText,
+  Cpu, MemoryStick, Database, Plus, UserPlus, AlertTriangle, Activity,
 } from 'lucide-react';
+import { api, type MetricPoint, type User } from '../api';
 import { useData } from '../data';
 import { Rack } from '../components/Rack';
-import { EmptyState, InfoTip, Led, SkeletonRows, UrlChip, publicUrls, timeAgo } from '../components/ui';
+import { TrendChart, Seg, trendDelta } from '../components/charts';
+import {
+  Delta, EmptyState, IconChip, InfoTip, Led, SkeletonRows, UrlChip, UsageBar,
+  publicUrls, timeAgo,
+} from '../components/ui';
 
-// Home answers one question at a glance: is everything okay?
-// Anything that needs attention comes first; healthy detail follows.
+// Home answers one question at a glance: is everything okay? Anything that
+// needs attention comes first; context (KPIs, the fleet chart, activity)
+// follows in reference-register form: big numbers, deltas, one hero chart.
 export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
   const { overview, nodes, services, events, alerts, ingress, loaded, reachable } = useData();
   const navigate = useNavigate();
+  const [me, setMe] = useState<User | null>(null);
+  const [hist24, setHist24] = useState<MetricPoint[]>([]);
+  const [hist7, setHist7] = useState<MetricPoint[]>([]);
+  const [win, setWin] = useState<'24h' | '7d'>('24h');
+  const [metric, setMetric] = useState<'cpuPct' | 'memUsedMb'>('cpuPct');
+
+  useEffect(() => { api.me().then(setMe).catch(() => {}); }, []);
+
+  // The 24h fleet series backs both the hero chart and every KPI delta;
+  // it refreshes on the sampler's own cadence, not the 2s live stream.
+  useEffect(() => {
+    let alive = true;
+    const load = () => {
+      api.metricsHistory('fleet', undefined, '24h')
+        .then((h) => { if (alive) setHist24(h.points); })
+        .catch(() => {});
+    };
+    load();
+    const t = setInterval(load, 60_000);
+    return () => { alive = false; clearInterval(t); };
+  }, []);
+
+  useEffect(() => {
+    if (win !== '7d') return;
+    let alive = true;
+    const load = () => {
+      api.metricsHistory('fleet', undefined, '7d')
+        .then((h) => { if (alive) setHist7(h.points); })
+        .catch(() => {});
+    };
+    load();
+    const t = setInterval(load, 120_000);
+    return () => { alive = false; clearInterval(t); };
+  }, [win]);
 
   const failing = services.filter((s) => s.status === 'failed');
   const openAlerts = alerts.filter((a) => !a.resolved);
@@ -23,8 +64,40 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
 
   const running = services.filter((s) => s.status === 'running').length;
 
+  const hour = new Date().getHours();
+  const daypart = hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening';
+  const firstName = me?.fullName?.trim().split(/\s+/)[0];
+
+  const points = win === '24h' ? hist24 : hist7;
+  const heroValue = metric === 'cpuPct'
+    ? `${overview?.avgCpuPct ?? 0}%`
+    : `${((overview?.usedMemMb ?? 0) / 1024).toFixed(1)} GB`;
+  const fmtCpu = (v: number) => `${v.toFixed(0)}%`;
+  const fmtMem = (v: number) => `${(v / 1024).toFixed(1)} GB`;
+
   return (
     <div className="page">
+      <div className="greet-row">
+        <div>
+          <div className="greet-date">
+            {new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}
+          </div>
+          <div className="greet">Good {daypart}{firstName ? `, ${firstName}` : ''}</div>
+        </div>
+        {/* Quick actions carry verbs the chrome doesn't already own (the
+            topbar has Deploy). Add machine yields to the banner primary on
+            an empty rack — one label per intent per surface. */}
+        <div className="quick-actions">
+          {nodes.length > 0 && (
+            <button className="btn" onClick={onAddMachine}><Plus size={13} /> Add machine</button>
+          )}
+          {services.length > 0 && (
+            <Link to="/network" className="btn"><Globe size={13} /> Make an app public</Link>
+          )}
+          <Link to="/settings" className="btn"><UserPlus size={13} /> Invite a teammate</Link>
+        </div>
+      </div>
+
       {/* Status banner: the one-glance answer. It must never claim an empty
           rack while the fleet is still loading or the server is unreachable,
           because that reads as data loss at the exact moment it would panic
@@ -41,17 +114,14 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
               : attention > 0 ? `${attention} thing${attention > 1 ? 's' : ''} need${attention > 1 ? '' : 's'} your attention`
               : 'All systems operational'}
           </div>
-          <div className="dim" style={{ marginTop: 2 }}>
-            {!loaded
-              ? (reachable ? 'connecting…' : 'the control plane is not answering yet')
-              : overview
-                ? `${overview.nodesOnline}/${overview.nodesTotal} machines online, ${running}/${services.length} apps running · fleet CPU ${overview.avgCpuPct}%`
-                : 'connecting…'}
-          </div>
+          {/* Counts live in the KPI tiles right below — the banner only
+              narrates while there is nothing else on screen yet. */}
+          {!loaded && (
+            <div className="dim" style={{ marginTop: 2 }}>
+              {reachable ? 'connecting…' : 'the control plane is not answering yet'}
+            </div>
+          )}
         </div>
-        {/* The banner action follows the state it announces: incidents jump
-            to the attention list, an empty rack starts onboarding, and
-            all-clear needs no button at all. */}
         {troubled && (
           <a href="#attention" className="btn">Review {attention} issue{attention > 1 ? 's' : ''}</a>
         )}
@@ -115,7 +185,54 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
           attention list and only renders when nothing needs attention. */}
       {attention === 0 && <SetupChecklist onAddMachine={onAddMachine} />}
 
-      <div className="grid-2" style={{ alignItems: 'start', marginTop: 10 }}>
+      {loaded && nodes.length > 0 && overview && (
+        <>
+          <div className="kpi-row" style={{ marginTop: 4 }}>
+            <StatTile label="Machines online" tone={nodesOffline.length > 0 ? 'crit' : 'ok'}
+              icon={<HardDrive size={15} />}
+              value={overview.nodesOnline} unit={`/ ${overview.nodesTotal}`} />
+            <StatTile label="Apps running" tone={failing.length > 0 ? 'crit' : services.length > 0 ? 'ok' : undefined}
+              icon={<Boxes size={15} />}
+              value={running} unit={`/ ${services.length}`} />
+            <StatTile label="Fleet CPU" icon={<Cpu size={15} />}
+              value={overview.avgCpuPct} unit="%"
+              delta={<Delta pct={trendDelta(hist24, 'cpuPct')} />} />
+            <StatTile label="Fleet memory" icon={<MemoryStick size={15} />}
+              value={(overview.usedMemMb / 1024).toFixed(1)} unit={`/ ${(overview.totalMemMb / 1024).toFixed(0)} GB`}
+              delta={<Delta pct={trendDelta(hist24, 'memUsedMb')} />} />
+          </div>
+
+          {/* The hero: how the fleet has been doing, not just how it is now */}
+          <div className="card" style={{ marginBottom: 20 }}>
+            <div className="row spread wrap" style={{ marginBottom: 10 }}>
+              <div className="row" style={{ gap: 8 }}>
+                <span style={{ fontWeight: 600, fontSize: 14 }}>Fleet activity</span>
+                <InfoTip>
+                  Averaged across every online machine in this organization, recorded once a
+                  minute for 24 hours and every 15 minutes for a week. Gaps mean a machine was
+                  offline, never zero.
+                </InfoTip>
+              </div>
+              <div className="row" style={{ gap: 8 }}>
+                <Seg value={metric} onChange={setMetric} label="Metric"
+                  options={[{ value: 'cpuPct', label: 'CPU' }, { value: 'memUsedMb', label: 'Memory' }]} />
+                <Seg value={win} onChange={setWin} label="Time window"
+                  options={[{ value: '24h', label: '24h' }, { value: '7d', label: '7 days' }]} />
+              </div>
+            </div>
+            <div className="row" style={{ gap: 10, marginBottom: 8 }}>
+              <span className="mono" style={{ fontSize: 24, fontWeight: 600, letterSpacing: '-0.02em' }}>{heroValue}</span>
+              <Delta pct={trendDelta(win === '24h' ? hist24 : hist7, metric)} />
+            </div>
+            <TrendChart points={points} metric={metric} height={190}
+              yMax={metric === 'cpuPct' ? 100 : undefined}
+              format={metric === 'cpuPct' ? fmtCpu : fmtMem}
+              label={metric === 'cpuPct' ? 'Fleet CPU usage' : 'Fleet memory usage'} />
+          </div>
+        </>
+      )}
+
+      <div className="grid-2" style={{ alignItems: 'start' }}>
         <div>
           <div className="section-title" style={{ marginTop: 12 }}>
             <Boxes size={15} aria-hidden /> Your apps
@@ -161,21 +278,25 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
               {reachable ? 'live' : 'stalled'}
             </span>
           </div>
-          <div className="terminal" style={{ maxHeight: 260 }}>
-            {events.map((e) => (
-              <div key={e.id}>
-                <span className="t-time">{new Date(e.createdAt).toLocaleTimeString()}</span>
-                <span className="t-kind">[{e.kind}]</span>
-                {e.message}
-              </div>
-            ))}
-            {events.length === 0 && (
-              <span className="faint">
-                {loaded
-                  ? 'quiet so far: activity from deploys, heals, and machines appears here'
-                  : 'waiting for the server…'}
-              </span>
-            )}
+          <div className="card" style={{ padding: '4px 16px' }}>
+            <div className="feed">
+              {events.slice(0, 12).map((e) => (
+                <div key={e.id} className="feed-item">
+                  <IconChip sm tone={feedTone(e.kind)}>{feedIcon(e.kind)}</IconChip>
+                  <span style={{ flex: 1, paddingTop: 4 }}>{e.message}</span>
+                  <span className="feed-time">{timeAgo(e.createdAt)}</span>
+                </div>
+              ))}
+              {events.length === 0 && (
+                <div className="feed-item">
+                  <span className="faint" style={{ padding: '6px 0' }}>
+                    {loaded
+                      ? 'quiet so far: activity from deploys, heals, and machines appears here'
+                      : 'waiting for the server…'}
+                  </span>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -183,24 +304,25 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
           <div className="section-title" style={{ marginTop: 12 }}>
             <HardDrive size={15} aria-hidden /> The rack
             <InfoTip>
-              Every machine in this organization, one slot per machine. The dot shows each
+              Every machine in this organization, one row per machine. The dot shows each
               machine&rsquo;s health; click through for full hardware detail.
             </InfoTip>
             <Link to="/machines" className="faint" style={{ marginLeft: 'auto', fontWeight: 400 }}>View all →</Link>
           </div>
-          {/* No onAdd here: the status banner already carries the page's
-              Add-machine primary; the rack panel stays quiet. */}
+          {/* No onAdd here: the greeting row already carries Add machine;
+              the rack panel stays quiet. */}
           <Rack nodes={nodes} services={services} loading={!loaded} />
 
-          {overview && nodes.length > 0 && (
-            <div className="kpi-row" style={{ marginTop: 14 }}>
-              <div className="card">
-                <div className="eyebrow">Fleet memory</div>
-                <div className="kpi-value">{((overview.usedMemMb) / 1024).toFixed(1)} <span className="unit">/ {(overview.totalMemMb / 1024).toFixed(0)} GB</span></div>
+          {overview && nodes.length > 0 && overview.totalStorageGb > 0 && (
+            <div className="card" style={{ marginTop: 14 }}>
+              <div className="row spread">
+                <span className="eyebrow">Pooled storage</span>
+                <IconChip sm><Database size={14} /></IconChip>
               </div>
-              <div className="card">
-                <div className="eyebrow">Pooled storage</div>
-                <div className="kpi-value">{overview.usedStorageGb.toFixed(0)} <span className="unit">/ {overview.totalStorageGb.toFixed(0)} GB</span></div>
+              <div className="kpi-value">{overview.usedStorageGb.toFixed(0)} <span className="unit">/ {overview.totalStorageGb.toFixed(0)} GB</span></div>
+              <div className="row" style={{ gap: 8, marginTop: 8 }}>
+                <UsageBar pct={(overview.usedStorageGb / overview.totalStorageGb) * 100} thick />
+                <span className="faint mono">{((overview.usedStorageGb / overview.totalStorageGb) * 100).toFixed(0)}%</span>
               </div>
             </div>
           )}
@@ -208,6 +330,38 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
       </div>
     </div>
   );
+}
+
+// StatTile: eyebrow + icon chip, big mono value, optional delta line.
+function StatTile({ label, icon, tone, value, unit, delta }: {
+  label: string; icon: React.ReactNode; tone?: 'ok' | 'warn' | 'crit' | 'accent';
+  value: React.ReactNode; unit?: string; delta?: React.ReactNode;
+}) {
+  return (
+    <div className="card">
+      <div className="row spread">
+        <span className="eyebrow">{label}</span>
+        <IconChip sm tone={tone}>{icon}</IconChip>
+      </div>
+      <div className="kpi-value">{value} {unit && <span className="unit">{unit}</span>}</div>
+      {delta && <div className="kpi-delta">{delta}</div>}
+    </div>
+  );
+}
+
+// Feed icon + tone by event kind. Tone is meaning: alerts warn, a machine
+// going dark is critical, everything routine stays neutral.
+function feedTone(kind: string): 'warn' | 'crit' | undefined {
+  if (kind.includes('down')) return 'crit';
+  if (kind.includes('alert')) return 'warn';
+  return undefined;
+}
+function feedIcon(kind: string) {
+  if (kind.includes('alert')) return <AlertTriangle size={13} />;
+  if (kind.includes('node') || kind.includes('machine')) return <HardDrive size={13} />;
+  if (kind.includes('deploy') || kind.includes('service')) return <Rocket size={13} />;
+  if (kind.includes('heal')) return <Activity size={13} />;
+  return <Radio size={13} />;
 }
 
 // SetupChecklist guides the first-run journey: machine, then app, then public

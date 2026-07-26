@@ -180,7 +180,7 @@ export function OrgSwitcher({ me }: { me: User | null }) {
             ))}
           </div>
           <div className="org-menu-sep" role="separator" />
-          <Link to="/settings?tab=org" className="org-item" role="menuitem" tabIndex={-1}
+          <Link to="/settings?tab=organization" className="org-item" role="menuitem" tabIndex={-1}
             onClick={() => setOpen(false)}>
             <Settings2 size={12} aria-hidden /> Manage organization
           </Link>

@@ -1,20 +1,142 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
-  ArrowLeft, Boxes, Clock, Cpu, HardDrive, MemoryStick, Network as NetworkIcon, Plus, Rocket, Server, Thermometer, Zap,
+  Activity, ArrowLeft, Boxes, Clock, Cpu, HardDrive, MemoryStick, Network as NetworkIcon, Plus, Rocket, Server, Thermometer, Zap,
 } from 'lucide-react';
+import { api } from '../api';
+import type { MetricPoint, Node } from '../api';
 import { useData } from '../data';
-import { Rack } from '../components/Rack';
+import { DataTable } from '../components/Table';
+import type { Column } from '../components/Table';
+import { Seg, TrendChart, trendDelta } from '../components/charts';
 import {
-  EmptyState, InfoTip, Kpi, Led, Skeleton, SkeletonRows, StatusBadge, UsageBar, formatUptime, shortGpu,
+  Delta, EmptyState, InfoTip, Kpi, Led, Pill, Skeleton, SkeletonRows, StatusBadge, UsageBar,
+  formatUptime, ledClass, shortGpu, timeAgo,
 } from '../components/ui';
 
-// MachinesPage: the physical rack, plus fleet-wide capacity.
+// The metrics the Activity chart can plot; MetricPoint carries all three.
+type MetricKey = 'cpuPct' | 'memUsedMb' | 'tempC';
+
+// MachinesPage: fleet-wide capacity up top, then every machine as a sortable
+// row — the ranking surface for "which box is busy, full, or gone quiet".
 export function MachinesPage({ onAddMachine }: { onAddMachine: () => void }) {
   const { nodes, services, overview, loaded } = useData();
+  const navigate = useNavigate();
+  const [fleetPoints, setFleetPoints] = useState<MetricPoint[]>([]);
   // One add-machine action at a time: while the empty state carries the CTA,
   // the header button steps aside so the intent never appears twice.
   const fleetEmpty = loaded && nodes.length === 0;
+
+  // One 24h fleet series feeds the KPI deltas. Fetched once: the comparison
+  // averages whole hours, so refetching per tick would change nothing.
+  useEffect(() => {
+    let alive = true;
+    api.metricsHistory('fleet', undefined, '24h')
+      .then((h) => { if (alive) setFleetPoints(h.points); })
+      .catch(() => { /* no history yet: the deltas simply stay hidden */ });
+    return () => { alive = false; };
+  }, []);
+
+  const cpuDelta = trendDelta(fleetPoints, 'cpuPct');
+  const memDelta = trendDelta(fleetPoints, 'memUsedMb');
+
+  const columns = useMemo<Column<Node>[]>(() => {
+    const appCounts = new Map<string, { up: number; total: number }>();
+    for (const s of services) {
+      const c = appCounts.get(s.nodeId) ?? { up: 0, total: 0 };
+      c.total += 1;
+      if (s.status === 'running') c.up += 1;
+      appCounts.set(s.nodeId, c);
+    }
+    // Fill across every discovered drive; null when the agent hasn't
+    // reported block devices yet, so the cell stays empty instead of "0%".
+    const diskPct = (n: Node): number | null => {
+      const drives = n.hardware.drives ?? [];
+      const sizeGb = drives.reduce((sum, d) => sum + d.sizeGb, 0);
+      if (sizeGb <= 0) return null;
+      return (drives.reduce((sum, d) => sum + d.usedGb, 0) / sizeGb) * 100;
+    };
+    // Ascending status sort floats trouble to the top: offline before online.
+    const statusRank: Record<'ok' | 'warn' | 'crit' | 'off', number> = { crit: 0, warn: 1, off: 2, ok: 3 };
+    return [
+      {
+        key: 'name',
+        label: 'Machine',
+        sortValue: (n) => n.name.toLowerCase(),
+        render: (n) => (
+          <span className="row" style={{ gap: 8 }}>
+            {/* Real link: the keyboard path into the row (see DataTable). */}
+            <Link to={`/machines/${n.id}`} style={{ fontWeight: 600 }} onClick={(e) => e.stopPropagation()}>
+              {n.name}
+            </Link>
+            {/* Running the control plane is an identity fact: neutral tag. */}
+            {n.role === 'server' && <span className="tag">control</span>}
+          </span>
+        ),
+      },
+      {
+        key: 'status',
+        label: 'Status',
+        sortValue: (n) => statusRank[ledClass(n.status)],
+        render: (n) => <Pill status={n.status} />,
+      },
+      {
+        key: 'ip',
+        label: 'IP',
+        render: (n) => <span className="dim mono">{n.ip}</span>,
+      },
+      {
+        key: 'cpu',
+        label: 'CPU',
+        num: true,
+        sortValue: (n) => (n.status === 'online' ? n.metrics.cpuPct : -1),
+        render: (n) => (n.status === 'online' ? `${n.metrics.cpuPct.toFixed(0)}%` : ''),
+      },
+      {
+        key: 'memory',
+        label: 'Memory',
+        num: true,
+        sortValue: (n) => (n.status === 'online' ? n.metrics.memUsedMb : -1),
+        render: (n) => (n.status === 'online'
+          ? `${(n.metrics.memUsedMb / 1024).toFixed(1)}/${(n.hardware.memTotalMb / 1024).toFixed(0)} GB`
+          : ''),
+      },
+      {
+        key: 'disk',
+        label: 'Disk',
+        num: true,
+        sortValue: (n) => diskPct(n) ?? -1,
+        render: (n) => {
+          const p = diskPct(n);
+          return p !== null ? `${p.toFixed(0)}%` : '';
+        },
+      },
+      {
+        key: 'apps',
+        label: 'Apps',
+        num: true,
+        sortValue: (n) => appCounts.get(n.id)?.up ?? -1,
+        render: (n) => {
+          const c = appCounts.get(n.id);
+          return c ? `${c.up}/${c.total}` : '';
+        },
+      },
+      {
+        key: 'uptime',
+        label: 'Uptime',
+        num: true,
+        sortValue: (n) => (n.status === 'online' ? n.metrics.uptimeSec : -1),
+        render: (n) => (n.status === 'online' ? formatUptime(n.metrics.uptimeSec) : ''),
+      },
+      {
+        // Online rows say nothing here: the status pill already says it.
+        key: 'lastSeen',
+        label: 'Last seen',
+        sortValue: (n) => Date.parse(n.lastSeen) || 0,
+        render: (n) => (n.status === 'offline' ? <span className="faint">{timeAgo(n.lastSeen)}</span> : null),
+      },
+    ];
+  }, [services]);
 
   return (
     <div className="page">
@@ -32,9 +154,17 @@ export function MachinesPage({ onAddMachine }: { onAddMachine: () => void }) {
       {fleetEmpty ? null : overview ? (
         <div className="kpi-row">
           <Kpi icon={<HardDrive size={12} aria-hidden />} label="Machines" value={`${overview.nodesOnline}/${overview.nodesTotal}`} unit="online" />
-          <Kpi icon={<Cpu size={12} aria-hidden />} label="Fleet CPU" value={overview.avgCpuPct.toFixed(0)} unit="%" />
+          <Kpi icon={<Cpu size={12} aria-hidden />} label="Fleet CPU" value={overview.avgCpuPct.toFixed(0)} unit="%">
+            {cpuDelta !== null && (
+              <div className="kpi-delta"><Delta pct={cpuDelta} label="vs 24 hours ago" /></div>
+            )}
+          </Kpi>
           <Kpi icon={<MemoryStick size={12} aria-hidden />} label="Memory"
-            value={(overview.usedMemMb / 1024).toFixed(1)} unit={`/ ${(overview.totalMemMb / 1024).toFixed(0)} GB`} />
+            value={(overview.usedMemMb / 1024).toFixed(1)} unit={`/ ${(overview.totalMemMb / 1024).toFixed(0)} GB`}>
+            {memDelta !== null && (
+              <div className="kpi-delta"><Delta pct={memDelta} label="vs 24 hours ago" /></div>
+            )}
+          </Kpi>
           <Kpi icon={<HardDrive size={12} aria-hidden />} label="Storage"
             value={overview.usedStorageGb.toFixed(0)} unit={`/ ${overview.totalStorageGb.toFixed(0)} GB`} />
         </div>
@@ -44,9 +174,21 @@ export function MachinesPage({ onAddMachine }: { onAddMachine: () => void }) {
         </div>
       )}
 
-      {/* The rack shows its own skeletons while loading; once the fleet is
-          confirmed empty, the single empty state below takes over. */}
-      {!fleetEmpty && <Rack nodes={nodes} services={services} loading={!loaded} />}
+      {/* The comparison surface: one sortable row per machine. Skeletons hold
+          the space while the fleet loads; once it is confirmed empty, the
+          single empty state below takes over. */}
+      {!fleetEmpty && (loaded ? (
+        <DataTable
+          columns={columns}
+          rows={nodes}
+          rowKey={(n) => n.id}
+          onRowClick={(n) => navigate(`/machines/${n.id}`)}
+          defaultSort={{ key: 'status', dir: 'asc' }}
+          caption="Machines in this rack"
+        />
+      ) : (
+        <SkeletonRows count={4} height={52} />
+      ))}
 
       {fleetEmpty && (
         <EmptyState icon={<Server size={18} />} title="One command turns any Linux box into part of your rack">
@@ -61,10 +203,6 @@ export function MachinesPage({ onAddMachine }: { onAddMachine: () => void }) {
   );
 }
 
-// Rolling CPU history per node for the sparkline (module-level so it
-// accumulates across re-renders and navigations).
-const histories = new Map<string, number[]>();
-
 // Drive health is a real status; anything unrecognized stays neutral.
 const healthBadge: Record<string, string> = { ok: 'ok', warning: 'warn', critical: 'crit' };
 
@@ -74,13 +212,29 @@ export function MachineDetail() {
   const { nodes, services, loaded } = useData();
   const node = nodes.find((n) => n.id === id);
 
+  const [metric, setMetric] = useState<MetricKey>('cpuPct');
+  const [win, setWin] = useState<'24h' | '7d'>('24h');
+  const [points, setPoints] = useState<MetricPoint[]>([]);
+  const exists = !!node;
+
+  // Switching machines must not show the previous box's history while the
+  // new fetch is in flight.
+  useEffect(() => { setPoints([]); }, [id]);
+
+  // Server-side history: refetched on window change and once a minute, so a
+  // detail page left open on a shelf screen keeps tracking without a reload.
   useEffect(() => {
-    if (!node) return;
-    const h = histories.get(node.id) ?? [];
-    h.push(node.metrics.cpuPct);
-    if (h.length > 40) h.shift();
-    histories.set(node.id, h);
-  }, [node, node?.metrics.timestamp]);
+    if (!exists) return;
+    let alive = true;
+    const load = () => {
+      api.metricsHistory('node', id, win)
+        .then((h) => { if (alive) setPoints(h.points); })
+        .catch(() => { /* TrendChart shows its own collecting state */ });
+    };
+    load();
+    const t = window.setInterval(load, 60_000);
+    return () => { alive = false; window.clearInterval(t); };
+  }, [id, win, exists]);
 
   if (!node) {
     // The fleet hasn't answered yet; this is loading, not a missing machine.
@@ -109,10 +263,24 @@ export function MachineDetail() {
   const m = node.metrics;
   const hw = node.hardware;
   const apps = services.filter((s) => s.nodeId === node.id);
-  const history = histories.get(node.id);
   const gpus = hw.gpus ?? [];
   const drives = hw.drives ?? [];
   const nics = hw.nics ?? [];
+
+  // No sensor, no Temperature tab: a flat 0°C line is noise, not telemetry.
+  const hasTemp = m.tempC > 0 || points.some((p) => (p.tempC ?? 0) > 0);
+  const activeMetric: MetricKey = metric === 'tempC' && !hasTemp ? 'cpuPct' : metric;
+  const metricDefs: Record<MetricKey, { label: string; current: number; format: (v: number) => string }> = {
+    cpuPct: { label: 'CPU usage', current: m.cpuPct, format: (v) => `${v.toFixed(0)}%` },
+    memUsedMb: { label: 'Memory used', current: m.memUsedMb, format: (v) => `${(v / 1024).toFixed(1)} GB` },
+    tempC: { label: 'Package temperature', current: m.tempC, format: (v) => `${v.toFixed(0)}°C` },
+  };
+  const chart = metricDefs[activeMetric];
+  const metricOptions: { value: MetricKey; label: string }[] = [
+    { value: 'cpuPct', label: 'CPU' },
+    { value: 'memUsedMb', label: 'Memory' },
+  ];
+  if (hasTemp) metricOptions.push({ value: 'tempC', label: 'Temperature' });
 
   return (
     <div className="page">
@@ -148,17 +316,7 @@ export function MachineDetail() {
       <div className="kpi-row">
         <Kpi icon={<Cpu size={12} aria-hidden />} label="CPU" value={m.cpuPct.toFixed(0)} unit="%">
           <div className="faint">{hw.cpuCores}C/{hw.cpuThreads}T · load {m.load1.toFixed(2)}</div>
-          {/* Fixed-height slot: swapping the bar for the sparkline once history
-              accumulates must not move the card. */}
-          <div style={{ height: 34, marginTop: 8, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
-            {history && history.length > 1 ? (
-              <div className="spark" aria-hidden>
-                {history.map((v, i) => <div key={i} style={{ height: `${Math.max(v, 3)}%` }} />)}
-              </div>
-            ) : (
-              <UsageBar pct={m.cpuPct} />
-            )}
-          </div>
+          <UsageBar pct={m.cpuPct} />
         </Kpi>
         <Kpi icon={<MemoryStick size={12} aria-hidden />} label="Memory"
           value={(m.memUsedMb / 1024).toFixed(1)} unit={`/ ${(hw.memTotalMb / 1024).toFixed(0)} GB`}>
@@ -179,6 +337,26 @@ export function MachineDetail() {
         <Kpi icon={<Zap size={12} aria-hidden />} label="Workload" value={m.containers} unit="containers">
           <div className="faint">{m.processCount} processes</div>
         </Kpi>
+      </div>
+
+      {/* Activity: server-side history for this machine. One metric at a
+          time, switched with a Seg; the KPI tiles above stay live-now. */}
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="row spread wrap" style={{ gap: 10 }}>
+          <div className="eyebrow"><Activity size={12} aria-hidden /> Activity</div>
+          <div className="row wrap" style={{ gap: 8 }}>
+            <Seg value={activeMetric} onChange={setMetric} options={metricOptions} label="Chart metric" />
+            <Seg value={win} onChange={setWin} label="Time window"
+              options={[{ value: '24h', label: '24h' }, { value: '7d', label: '7d' }]} />
+          </div>
+        </div>
+        <div className="row" style={{ gap: 10, margin: '12px 0 4px', alignItems: 'baseline' }}>
+          <span className="mono" style={{ fontSize: 20, fontWeight: 600 }}>{chart.format(chart.current)}</span>
+          <Delta pct={trendDelta(points, activeMetric)} label="vs 24 hours ago" />
+        </div>
+        <TrendChart points={points} metric={activeMetric} height={170}
+          yMax={activeMetric === 'cpuPct' ? 100 : undefined}
+          format={chart.format} label={chart.label} />
       </div>
 
       <div className="section-title" style={{ marginTop: 4 }}><Boxes size={15} aria-hidden /> Apps on this machine</div>

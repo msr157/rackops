@@ -6,13 +6,14 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { api, subscribeLogChunks } from '../api';
-import type { Service, ServiceUpdate, Mount, EnvVar, Deployment, Domain, DirEntry, PlacementScore, LogChunk } from '../api';
+import type { Service, ServiceUpdate, Mount, EnvVar, Deployment, Domain, DirEntry, MetricPoint, PlacementScore, LogChunk } from '../api';
 import { useData } from '../data';
 import { useToast, cleanError } from '../components/toast';
 import { useConfirm } from '../components/confirm';
+import { Seg, TrendChart, trendDelta } from '../components/charts';
 import {
-  EmptyState, Field, InfoTip, Kpi, Led, Modal, Skeleton, SkeletonRows, Spinner, StatusBadge,
-  UrlChip, dnsLabel, publicUrls, timeAgo,
+  Delta, EmptyState, Field, InfoTip, Kpi, Led, Modal, Pill, Skeleton, SkeletonRows, Spinner,
+  StatusBadge, UrlChip, dnsLabel, publicUrls, timeAgo,
 } from '../components/ui';
 
 type Tab = 'overview' | 'networking' | 'logs' | 'deployments' | 'settings';
@@ -354,32 +355,118 @@ export function AppDetail() {
   );
 }
 
-/* ---------- Overview ---------- */
+/* ---------- Overview: the app cockpit ---------- */
+
+// Formatters shared by the Activity readout and its chart. Memory speaks GB
+// only once it earns it; below 1 GB the MB number is the honest one.
+const fmtCpu = (v: number) => `${v.toFixed(0)}%`;
+const fmtMem = (v: number) => (v >= 1024 ? `${(v / 1024).toFixed(1)} GB` : `${v.toFixed(0)} MB`);
 
 function OverviewTab({ svc, nodeLabel, urls }: { svc: Service; nodeLabel: string; urls: string[] }) {
+  const [metric, setMetric] = useState<'cpuPct' | 'memUsedMb'>('cpuPct');
+  const [win, setWin] = useState<'24h' | '7d'>('24h');
+  const [points, setPoints] = useState<MetricPoint[]>([]);
+  const [recent, setRecent] = useState<Deployment[]>([]);
+
+  // Metric history: fetched on mount and on window change, then refreshed
+  // every minute while this tab is open. A failed read is swallowed on
+  // purpose — the chart's own "collecting history" state is the right face
+  // for it, and the KPI numbers stay live off the 4s status poll either way.
+  useEffect(() => {
+    let stopped = false;
+    const pull = () => {
+      api.metricsHistory('service', svc.id, win)
+        .then((h) => { if (!stopped) setPoints(h.points ?? []); })
+        .catch(() => {});
+    };
+    pull();
+    const t = setInterval(pull, 60_000);
+    return () => { stopped = true; clearInterval(t); };
+  }, [svc.id, win]);
+
+  // Same source the Deployments tab reads, trimmed to the last three. If the
+  // read fails (or there's no history yet) the card simply doesn't render —
+  // the Deployments tab remains the surface that reports history problems.
+  useEffect(() => {
+    let stopped = false;
+    api.serviceDeployments(svc.id)
+      .then((d) => { if (!stopped) setRecent((d ?? []).slice(0, 3)); })
+      .catch(() => {});
+    return () => { stopped = true; };
+  }, [svc.id]);
+
+  const fmt = metric === 'cpuPct' ? fmtCpu : fmtMem;
+  const current = metric === 'cpuPct' ? svc.cpuPct : svc.memUsedMb;
+
   return (
     <>
+      {/* Two real metrics up top; identity facts (port, machine) are plain
+          key-values, so they live in Details instead of wearing KPI costume. */}
       <div className="kpi-row">
-        <Kpi label="CPU" value={svc.cpuPct.toFixed(1)} unit="%" />
-        <Kpi label="Memory" value={svc.memUsedMb} unit={`MB${svc.memLimitMb ? ` / ${svc.memLimitMb}` : ''}`} />
-        <Kpi label="Port" value={svc.port || 'none'} />
-        <Kpi label="Machine" value={nodeLabel} />
+        <Kpi label="CPU" value={svc.cpuPct.toFixed(1)} unit="%">
+          <div className="kpi-delta"><Delta pct={trendDelta(points, 'cpuPct')} label="vs 24 hours ago" /></div>
+        </Kpi>
+        <Kpi label="Memory" value={svc.memUsedMb} unit={`MB${svc.memLimitMb ? ` / ${svc.memLimitMb}` : ''}`}>
+          <div className="kpi-delta"><Delta pct={trendDelta(points, 'memUsedMb')} label="vs 24 hours ago" /></div>
+        </Kpi>
       </div>
 
-      <div className="card">
-        <div className="eyebrow" style={{ marginBottom: 10 }}>Details</div>
-        <dl className="kv">
-          <dt>Source</dt>
-          <dd>{svc.image || svc.gitRepo || `${svc.kind} stack`}</dd>
-          <dt>Public URLs</dt>
-          <dd>{urls.length ? urls.join(' · ') : 'none yet. Set one up in Networking.'}</dd>
-          <dt>Container</dt>
-          <dd>{svc.containerId || 'not created yet'}</dd>
-          <dt>Restart policy</dt>
-          <dd>{svc.restartPolicy || 'unless-stopped'}</dd>
-          <dt>Created</dt>
-          <dd>{new Date(svc.createdAt).toLocaleString()} ({timeAgo(svc.createdAt)})</dd>
-        </dl>
+      <div className="stack">
+        <div className="card">
+          <div className="row spread wrap" style={{ marginBottom: 12 }}>
+            <span className="eyebrow">Activity</span>
+            <div className="row" style={{ gap: 8 }}>
+              <Seg value={metric} onChange={setMetric} label="Metric"
+                options={[{ value: 'cpuPct', label: 'CPU' }, { value: 'memUsedMb', label: 'Memory' }]} />
+              <Seg value={win} onChange={setWin} label="Time window"
+                options={[{ value: '24h', label: '24h' }, { value: '7d', label: '7d' }]} />
+            </div>
+          </div>
+          <div className="row" style={{ marginBottom: 10 }}>
+            <span className="mono" style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.02em' }}>{fmt(current)}</span>
+            <Delta pct={trendDelta(points, metric)} label="vs 24 hours ago" />
+          </div>
+          <TrendChart points={points} metric={metric} yMax={metric === 'cpuPct' ? 100 : undefined}
+            format={fmt} label={metric === 'cpuPct' ? 'CPU usage' : 'Memory usage'} />
+        </div>
+
+        {recent.length > 0 && (
+          <div className="card">
+            <div className="row spread" style={{ marginBottom: 4 }}>
+              <span className="eyebrow">Recent deployments</span>
+              <Link to={`/apps/${svc.id}/deployments`} className="faint" style={{ fontWeight: 400 }}>View all →</Link>
+            </div>
+            <div className="list">
+              {recent.map((d) => (
+                <div key={d.id} className="list-row">
+                  <Pill status={d.status} />
+                  <span className="mono" style={{ fontSize: 12.5 }}>v{d.version}</span>
+                  <span className="faint" style={{ marginLeft: 'auto' }}>{timeAgo(d.startedAt)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="card">
+          <div className="eyebrow" style={{ marginBottom: 10 }}>Details</div>
+          <dl className="kv">
+            <dt>Source</dt>
+            <dd>{svc.image || svc.gitRepo || `${svc.kind} stack`}</dd>
+            <dt>Machine</dt>
+            <dd>{nodeLabel}</dd>
+            <dt>Port</dt>
+            <dd>{svc.port || 'none'}</dd>
+            <dt>Public URLs</dt>
+            <dd>{urls.length ? urls.join(' · ') : 'none yet. Set one up in Networking.'}</dd>
+            <dt>Container</dt>
+            <dd>{svc.containerId || 'not created yet'}</dd>
+            <dt>Restart policy</dt>
+            <dd>{svc.restartPolicy || 'unless-stopped'}</dd>
+            <dt>Created</dt>
+            <dd>{new Date(svc.createdAt).toLocaleString()} ({timeAgo(svc.createdAt)})</dd>
+          </dl>
+        </div>
       </div>
     </>
   );

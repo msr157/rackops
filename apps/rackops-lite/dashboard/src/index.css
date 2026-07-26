@@ -394,19 +394,13 @@ a:hover { color: var(--accent-hi); text-decoration: underline; text-underline-of
   display: flex; align-items: center; gap: 12px;
   background: none;
   border: none; border-top: 1px solid var(--border);
-  padding: 11px 14px 11px 0;
+  padding: 11px 14px;
   width: 100%; text-align: left; font-family: inherit; font-size: inherit; color: inherit;
   cursor: pointer;
   transition: background 0.13s;
 }
 .rack-unit:first-child { border-top: none; }
 .rack-unit:hover { background: var(--bg-2); }
-.rack-unit .u-label {
-  font-family: var(--mono); font-size: 11px; color: var(--faint);
-  width: 44px; flex: none; text-align: center;
-  border-right: 1px solid var(--border);
-  align-self: stretch; display: flex; align-items: center; justify-content: center;
-}
 /* A 60-character machine name truncates instead of shoving the meters off the row. */
 .rack-unit .u-name {
   font-weight: 600; font-size: 13.5px;
@@ -415,8 +409,10 @@ a:hover { color: var(--accent-hi); text-decoration: underline; text-underline-of
 .rack-unit .u-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rack-unit .u-meter { display: flex; flex-direction: column; gap: 3px; width: 90px; flex: none; }
 .rack-unit .u-meter .faint { font-size: 10.5px; }
+/* Tight panels shed the MEM meter first, then both. (last-of-type, because
+   the flexible content div is also a sibling div and nth-of-type counts it.) */
 @container (max-width: 520px) {
-  .rack-unit .u-meter:nth-of-type(n + 2) { display: none; }
+  .rack-unit .u-meter:last-of-type { display: none; }
 }
 @container (max-width: 380px) {
   .rack-unit .u-meter { display: none; }
@@ -1015,6 +1011,56 @@ table.table { width: 100%; border-collapse: collapse; font-size: 13px; }
 }
 .feed-item:last-child { border-bottom: none; }
 .feed-time { margin-left: auto; flex: none; color: var(--faint); font-size: 11px; font-family: var(--mono); padding-top: 2px; }
+
+/* trend chart: SVG stretches, text is HTML overlay so it never distorts */
+.chart { position: relative; }
+.chart-y {
+  position: absolute; right: 2px; transform: translateY(-1px);
+  font-size: 10px; font-family: var(--mono); color: var(--faint);
+  background: color-mix(in srgb, var(--bg-1) 82%, transparent);
+  padding: 0 3px; border-radius: 3px; pointer-events: none;
+}
+.chart-x { position: relative; height: 16px; margin-top: 4px; }
+.chart-x span {
+  position: absolute; top: 0; transform: translateX(-50%);
+  font-size: 10px; font-family: var(--mono); color: var(--faint); white-space: nowrap;
+}
+.chart-x span.first { transform: none; }
+.chart-x span.last { transform: translateX(-100%); }
+.chart-dot {
+  position: absolute; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--accent); border: 1.5px solid var(--bg-1);
+  transform: translate(-50%, -50%); pointer-events: none;
+}
+.chart-tip {
+  position: absolute; top: 8px; transform: translateX(-50%);
+  display: flex; flex-direction: column; gap: 1px; align-items: center;
+  background: var(--bg-3); border: 1px solid var(--border-hi);
+  border-radius: var(--r-sm); padding: 5px 9px;
+  font-size: 11.5px; pointer-events: none; white-space: nowrap;
+  box-shadow: var(--shadow-float); z-index: 2;
+}
+.chart-tip strong { font-family: var(--mono); font-size: 12.5px; }
+.chart-empty {
+  display: grid; place-items: center;
+  border: 1px solid var(--border); border-radius: var(--r-md);
+  background: var(--bg-2); color: var(--faint); font-size: 12.5px;
+  text-align: center; padding: 0 20px;
+}
+
+/* seg: pill-tab switch beside charts (metric, time window) */
+.seg {
+  display: inline-flex; gap: 2px; padding: 2px;
+  background: var(--bg-2); border: 1px solid var(--border); border-radius: 8px;
+}
+.seg button {
+  border: none; background: none; cursor: pointer;
+  padding: 3px 10px; border-radius: 6px;
+  font-size: 12px; font-family: inherit; color: var(--dim);
+  transition: background 0.13s, color 0.13s;
+}
+.seg button:hover { color: var(--text); }
+.seg button.on { background: var(--bg-3); color: var(--text); font-weight: 500; }
 
 @media (max-width: 900px) {
   .gsearch { width: auto; flex: 1; }

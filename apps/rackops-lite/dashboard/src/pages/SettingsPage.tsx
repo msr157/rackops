@@ -7,7 +7,14 @@ import { useToast, cleanError } from '../components/toast';
 import { OrgPanel } from '../components/OrgPanel';
 import { Field, InfoTip, Spinner } from '../components/ui';
 
-type Tab = 'org' | 'ai' | 'notify';
+// The active tab lives in the URL (?tab=…), so refresh keeps the tab and Back
+// walks through tabs the operator actually visited. Unknown values fall back
+// to the first tab instead of rendering nothing.
+const TABS = ['organization', 'copilot', 'notifications'] as const;
+type Tab = (typeof TABS)[number];
+
+// Pre-rename URLs (bookmarks, in-app links) keep landing on the tab they meant.
+const LEGACY_TABS: Record<string, Tab> = { org: 'organization', ai: 'copilot', notify: 'notifications' };
 
 type VendorId = 'anthropic' | 'gemini' | 'openai';
 
@@ -75,8 +82,16 @@ function ModelSelect({ label, presets, defaultId, customHint, value, onChange }:
 export function SettingsPage() {
   const toast = useToast();
   const [params, setParams] = useSearchParams();
-  const tab = (['org', 'ai', 'notify'].includes(params.get('tab') ?? '') ? params.get('tab') : 'org') as Tab;
-  const setTab = (t: Tab) => setParams({ tab: t }, { replace: true });
+  const rawTab = params.get('tab') ?? '';
+  const tab: Tab = (TABS as readonly string[]).includes(rawTab) ? (rawTab as Tab)
+    : LEGACY_TABS[rawTab] ?? 'organization';
+  // replace: false pushes a history entry per tab switch, so Back works.
+  // Other params (none today) survive the write untouched.
+  const setTab = (t: Tab) => setParams((prev) => {
+    const next = new URLSearchParams(prev);
+    next.set('tab', t);
+    return next;
+  }, { replace: false });
   const [s, setS] = useState<Settings>({ notifyDeploys: true, notifyAlerts: true });
   // The server only ever tests what it has stored, so the UI tracks what's
   // been saved rather than asking the operator to remember.
@@ -195,9 +210,9 @@ export function SettingsPage() {
 
       <div className="tabs">
         {([
-          ['org', <Building2 size={14} key="o" />, 'Organization'],
-          ['ai', <Key size={14} key="a" />, 'Copilot AI'],
-          ['notify', <Bell size={14} key="n" />, 'Notifications'],
+          ['organization', <Building2 size={14} key="o" />, 'Organization'],
+          ['copilot', <Key size={14} key="a" />, 'Copilot AI'],
+          ['notifications', <Bell size={14} key="n" />, 'Notifications'],
         ] as [Tab, React.ReactNode, string][]).map(([key, icon, label]) => (
           <button key={key} className={`tab ${tab === key ? 'active' : ''}`} onClick={() => setTab(key)}>
             {icon} {label}
@@ -205,9 +220,9 @@ export function SettingsPage() {
         ))}
       </div>
 
-      {tab === 'org' && <OrgPanel />}
+      {tab === 'organization' && <OrgPanel />}
 
-      {tab === 'ai' && (
+      {tab === 'copilot' && (
         <div className="card">
           <div className="dim" style={{ marginBottom: 14 }}>
             The Copilot answers questions about your fleet using live telemetry.
@@ -302,7 +317,7 @@ export function SettingsPage() {
         </div>
       )}
 
-      {tab === 'notify' && (
+      {tab === 'notifications' && (
         <div className="card">
           <div className="dim" style={{ marginBottom: 14 }}>
             Get pinged when deploys finish or alerts fire, per organization.

@@ -11,6 +11,14 @@ Provenance: full visual-world replacement, user-directed 2026-07-26
 page. Physical scene: an operator checking their rack from a laptop in the
 evening or a dim office — dark, calm, zero spectacle.
 
+**2026-07-27 revision ("reference register"):** the user supplied two light
+admin-kit references (DealPort, Orbix) and chose to keep the dark palette
+while adopting their structure: a time dimension everywhere (charts, "vs 24h"
+deltas, fed by `/api/metrics/history`), real tables for comparison surfaces,
+bigger hierarchy (22px titles, 28px KPI values), tinted icon chips and status
+pills as landmarks, a real topbar search input, and a notification bell. A
+light theme / toggle was explicitly deferred, not rejected.
+
 ## Tokens (authoritative; exact values live in `src/index.css`)
 
 ### Color — chassis
@@ -52,10 +60,10 @@ gone — hardware facts wear neutral `.tag`s.
   removed from the product.
 - `--mono`: IBM Plex Mono — data, ids, metrics, terminal, kbd. Never as a
   "technical costume" on prose.
-- Scale (rem-fixed): page title 20px/650/-0.01em · section 14px/600 ·
-  body 13.5px/400 · secondary 12.5px · label 12px/500 (sentence case — the old
-  tracked-uppercase eyebrow grammar is retired) · micro-mono 11px (U-numbers,
-  kbd, timestamps).
+- Scale (rem-fixed): greeting 24px/650 · page title 22px/650/-0.015em ·
+  KPI value 28px/600 mono · section 14px/600 · body 13.5px/400 · secondary
+  12.5px · label 12px/500 (sentence case — the old tracked-uppercase eyebrow
+  grammar is retired) · micro-mono 11px (kbd, timestamps, chart axes).
 
 ### Shape, depth, motion
 - Radius: 6 / 8 / 10 (`--r-sm/md/lg`). Cards 10, controls 8, chips/badges full.
@@ -113,6 +121,29 @@ gone — hardware facts wear neutral `.tag`s.
   `--bg-2` circle, title + one sentence + one primary action.
 - **Skeletons**: `--bg-2` blocks with 1.4s sweep; every async list shows
   skeletons until `loaded`, never a false empty.
+- **Icon chips** (`.icon-chip`, `IconChip`): a lucide glyph in a soft tinted
+  34px (28px `.sm`) container — the landmark for KPI tiles, feed rows, empty
+  states, template tiles. Tone carries meaning (`ok/warn/crit/accent`);
+  neutral is the default for identity and inventory facts.
+- **Status pills** (`.pill`, `Pill`): dot + word in a tinted capsule — the
+  status language inside tables and dense lists. Bare `StatusBadge` stays for
+  inline headers. Color never travels without the word.
+- **Data tables** (`.table-wrap`/`table.table`, `DataTable`): the comparison
+  surface (Apps, Machines). Sticky header, hairline rows, sortable columns
+  via `.th-sort` + `aria-sort`, numeric cells `.num` right-aligned mono, row
+  click navigates with a real `<Link>` in the name cell for keyboards.
+  Narrative surfaces (attention, feeds, wizards) stay cards.
+- **Trend charts** (`TrendChart`): the one time-series primitive. Self-drawn
+  SVG (no chart library, air-gap safe), accent line + gradient fill, HTML
+  text overlay (never stretched SVG text), hover guide + tooltip, `.chart-x`
+  time ticks. One metric per chart; `Seg` switches metric and window
+  (24h fine / 7d coarse from `/api/metrics/history`). Gaps mean offline —
+  never zero-filled. Under ~2 points it renders its own "collecting" state.
+- **Deltas** (`Delta`, `trendDelta`): "↑ 12%" vs 24h ago beside a value.
+  Direction is meaning-aware (caller sets `goodWhenUp`); renders nothing when
+  history can't honestly support the comparison (<20h span, near-zero base).
+- **Segmented switch** (`.seg`, `Seg`): pill-tabs for chart metric/window.
+  Not a filter (filters use `.btn.chip-on`), not navigation (tabs use `.tabs`).
 
 ## Interaction grammar (post-audit, 2026-07-26)
 
@@ -136,6 +167,28 @@ gone — hardware facts wear neutral `.tag`s.
   metadata line; one label per intent per surface; `<option>` labels carry
   names only (descriptions go in Field hints).
 
+## Interaction grammar additions (reference register, 2026-07-27)
+
+- **Sidebar sections**: `Operate` (Home, Apps, Machines, Network) and
+  `Workspace` (Settings, Support, What's new). The account menu keeps only
+  Profile and Log out — Support moved to the nav.
+- **Topbar order**: search input → (spacer) → bell → Copilot → Deploy app.
+  The search box is a real input that hands its first keystroke to the
+  command palette (`seed`); ⌘K/Ctrl K still toggles it.
+- **Bell semantics**: the badge counts open alerts ONLY (never routine
+  activity); the panel lists open alerts (clickable, → machine) then recent
+  activity (non-interactive rows, neutral dots). Empty state: "Nothing needs
+  your attention."
+- **Home order**: greeting + date + quick actions → status banner →
+  attention list → checklist (only when calm) → KPI row with deltas → fleet
+  hero chart → apps + activity feed | rack + storage. Quick actions never
+  duplicate chrome verbs (Deploy lives in the topbar) and Add machine yields
+  to the banner primary on an empty rack.
+- **The time dimension is server truth**: every chart and delta reads
+  `/api/metrics/history` (24h @ 1min, 7d @ 15min, org-scoped). No component
+  accumulates client-side history; deltas are null, not 0%, when the rings
+  are too young.
+
 ## Hard rules
 
 1. Never render unreachable/loading as empty — gate empties on `loaded`,
@@ -148,7 +201,9 @@ gone — hardware facts wear neutral `.tag`s.
 5. AA contrast on all ink tokens against all four surfaces; focus ring
    (2px `--accent`, 2px offset) on every interactive element.
 6. Icon-only buttons are banned in primary chrome — visible labels, or
-   `aria-label` + `title` only for tight table-row actions.
+   `aria-label` + `title` only for tight table-row actions. One standing
+   exception: the notification bell (`.bell-btn`), a universal convention,
+   with `aria-label` + `title` and a badge that only ever counts open alerts.
 7. Keep the `rackops-org-changed` + localStorage org contract and all API
    behavior intact — this is a reskin plus UX repair, not a rewrite.
 

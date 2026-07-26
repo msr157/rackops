@@ -1,10 +1,11 @@
 import { useNavigate } from 'react-router-dom';
 import { Server } from 'lucide-react';
 import type { Node, Service } from '../api';
-import { EmptyState, Led, Skeleton, UsageBar } from './ui';
+import { EmptyState, Led, Skeleton, UsageBar, timeAgo } from './ui';
 
-// Rack renders the fleet as slot-numbered rows (the signature element),
-// drawn flat: a mono U-number rail, status dot + word, name, live meters.
+// Rack renders the fleet as flat hairline-separated rows: status dot (plus
+// the word, for screen readers), name, one line of vitals, live meters.
+// No U-numbers: slot positions were decoration, not data.
 export function Rack({ nodes, services, loading, onAdd }: {
   nodes: Node[]; services: Service[]; loading?: boolean; onAdd?: () => void;
 }) {
@@ -35,12 +36,15 @@ export function Rack({ nodes, services, loading, onAdd }: {
 
   return (
     <div className="rack">
-      {nodes.map((n, i) => {
+      {nodes.map((n) => {
         const apps = services.filter((s) => s.nodeId === n.id);
         const up = apps.filter((s) => s.status === 'running').length;
+        const offline = n.status === 'offline';
         return (
-          <button key={n.id} className="rack-unit" onClick={() => navigate(`/machines/${n.id}`)}>
-            <span className="u-label" aria-hidden>U{nodes.length - i}</span>
+          // .rack-unit's left padding used to come from the rail column
+          // (padding-left is 0 in the class), so the row supplies its own.
+          <button key={n.id} className="rack-unit"
+            onClick={() => navigate(`/machines/${n.id}`)}>
             {/* label: the dot is the only status cue on the row, so say the word too */}
             <Led status={n.status} lg label />
             <div style={{ flex: 1, minWidth: 0 }}>
@@ -50,9 +54,13 @@ export function Rack({ nodes, services, loading, onAdd }: {
               </div>
               {/* One middot per line: ip first, then readings comma-joined.
                   Temperature lives here because it is a reading, not a
-                  percentage, so it never gets a meter bar. */}
+                  percentage, so it never gets a meter bar. Offline rows swap
+                  the live readings for when the box was last heard from:
+                  stale numbers presented as live would be a lie. */}
               <div className="faint mono u-sub">
-                {n.ip} · {apps.length > 0 && `${up}/${apps.length} apps up, `}{n.metrics.tempC.toFixed(0)}°C
+                {offline
+                  ? <>{n.ip} · last seen {timeAgo(n.lastSeen)}</>
+                  : <>{n.ip} · {apps.length > 0 && `${up}/${apps.length} apps up, `}{n.metrics.tempC.toFixed(0)}°C</>}
               </div>
             </div>
             <div className="u-meter">

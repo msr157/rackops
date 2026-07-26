@@ -2,15 +2,15 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   Rocket, Package, Container, GitBranch, Layers, Sparkles, Plus, Trash2, ArrowLeft, ArrowRight,
-  Globe, Check, CheckCircle2, ScrollText, Bot, Server, Home, Wrench, Gamepad2, Database, KeyRound,
-  Search, RotateCw,
+  Globe, Check, CheckCircle2, ScrollText, Bot, Server, House, Wrench, Gamepad2, Database, KeyRound,
+  Search, RotateCw, Activity, Box, Clapperboard, HardDrive, Music, Shield,
 } from 'lucide-react';
 import { api, subscribeLogChunks } from '../api';
 import type { Template, EnvVar, PlacementScore, Service, Deployment, LogChunk } from '../api';
 import { useData } from '../data';
 import { useToast, cleanError } from '../components/toast';
 import {
-  EmptyState, Field, Led, PasswordInput, Skeleton, Spinner, UrlChip, dnsLabel, publicUrls,
+  EmptyState, Field, IconChip, Led, PasswordInput, Skeleton, Spinner, UrlChip, dnsLabel, publicUrls,
 } from '../components/ui';
 
 type Source = 'template' | 'image' | 'git' | 'compose';
@@ -18,7 +18,7 @@ type Source = 'template' | 'image' | 'git' | 'compose';
 const CATEGORIES = [
   { key: '', label: 'All', icon: <Layers size={12} /> },
   { key: 'infra', label: 'Infra', icon: <Server size={12} /> },
-  { key: 'homelab', label: 'Homelab', icon: <Home size={12} /> },
+  { key: 'homelab', label: 'Homelab', icon: <House size={12} /> },
   { key: 'ai', label: 'AI', icon: <Bot size={12} /> },
   { key: 'web', label: 'Web', icon: <Globe size={12} /> },
   { key: 'tools', label: 'Tools', icon: <Wrench size={12} /> },
@@ -37,6 +37,38 @@ const SOURCES: { key: Source; icon: React.ReactNode; label: string; sub: string 
 const TPL_GRID: React.CSSProperties = {
   display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 8,
 };
+
+// templateIcon: one recognizable glyph per template so the grid scans by shape,
+// not by reading 45+ names. Keyed off id/name keywords first, then the
+// category. Chips stay neutral: template identity is a fact, not a status.
+const TPL_ICON = 14;
+
+function templateIcon(t: Template): React.ReactNode {
+  const hay = `${t.id} ${t.name}`.toLowerCase();
+  const has = (...words: string[]) => words.some((w) => hay.includes(w));
+  if (has('postgres', 'mysql', 'maria', 'mongo', 'redis', 'clickhouse', 'qdrant', 'sql', 'database')) return <Database size={TPL_ICON} />;
+  if (has('music', 'audio', 'navidrome')) return <Music size={TPL_ICON} />;
+  if (has('jellyfin', 'plex', 'immich', 'media', 'video', 'photo')) return <Clapperboard size={TPL_ICON} />;
+  if (has('git')) return <GitBranch size={TPL_ICON} />;
+  if (has('docker', 'registry', 'container')) return <Container size={TPL_ICON} />;
+  if (has('prometheus', 'grafana', 'uptime', 'monitor', 'metric', 'plausible', 'umami', 'analytic')) return <Activity size={TPL_ICON} />;
+  if (has('minio', 'seaweed', 'nextcloud', 'syncthing', 'filebrowser', 'file', 'storage', 'backup')) return <HardDrive size={TPL_ICON} />;
+  if (has('home assistant', 'home-assistant', 'homeassistant')) return <House size={TPL_ICON} />;
+  if (has('vaultwarden', 'vault', 'password', 'secret')) return <KeyRound size={TPL_ICON} />;
+  if (has('adguard', 'pihole', 'pi-hole', 'firewall')) return <Shield size={TPL_ICON} />;
+  if (has('nginx', 'caddy', 'traefik', 'proxy')) return <Globe size={TPL_ICON} />;
+  if (has('ollama', 'openai', 'llm', 'webui', 'flowise')) return <Bot size={TPL_ICON} />;
+  switch (t.category) {
+    case 'database': return <Database size={TPL_ICON} />;
+    case 'ai': return <Bot size={TPL_ICON} />;
+    case 'games': return <Gamepad2 size={TPL_ICON} />;
+    case 'web': return <Globe size={TPL_ICON} />;
+    case 'homelab': return <House size={TPL_ICON} />;
+    case 'infra': return <Server size={TPL_ICON} />;
+    case 'tools': return <Wrench size={TPL_ICON} />;
+    default: return <Box size={TPL_ICON} />;
+  }
+}
 
 // Env rows need identity that survives removal from the middle of the list;
 // index keys would hand row N's focused input to row N+1's data.
@@ -318,7 +350,9 @@ export function DeployFlow() {
                   }}
                   onClick={() => setSource(s.key)}
                   onKeyDown={(e) => onSourceKey(e, i)}>
-                  <div style={{ color: selected ? 'var(--accent)' : 'var(--dim)', marginBottom: 6 }} aria-hidden>{s.icon}</div>
+                  <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 8 }}>
+                    <IconChip tone={selected ? 'accent' : undefined}>{s.icon}</IconChip>
+                  </div>
                   <div style={{ fontWeight: 600, fontSize: 13 }}>{s.label}</div>
                   <div className="faint">{s.sub}</div>
                 </button>
@@ -371,12 +405,17 @@ export function DeployFlow() {
                           borderColor: selected ? 'var(--accent)' : undefined,
                           background: selected ? 'var(--accent-dim)' : undefined,
                         }} onClick={() => pickTemplate(t)}>
-                        <div className="row spread">
-                          <strong style={{ fontSize: 13, color: 'var(--text)' }}>{t.name}</strong>
-                          <span className="tag">{t.category}</span>
+                        <div className="row" style={{ gap: 10, alignItems: 'flex-start' }}>
+                          <IconChip sm>{templateIcon(t)}</IconChip>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div className="row spread">
+                              <strong style={{ fontSize: 13, color: 'var(--text)' }}>{t.name}</strong>
+                              <span className="tag">{t.category}</span>
+                            </div>
+                            <div className="faint" style={{ marginTop: 4 }}>{t.description}</div>
+                            {t.gpu && <span className="tag" style={{ marginTop: 6, display: 'inline-block' }}>needs GPU</span>}
+                          </div>
                         </div>
-                        <div className="faint" style={{ marginTop: 4 }}>{t.description}</div>
-                        {t.gpu && <span className="tag" style={{ marginTop: 6, display: 'inline-block' }}>needs GPU</span>}
                       </button>
                     );
                   })}

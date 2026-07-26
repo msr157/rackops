@@ -1,127 +1,180 @@
 import { useId, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Rocket, Search, TriangleAlert } from 'lucide-react';
+import { Rocket, Search } from 'lucide-react';
 import type { Service } from '../api';
 import { useData } from '../data';
-import { EmptyState, InfoTip, Led, SkeletonRows, StatusBadge, UrlChip, publicUrls } from '../components/ui';
+import { DataTable } from '../components/Table';
+import type { Column } from '../components/Table';
+import { EmptyState, Pill, SkeletonRows, UrlChip, ledClass, publicUrls } from '../components/ui';
 
-// AppsPage: every workload, its health, and where it's reachable, with the
-// full detail one click away. Rows are pure navigation: lifecycle actions live
-// on the app detail header and in the command palette, so nothing on this list
-// can be mis-clicked while scanning.
+// AppsPage: the fleet's comparison surface. Every workload in one sortable
+// table — status, machine, live resource use, and where it's reachable —
+// with the full detail one click away. Rows are pure navigation: lifecycle
+// actions live on the app detail header and in the command palette, so
+// nothing on this list can be mis-clicked while scanning.
+
+// Severity order for the status column: ascending puts problems on top
+// (failed, then in-flight, then stopped, then running).
+const STATUS_RANK: Record<ReturnType<typeof ledClass>, number> = {
+  crit: 0, warn: 1, off: 2, ok: 3,
+};
+
+// Status filter groups. Grouping goes through ledClass so every backend
+// status lands in exactly one chip: ok/warn (running + building/pending)
+// read as "Running", crit as "Needs attention", off as "Stopped".
+type StatusFilter = 'all' | 'running' | 'attention' | 'stopped';
+const STATUS_GROUPS: { id: StatusFilter; label: string; test: (s: Service) => boolean }[] = [
+  { id: 'all', label: 'All', test: () => true },
+  { id: 'running', label: 'Running', test: (s) => { const c = ledClass(s.status); return c === 'ok' || c === 'warn'; } },
+  { id: 'attention', label: 'Needs attention', test: (s) => ledClass(s.status) === 'crit' },
+  { id: 'stopped', label: 'Stopped', test: (s) => ledClass(s.status) === 'off' },
+];
+
+function formatMem(mb: number): string {
+  return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`;
+}
+
 export function AppsPage() {
-  const { services, nodes, ingress, nodeName, loaded } = useData();
+  const { services, ingress, nodes, nodeName, loaded } = useData();
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState<StatusFilter>('all');
   const searchId = useId();
 
-  const filtered = services.filter((s) =>
-    !search || (s.name + (s.image ?? '') + (s.domain ?? '')).toLowerCase().includes(search.toLowerCase()));
+  const group = STATUS_GROUPS.find((g) => g.id === filter) ?? STATUS_GROUPS[0];
+  const query = search.trim().toLowerCase();
+  const visible = services.filter((s) =>
+    (!query || `${s.name} ${s.image ?? ''} ${s.domain ?? ''}`.toLowerCase().includes(query))
+    && group.test(s));
 
-  // Stable name order, always. Failed apps sit under their own labelled group
-  // instead of a live failing-first resort, so rows never jump mid-aim when a
-  // status flips between telemetry ticks.
-  const byName = [...filtered].sort((a, b) => a.name.localeCompare(b.name));
-  const attention = byName.filter((s) => s.status === 'failed');
-  const rest = byName.filter((s) => s.status !== 'failed');
+  // Rows enter the table in name order; DataTable's sort is stable, so ties
+  // inside any sorted column always resolve alphabetically and rows never
+  // shuffle arbitrarily between telemetry ticks.
+  const rows = [...visible].sort((a, b) => a.name.localeCompare(b.name));
 
-  // The filter earns its place once there are 2+ apps, but its slot is always
-  // reserved: appearing after the fleet loads must not shove the list down
-  // mid-read. visibility keeps the exact footprint without a focusable ghost.
+  // The filter row earns its place once there are 2+ apps, but its slot is
+  // always reserved: appearing after the fleet loads must not shove the table
+  // down mid-read. visibility keeps the footprint without focusable ghosts.
   const showFilter = loaded && services.length > 1;
 
-  const renderRow = (s: Service) => {
-    const urls = publicUrls(s, ingress);
-    const node = nodes.find((n) => n.id === s.nodeId);
-    return (
-      // The app name is the real link, stretched across the card: the whole
-      // surface stays clickable, and the row is reachable by Tab, openable
-      // with Enter, and middle-clickable into a new tab.
-      <div key={s.id} className="card row-card" style={{ padding: '13px 16px' }}>
-        <div className="row" style={{ minWidth: 0 }}>
-          <Link to={`/apps/${s.id}`} className="row-link"
-            style={{ fontSize: 14.5, fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+  const columns: Column<Service>[] = [
+    {
+      key: 'name',
+      label: 'App',
+      sortValue: (s) => s.name.toLowerCase(),
+      render: (s) => (
+        <span className="row" style={{ gap: 8, minWidth: 0 }}>
+          {/* A real link inside the clickable row: reachable by Tab, openable
+              with Enter, middle-clickable into a new tab. */}
+          <Link to={`/apps/${s.id}`} style={{ color: 'inherit', fontWeight: 600 }}
+            onClick={(e) => e.stopPropagation()}>
             {s.name}
           </Link>
-          <StatusBadge status={s.status} />
           {s.kind === 'compose' && <span className="tag">stack</span>}
-        </div>
-        {/* row-actions: keeps the live URLs clickable above the stretched link */}
-        <div className="row wrap row-actions" style={{ marginTop: 9, gap: 10 }}>
-          {urls.map((u) => <UrlChip key={u.url} url={u.url} />)}
-          {urls.length === 0 && s.port > 0 && node && s.status === 'running' && (
-            <UrlChip url={`http://${node.ip}:${s.port}`} />
-          )}
-          {urls.length === 0 && (s.port === 0 || s.status !== 'running') && (
-            <span className="faint">no public URL yet</span>
-          )}
-          <span className="faint mono" style={{ marginLeft: 'auto' }}>
-            {s.image || s.gitRepo || s.kind} · {nodeName(s.nodeId)}
-          </span>
-        </div>
-      </div>
-    );
-  };
+        </span>
+      ),
+    },
+    {
+      key: 'status',
+      label: 'Status',
+      width: 130,
+      sortValue: (s) => STATUS_RANK[ledClass(s.status)],
+      render: (s) => <Pill status={s.status} />,
+    },
+    {
+      key: 'machine',
+      label: 'Machine',
+      sortValue: (s) => nodeName(s.nodeId).toLowerCase(),
+      render: (s) => <span className="dim">{nodeName(s.nodeId)}</span>,
+    },
+    {
+      key: 'cpu',
+      label: 'CPU',
+      num: true,
+      width: 70,
+      sortValue: (s) => (s.status === 'running' ? s.cpuPct : -1),
+      render: (s) => (s.status === 'running' ? `${s.cpuPct.toFixed(0)}%` : ''),
+    },
+    {
+      key: 'mem',
+      label: 'Memory',
+      num: true,
+      width: 90,
+      sortValue: (s) => (s.status === 'running' ? s.memUsedMb : -1),
+      render: (s) => (s.status === 'running' ? formatMem(s.memUsedMb) : ''),
+    },
+    {
+      key: 'url',
+      label: 'URL',
+      render: (s) => {
+        const urls = publicUrls(s, ingress);
+        if (urls.length > 0) return <UrlChip url={urls[0].url} />;
+        // No public URL, but on a homelab the LAN address IS the address.
+        const ip = nodes.find((n) => n.id === s.nodeId)?.ip;
+        if (s.status === 'running' && s.port > 0 && ip) {
+          return <UrlChip url={`http://${ip}:${s.port}`} />;
+        }
+        return <span className="faint">not public yet</span>;
+      },
+    },
+  ];
 
   return (
     <div className="page">
       <div className="page-title">Apps</div>
       <div className="page-sub">Everything running on your rack, and where it's reachable</div>
 
-      <div className="search-input"
-        style={{ width: 280, maxWidth: '100%', marginBottom: 16, visibility: showFilter ? 'visible' : 'hidden' }}>
-        <Search size={13} aria-hidden />
-        <label className="sr-only" htmlFor={searchId}>Filter apps</label>
-        <input className="input" id={searchId} placeholder="Filter apps…"
-          value={search} onChange={(e) => setSearch(e.target.value)} />
-      </div>
-
-      <div className="stack" style={{ gap: 8 }}>
-        {attention.length > 0 && (
-          <div className="eyebrow" style={{ color: 'var(--crit)' }}>
-            <TriangleAlert size={12} aria-hidden /> Needs attention
-          </div>
-        )}
-        {attention.map(renderRow)}
-        {attention.length > 0 && rest.length > 0 && (
-          <div className="eyebrow" style={{ marginTop: 8 }}>Everything else</div>
-        )}
-        {rest.map(renderRow)}
-
-        {/* Waiting for the first load is not the same as having no apps. */}
-        {!loaded && services.length === 0 && <SkeletonRows count={3} height={78} />}
-
-        {loaded && services.length === 0 && (
-          <EmptyState icon={<Rocket size={18} />} title="Nothing deployed yet">
-            <div style={{ maxWidth: 460, margin: '0 auto 16px', lineHeight: 1.6 }}>
-              Pick from 45+ ready-made templates (media servers, databases, AI tools)
-              or bring your own image, git repo, or compose file.
-            </div>
-            <button className="btn primary" onClick={() => navigate('/apps/new')}>
-              <Rocket size={13} aria-hidden /> Deploy your first app
+      <div className="row wrap" style={{ gap: 8, marginBottom: 16, visibility: showFilter ? 'visible' : 'hidden' }}>
+        <div className="search-input" style={{ width: 260, maxWidth: '100%' }}>
+          <Search size={13} aria-hidden />
+          <label className="sr-only" htmlFor={searchId}>Filter apps by name</label>
+          <input className="input" id={searchId} placeholder="Filter apps…"
+            value={search} onChange={(e) => setSearch(e.target.value)} />
+        </div>
+        <div className="row" role="group" aria-label="Filter by status" style={{ gap: 6 }}>
+          {STATUS_GROUPS.map((g) => (
+            <button key={g.id} type="button"
+              className={`btn sm ${filter === g.id ? 'chip-on' : ''}`}
+              aria-pressed={filter === g.id}
+              onClick={() => setFilter(g.id)}>
+              {g.label}
             </button>
-          </EmptyState>
-        )}
-        {services.length > 0 && filtered.length === 0 && (
-          <EmptyState icon={<Search size={18} />} title={`Nothing matches "${search}"`}>
-            <button className="btn sm" style={{ marginTop: 4 }} onClick={() => setSearch('')}>Clear filter</button>
-          </EmptyState>
-        )}
+          ))}
+        </div>
       </div>
 
-      {/* Legend for new users: same words the status badges use, so the page
-          never speaks two dialects. */}
-      {services.length > 0 && (
-        <div className="row wrap" style={{ marginTop: 18, gap: 16 }}>
-          <span className="faint row" style={{ gap: 5 }}><Led status="running" /> running</span>
-          <span className="faint row" style={{ gap: 5 }}><Led status="building" /> building</span>
-          <span className="faint row" style={{ gap: 5 }}><Led status="failed" /> failed (auto-heal retries, check logs)</span>
-          <span className="faint row" style={{ gap: 5 }}><Led status="stopped" /> stopped</span>
-          <InfoTip wide>
-            &ldquo;Building&rdquo; means a deploy or restart is in flight. &ldquo;Failed&rdquo; apps are
-            retried automatically a few times; if they stay down, the logs usually say why.
-            Open an app to start, stop, or restart it.
-          </InfoTip>
+      {/* Waiting for the first load is not the same as having no apps. */}
+      {!loaded && services.length === 0 && <SkeletonRows count={4} height={46} />}
+
+      {rows.length > 0 && (
+        <DataTable<Service>
+          columns={columns}
+          rows={rows}
+          rowKey={(s) => s.id}
+          onRowClick={(s) => navigate(`/apps/${s.id}`)}
+          defaultSort={{ key: 'status', dir: 'asc' }}
+          caption="Apps with status, machine, resource use, and public URL"
+        />
+      )}
+
+      {loaded && services.length === 0 && (
+        <EmptyState icon={<Rocket size={18} />} title="Nothing deployed yet">
+          <div style={{ maxWidth: 460, margin: '0 auto 16px', lineHeight: 1.6 }}>
+            Pick from 45+ ready-made templates (media servers, databases, AI tools)
+            or bring your own image, git repo, or compose file.
+          </div>
+          <button className="btn primary" onClick={() => navigate('/apps/new')}>
+            <Rocket size={13} aria-hidden /> Deploy your first app
+          </button>
+        </EmptyState>
+      )}
+
+      {services.length > 0 && rows.length === 0 && (
+        <div className="row" style={{ gap: 10, padding: '14px 2px' }}>
+          <span className="faint">No apps match the current filters.</span>
+          <button className="btn sm" onClick={() => { setSearch(''); setFilter('all'); }}>
+            Clear filters
+          </button>
         </div>
       )}
     </div>

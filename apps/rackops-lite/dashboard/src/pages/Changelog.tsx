@@ -55,7 +55,7 @@ const normVersion = (v: string) => v.replace(/^v/i, '');
 // Quick paths to the v0.4.0 features — scoped under that release, because
 // that is the release they shipped in.
 const featureLinks = [
-  { label: 'Organizations', to: '/settings?tab=org', icon: <Users size={16} aria-hidden /> },
+  { label: 'Organizations', to: '/settings?tab=organization', icon: <Users size={16} aria-hidden /> },
   { label: 'API keys & MCP', to: '/profile', icon: <KeyRound size={16} aria-hidden /> },
   { label: 'Domains & edge', to: '/network', icon: <Network size={16} aria-hidden /> },
   { label: 'Support', to: '/support', icon: <LifeBuoy size={16} aria-hidden /> },

@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Globe, Shield, Waypoints, Boxes, AlertTriangle, Plus, Trash2, RefreshCw, ChevronDown,
-  ChevronRight, Lock, Rocket, Cloud, ArrowRight, ArrowLeft, Route, SlidersHorizontal,
+  ChevronRight, Lock, Rocket, Cloud, ArrowRight, ArrowLeft, Route, SlidersHorizontal, Network,
 } from 'lucide-react';
 import { api } from '../api';
 import type { Domain, IngressConfig, MeshStatus, ClusterStatus, NetworkDiagnosis } from '../api';
@@ -10,8 +10,8 @@ import { useData } from '../data';
 import { useToast, cleanError } from '../components/toast';
 import { useConfirm } from '../components/confirm';
 import {
-  EmptyState, Field, InfoTip, Led, CopyBtn, CopyField, Modal, Skeleton, SkeletonRows,
-  Spinner, UrlChip, publicUrls,
+  EmptyState, Field, IconChip, InfoTip, Led, CopyBtn, CopyField, Modal, Pill, Skeleton,
+  SkeletonRows, Spinner, UrlChip, publicUrls,
 } from '../components/ui';
 
 // recordHost: what goes in the registrar's "Host/Name" field.
@@ -31,9 +31,9 @@ const DOMAIN_SHAPE = /^(\*\.)?[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$/;
 
 function DomainBadge({ d }: { d: Domain }) {
   switch (d.status) {
-    case 'verified': return <span className="badge ok"><Led status="verified" /> verified</span>;
-    case 'misconfigured': return <span className="badge crit"><AlertTriangle size={11} aria-hidden /> misconfigured</span>;
-    default: return <span className="badge warn"><Led status="pending" /> pending DNS</span>;
+    case 'verified': return <Pill status="verified" />;
+    case 'misconfigured': return <Pill status="misconfigured" />;
+    default: return <Pill status="pending">pending DNS</Pill>;
   }
 }
 
@@ -295,26 +295,45 @@ export function NetworkPage() {
   // How each machine is reachable, for annotating the edge's node picker.
   const reachability = new Map((diagnosis?.nodes ?? []).map((n) => [n.id, n.reachability] as const));
 
+  // Strip chip tones: ok when healthy, crit when failed, warn while settling,
+  // none while off, disabled, loading, or unknown. The word rides beside the
+  // chip, so color never travels alone.
+  const edgeTone = ingressState !== 'ready' || !ingress?.enabled ? undefined
+    : ingress.status === 'running' ? ('ok' as const)
+    : ingress.status === 'failed' ? ('crit' as const)
+    : ('warn' as const);
+  const meshTone = meshState === 'ready' && meshStatus?.enabled ? ('ok' as const) : undefined;
+  const routesTone = loaded && publicApps.length > 0 ? ('ok' as const) : undefined;
+
   return (
     <div className="page">
       <div className="page-title">Network</div>
       <div className="page-sub">How the internet reaches your rack: public routes, domains, and the edge</div>
 
       {/* One-line answer before anything else: edge, mesh, and what's live. */}
-      <div className="card row wrap" style={{ padding: '10px 14px', marginBottom: 16, gap: 10 }}>
-        {ingressState === 'loading' ? <Skeleton width={90} height={20} radius={20} />
-          : ingressState === 'error' ? <span className="badge neutral">edge status unknown</span>
-          : !ingress?.enabled ? <span className="badge neutral">edge off</span>
-          : ingress.status === 'running' ? <span className="badge ok"><Led status="running" /> edge running on {nodeName(ingress.nodeId)}</span>
-          : ingress.status === 'failed' ? <span className="badge crit"><AlertTriangle size={11} aria-hidden /> edge failed</span>
-          : <span className="badge warn"><Led status="pending" /> edge starting…</span>}
-        {meshState === 'loading' ? <Skeleton width={74} height={20} radius={20} />
-          : meshState === 'error' ? <span className="badge neutral">mesh status unknown</span>
-          : meshStatus?.enabled ? <span className="badge ok">mesh active</span>
-          : <span className="badge neutral">mesh off</span>}
-        {loaded
-          ? <span className="dim">{publicApps.length} route{publicApps.length === 1 ? '' : 's'} live</span>
-          : <Skeleton width={70} height={14} />}
+      <div className="card row wrap" style={{ padding: '10px 14px', marginBottom: 16, gap: 16 }}>
+        <span className="row" style={{ gap: 8 }}>
+          <IconChip sm tone={edgeTone}><Globe size={14} /></IconChip>
+          {ingressState === 'loading' ? <Skeleton width={90} height={20} radius={20} />
+            : ingressState === 'error' ? <Pill status="unknown">edge status unknown</Pill>
+            : !ingress?.enabled ? <Pill status="off">edge off</Pill>
+            : ingress.status === 'running' ? <Pill status="running">edge running on {nodeName(ingress.nodeId)}</Pill>
+            : ingress.status === 'failed' ? <Pill status="failed">edge failed</Pill>
+            : <Pill status="starting">edge starting…</Pill>}
+        </span>
+        <span className="row" style={{ gap: 8 }}>
+          <IconChip sm tone={meshTone}><Network size={14} /></IconChip>
+          {meshState === 'loading' ? <Skeleton width={74} height={20} radius={20} />
+            : meshState === 'error' ? <Pill status="unknown">mesh status unknown</Pill>
+            : meshStatus?.enabled ? <Pill status="ok">mesh active</Pill>
+            : <Pill status="off">mesh off</Pill>}
+        </span>
+        <span className="row" style={{ gap: 8 }}>
+          <IconChip sm tone={routesTone}><Route size={14} /></IconChip>
+          {loaded
+            ? <span className="dim">{publicApps.length} route{publicApps.length === 1 ? '' : 's'} live</span>
+            : <Skeleton width={70} height={14} />}
+        </span>
       </div>
 
       {lanOnly && (
@@ -345,7 +364,7 @@ export function NetworkPage() {
                 <strong>{s.name}</strong>
                 {urls.map((u) => <UrlChip key={u.url} url={u.url} />)}
                 {s.quickTunnelUrl && <span className="badge neutral"><Cloud size={10} aria-hidden /> tunnel</span>}
-                {backing && backing.status !== 'verified' && <span className="badge warn"><AlertTriangle size={10} aria-hidden /> DNS not verified</span>}
+                {backing && backing.status !== 'verified' && <Pill status="pending">DNS not verified</Pill>}
                 {s.domain && ingress?.enabled && s.nodeId !== ingress.nodeId && <span className="badge neutral">via mesh relay</span>}
               </div>
               <Link to={`/apps/${s.id}/networking`} className="btn sm" style={{ flexShrink: 0 }}>
@@ -407,7 +426,7 @@ export function NetworkPage() {
                       <span className="mono">{d.name}</span>
                       {d.wildcard && <span className="badge neutral">wildcard</span>}
                       <DomainBadge d={d} />
-                      {d.certOk && <span className="badge ok"><Lock size={10} aria-hidden /> TLS</span>}
+                      {d.certOk && <Pill status="ok">TLS</Pill>}
                     </button>
                     {/* Fixed width so the label swap to "Checking…" doesn't jitter the row. */}
                     <button className="btn sm" style={{ minWidth: 104, flex: 'none' }} disabled={checking === d.id}
@@ -510,10 +529,10 @@ export function NetworkPage() {
             <span style={{ marginLeft: 'auto' }}>
               {ingressState === 'loading' ? <Skeleton width={64} height={20} radius={20} />
                 : ingressState === 'error' ? null
-                : !ingress?.enabled ? <span className="badge neutral">off</span>
-                : ingress.status === 'running' ? <span className="badge ok"><Led status="running" /> running on {nodeName(ingress.nodeId)}</span>
-                : ingress.status === 'failed' ? <span className="badge crit"><AlertTriangle size={11} aria-hidden /> failed</span>
-                : <span className="badge warn"><Led status="pending" /> starting…</span>}
+                : !ingress?.enabled ? <Pill status="off" />
+                : ingress.status === 'running' ? <Pill status="running">running on {nodeName(ingress.nodeId)}</Pill>
+                : ingress.status === 'failed' ? <Pill status="failed" />
+                : <Pill status="starting">starting…</Pill>}
             </span>
           </div>
           <div className="dim" style={{ marginBottom: 12 }}>
@@ -634,8 +653,8 @@ export function NetworkPage() {
             <span style={{ marginLeft: 'auto' }}>
               {meshState === 'loading' ? <Skeleton width={60} height={20} radius={20} />
                 : meshState === 'error' ? null
-                : meshStatus?.enabled ? <span className="badge ok">active</span>
-                : <span className="badge neutral">disabled</span>}
+                : meshStatus?.enabled ? <Pill status="ok">active</Pill>
+                : <Pill status="disabled" />}
             </span>
           </div>
           {meshState === 'loading' && <SkeletonRows count={3} height={28} />}
@@ -724,9 +743,9 @@ export function NetworkPage() {
                     {(diagnosis.nodes ?? []).map((n) => (
                       <div className="list-row spread" key={n.id}>
                         <span>{n.name} <span className="mono faint">{n.lanIp}{n.publicIp ? ` → ${n.publicIp}` : ''}</span></span>
-                        {n.reachability === 'direct' && <span className="badge ok">publicly addressed</span>}
-                        {n.reachability === 'nat' && <span className="badge warn">behind NAT/router</span>}
-                        {n.reachability === 'unknown' && <span className="badge neutral">detecting…</span>}
+                        {n.reachability === 'direct' && <Pill status="ok">publicly addressed</Pill>}
+                        {n.reachability === 'nat' && <Pill status="pending">behind NAT/router</Pill>}
+                        {n.reachability === 'unknown' && <Pill status="unknown">detecting…</Pill>}
                       </div>
                     ))}
                   </div>
