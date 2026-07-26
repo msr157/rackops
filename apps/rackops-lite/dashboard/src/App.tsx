@@ -217,11 +217,14 @@ function Shell({ onLogout }: { onLogout: () => void }) {
 
       <div className="shell-right">
         <header className="topbar">
-          {/* A real input, but the palette is the engine: the first keystroke
-              (or Enter/click-through) opens it, seeded with what was typed. */}
+          {/* A real input, but the palette is the engine: a click or the
+              first keystroke opens it, seeded with what was typed. (Click,
+              not focus — the palette restores focus here on close, and a
+              focus trigger would reopen it in a loop.) */}
           <div className="gsearch">
             <Search size={14} aria-hidden />
             <input value="" placeholder="Search apps, machines, actions…" aria-label="Search"
+              onClick={() => { setPaletteSeed(''); setPaletteOpen(true); }}
               onChange={(e) => { setPaletteSeed(e.target.value); setPaletteOpen(true); }}
               onKeyDown={(e) => { if (e.key === 'Enter') { setPaletteSeed(''); setPaletteOpen(true); } }} />
             <kbd>{shortcutHint}</kbd>
@@ -331,7 +334,7 @@ function NotificationBell() {
               <>
                 <div className="org-menu-label">Recent activity</div>
                 {recent.map((e) => (
-                  <div key={e.id} className="bell-item" style={{ cursor: 'default' }}>
+                  <div key={e.id} className="bell-item static">
                     {/* neutral dot: activity is information, not status */}
                     <span className="led off" style={{ marginTop: 5 }} aria-hidden />
                     <span style={{ flex: 1 }}>

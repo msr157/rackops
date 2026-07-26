@@ -24,6 +24,7 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
   const [hist7, setHist7] = useState<MetricPoint[]>([]);
   const [win, setWin] = useState<'24h' | '7d'>('24h');
   const [metric, setMetric] = useState<'cpuPct' | 'memUsedMb'>('cpuPct');
+  const [histErr, setHistErr] = useState(false);
 
   useEffect(() => { api.me().then(setMe).catch(() => {}); }, []);
 
@@ -33,8 +34,8 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
     let alive = true;
     const load = () => {
       api.metricsHistory('fleet', undefined, '24h')
-        .then((h) => { if (alive) setHist24(h.points); })
-        .catch(() => {});
+        .then((h) => { if (alive) { setHist24(h.points); setHistErr(false); } })
+        .catch(() => { if (alive) setHistErr(true); });
     };
     load();
     const t = setInterval(load, 60_000);
@@ -46,8 +47,8 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
     let alive = true;
     const load = () => {
       api.metricsHistory('fleet', undefined, '7d')
-        .then((h) => { if (alive) setHist7(h.points); })
-        .catch(() => {});
+        .then((h) => { if (alive) { setHist7(h.points); setHistErr(false); } })
+        .catch(() => { if (alive) setHistErr(true); });
     };
     load();
     const t = setInterval(load, 120_000);
@@ -227,7 +228,8 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
             <TrendChart points={points} metric={metric} height={190}
               yMax={metric === 'cpuPct' ? 100 : undefined}
               format={metric === 'cpuPct' ? fmtCpu : fmtMem}
-              label={metric === 'cpuPct' ? 'Fleet CPU usage' : 'Fleet memory usage'} />
+              label={metric === 'cpuPct' ? 'Fleet CPU usage' : 'Fleet memory usage'}
+              unavailable={histErr} />
           </div>
         </>
       )}

@@ -366,18 +366,19 @@ function OverviewTab({ svc, nodeLabel, urls }: { svc: Service; nodeLabel: string
   const [metric, setMetric] = useState<'cpuPct' | 'memUsedMb'>('cpuPct');
   const [win, setWin] = useState<'24h' | '7d'>('24h');
   const [points, setPoints] = useState<MetricPoint[]>([]);
+  const [histErr, setHistErr] = useState(false);
   const [recent, setRecent] = useState<Deployment[]>([]);
 
   // Metric history: fetched on mount and on window change, then refreshed
-  // every minute while this tab is open. A failed read is swallowed on
-  // purpose — the chart's own "collecting history" state is the right face
-  // for it, and the KPI numbers stay live off the 4s status poll either way.
+  // every minute while this tab is open. A failed read flips the chart to
+  // its "unavailable" face — "collecting" would be a lie during an outage —
+  // while the KPI numbers stay live off the 4s status poll either way.
   useEffect(() => {
     let stopped = false;
     const pull = () => {
       api.metricsHistory('service', svc.id, win)
-        .then((h) => { if (!stopped) setPoints(h.points ?? []); })
-        .catch(() => {});
+        .then((h) => { if (!stopped) { setPoints(h.points ?? []); setHistErr(false); } })
+        .catch(() => { if (!stopped) setHistErr(true); });
     };
     pull();
     const t = setInterval(pull, 60_000);
@@ -427,7 +428,8 @@ function OverviewTab({ svc, nodeLabel, urls }: { svc: Service; nodeLabel: string
             <Delta pct={trendDelta(points, metric)} label="vs 24 hours ago" />
           </div>
           <TrendChart points={points} metric={metric} yMax={metric === 'cpuPct' ? 100 : undefined}
-            format={fmt} label={metric === 'cpuPct' ? 'CPU usage' : 'Memory usage'} />
+            format={fmt} label={metric === 'cpuPct' ? 'CPU usage' : 'Memory usage'}
+            unavailable={histErr} />
         </div>
 
         {recent.length > 0 && (

@@ -993,6 +993,9 @@ table.table { width: 100%; border-collapse: collapse; font-size: 13px; }
   color: var(--text); font-size: 12.5px; line-height: 1.5; font-family: inherit;
 }
 .bell-item:hover { background: var(--bg-3); }
+/* Activity rows are information, not actions: no hover invite, no pointer. */
+.bell-item.static { cursor: default; }
+.bell-item.static:hover { background: none; }
 .bell-item .faint { display: block; margin-top: 1px; }
 .bell-empty { padding: 26px 14px; text-align: center; color: var(--faint); font-size: 12.5px; }
 

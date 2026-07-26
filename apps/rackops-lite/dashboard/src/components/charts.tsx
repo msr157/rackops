@@ -11,7 +11,7 @@ import type { MetricPoint } from '../api';
 
 const W = 600; // internal coordinate width; strokes are non-scaling
 
-export function TrendChart({ points, metric, height = 170, yMax, format, label }: {
+export function TrendChart({ points, metric, height = 170, yMax, format, label, unavailable }: {
   points: MetricPoint[];
   metric: 'cpuPct' | 'memUsedMb' | 'tempC';
   height?: number;
@@ -20,6 +20,9 @@ export function TrendChart({ points, metric, height = 170, yMax, format, label }
   format: (v: number) => string;
   /** Plain-language name for the accessible summary and tooltip. */
   label: string;
+  /** The history read failed. "Collecting history" would be a lie during an
+      outage, so the caller says which empty state is the truth. */
+  unavailable?: boolean;
 }) {
   const [hover, setHover] = useState<number | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -45,8 +48,10 @@ export function TrendChart({ points, metric, height = 170, yMax, format, label }
 
   if (points.length < 2) {
     return (
-      <div className="chart-empty" style={{ height: height + 22 }}>
-        Collecting history: the chart appears after a few minutes of reports.
+      <div className="chart-empty" style={{ height: height + 22 }} role={unavailable ? 'alert' : undefined}>
+        {unavailable
+          ? 'History is unavailable right now. It resumes on its own once the server answers again.'
+          : 'Collecting history: the chart appears after a few minutes of reports.'}
       </div>
     );
   }

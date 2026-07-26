@@ -215,11 +215,12 @@ export function MachineDetail() {
   const [metric, setMetric] = useState<MetricKey>('cpuPct');
   const [win, setWin] = useState<'24h' | '7d'>('24h');
   const [points, setPoints] = useState<MetricPoint[]>([]);
+  const [histErr, setHistErr] = useState(false);
   const exists = !!node;
 
   // Switching machines must not show the previous box's history while the
   // new fetch is in flight.
-  useEffect(() => { setPoints([]); }, [id]);
+  useEffect(() => { setPoints([]); setHistErr(false); }, [id]);
 
   // Server-side history: refetched on window change and once a minute, so a
   // detail page left open on a shelf screen keeps tracking without a reload.
@@ -228,8 +229,8 @@ export function MachineDetail() {
     let alive = true;
     const load = () => {
       api.metricsHistory('node', id, win)
-        .then((h) => { if (alive) setPoints(h.points); })
-        .catch(() => { /* TrendChart shows its own collecting state */ });
+        .then((h) => { if (alive) { setPoints(h.points); setHistErr(false); } })
+        .catch(() => { if (alive) setHistErr(true); }); // a dead read must not wear "collecting"
     };
     load();
     const t = window.setInterval(load, 60_000);
@@ -356,7 +357,7 @@ export function MachineDetail() {
         </div>
         <TrendChart points={points} metric={activeMetric} height={170}
           yMax={activeMetric === 'cpuPct' ? 100 : undefined}
-          format={chart.format} label={chart.label} />
+          format={chart.format} label={chart.label} unavailable={histErr} />
       </div>
 
       <div className="section-title" style={{ marginTop: 4 }}><Boxes size={15} aria-hidden /> Apps on this machine</div>
