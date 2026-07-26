@@ -161,7 +161,12 @@ a.brand-ver:hover { color: var(--dim); text-decoration: none; }
   background: var(--bg-2); border: 1px solid var(--border-hi);
   border-radius: var(--r-md); padding: 5px;
   box-shadow: var(--shadow-float);
+  animation: menu-in-down 0.13s ease-out;
 }
+/* Floating menus arrive from their trigger; exits are instant unmounts —
+   faster out than in. */
+@keyframes menu-in-down { from { opacity: 0; transform: translateY(-4px); } }
+@keyframes menu-in-up { from { opacity: 0; transform: translateY(4px); } }
 .org-menu-label {
   font-size: 11px; font-weight: 500; color: var(--faint); padding: 5px 8px 4px;
 }
@@ -174,7 +179,7 @@ a.brand-ver:hover { color: var(--dim); text-decoration: none; }
 .org-item:hover { background: var(--bg-3); }
 .org-menu-sep { height: 1px; background: var(--border); margin: 5px 3px; }
 /* Menus opening upward (sidebar footer account menu). */
-.org-menu.up { top: auto; bottom: calc(100% + 6px); }
+.org-menu.up { top: auto; bottom: calc(100% + 6px); animation-name: menu-in-up; }
 /* The org scopes every byte on screen — at rail width it collapses to an
    icon trigger instead of disappearing. */
 @media (max-width: 900px) {
@@ -782,7 +787,11 @@ a:hover { color: var(--accent-hi); text-decoration: underline; text-underline-of
   background: color-mix(in srgb, var(--warn) 14%, var(--bg-1));
   box-shadow: var(--shadow-float);
   margin: 14px 0 0;
+  /* Rises when the form first goes dirty: a state change at the bottom
+     edge of the viewport has to announce itself. */
+  animation: banner-in 0.15s ease-out;
 }
+@keyframes banner-in { from { opacity: 0; transform: translateY(6px); } }
 .update-banner {
   display: flex; align-items: center; gap: 12px;
   border: 1px solid rgba(87, 162, 255, 0.35); border-radius: var(--r-md);
@@ -979,6 +988,7 @@ table.table { width: 100%; border-collapse: collapse; font-size: 13px; }
   width: 360px; max-width: min(90vw, 360px);
   background: var(--bg-2); border: 1px solid var(--border-hi); border-radius: var(--r-lg);
   box-shadow: var(--shadow-float); overflow: hidden;
+  animation: menu-in-down 0.13s ease-out;
 }
 .bell-head {
   display: flex; align-items: center; justify-content: space-between;
@@ -1017,6 +1027,15 @@ table.table { width: 100%; border-collapse: collapse; font-size: 13px; }
 
 /* trend chart: SVG stretches, text is HTML overlay so it never distorts */
 .chart { position: relative; }
+/* The authored moment: the line traces left to right — the console reading
+   history off the rings — and the area catches up a beat later. Replays on
+   metric/window switch (new series, new trace), never on silent refresh. */
+.chart .line-draw {
+  stroke-dasharray: 1; /* path is normalized via pathLength=1 */
+  animation: chart-draw 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes chart-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+.chart .area-draw { animation: fade-in 0.3s ease-out 0.18s both; }
 .chart-y {
   position: absolute; right: 2px; transform: translateY(-1px);
   font-size: 10px; font-family: var(--mono); color: var(--faint);

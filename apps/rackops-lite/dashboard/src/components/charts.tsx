@@ -11,7 +11,7 @@ import type { MetricPoint } from '../api';
 
 const W = 600; // internal coordinate width; strokes are non-scaling
 
-export function TrendChart({ points, metric, height = 170, yMax, format, label, unavailable }: {
+export function TrendChart({ points, metric, height = 170, yMax, format, label, unavailable, drawKey }: {
   points: MetricPoint[];
   metric: 'cpuPct' | 'memUsedMb' | 'tempC';
   height?: number;
@@ -23,6 +23,10 @@ export function TrendChart({ points, metric, height = 170, yMax, format, label, 
   /** The history read failed. "Collecting history" would be a lie during an
       outage, so the caller says which empty state is the truth. */
   unavailable?: boolean;
+  /** Changes when the operator picks a different series (metric/window):
+      the line re-traces. Steady data refreshes keep the key, so the chart
+      never re-animates under a resting gaze. */
+  drawKey?: string;
 }) {
   const [hover, setHover] = useState<number | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -80,7 +84,7 @@ export function TrendChart({ points, metric, height = 170, yMax, format, label, 
     <div className="chart" ref={wrapRef} role="img"
       aria-label={`${label}: currently ${format(cur as number)}, from ${fmtTime(points[0].t)} to ${fmtTime(points[points.length - 1].t)}`}
       onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
-      <svg viewBox={`0 0 ${W} ${height}`} preserveAspectRatio="none" style={{ width: '100%', height, display: 'block' }} aria-hidden>
+      <svg key={drawKey} viewBox={`0 0 ${W} ${height}`} preserveAspectRatio="none" style={{ width: '100%', height, display: 'block' }} aria-hidden>
         <defs>
           <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor="var(--accent)" stopOpacity="0.22" />
@@ -91,8 +95,8 @@ export function TrendChart({ points, metric, height = 170, yMax, format, label, 
           <line key={f} x1="0" x2={W} y1={height * f} y2={height * f}
             stroke="var(--border)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
         ))}
-        {area && <path d={area} fill={`url(#${gradId})`} />}
-        {path && <path d={path} fill="none" stroke="var(--accent)" strokeWidth="1.6" vectorEffect="non-scaling-stroke" />}
+        {area && <path className="area-draw" d={area} fill={`url(#${gradId})`} />}
+        {path && <path className="line-draw" pathLength={1} d={path} fill="none" stroke="var(--accent)" strokeWidth="1.6" vectorEffect="non-scaling-stroke" />}
         {hover !== null && (
           <line x1={xs[hover]} x2={xs[hover]} y1="0" y2={height}
             stroke="var(--border-hi)" strokeWidth="1" vectorEffect="non-scaling-stroke" />

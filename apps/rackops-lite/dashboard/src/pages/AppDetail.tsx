@@ -429,7 +429,7 @@ function OverviewTab({ svc, nodeLabel, urls }: { svc: Service; nodeLabel: string
           </div>
           <TrendChart points={points} metric={metric} yMax={metric === 'cpuPct' ? 100 : undefined}
             format={fmt} label={metric === 'cpuPct' ? 'CPU usage' : 'Memory usage'}
-            unavailable={histErr} />
+            unavailable={histErr} drawKey={`${metric}:${win}`} />
         </div>
 
         {recent.length > 0 && (

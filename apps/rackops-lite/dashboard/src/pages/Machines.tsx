@@ -357,7 +357,8 @@ export function MachineDetail() {
         </div>
         <TrendChart points={points} metric={activeMetric} height={170}
           yMax={activeMetric === 'cpuPct' ? 100 : undefined}
-          format={chart.format} label={chart.label} unavailable={histErr} />
+          format={chart.format} label={chart.label} unavailable={histErr}
+          drawKey={`${activeMetric}:${win}`} />
       </div>
 
       <div className="section-title" style={{ marginTop: 4 }}><Boxes size={15} aria-hidden /> Apps on this machine</div>

@@ -229,7 +229,7 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
               yMax={metric === 'cpuPct' ? 100 : undefined}
               format={metric === 'cpuPct' ? fmtCpu : fmtMem}
               label={metric === 'cpuPct' ? 'Fleet CPU usage' : 'Fleet memory usage'}
-              unavailable={histErr} />
+              unavailable={histErr} drawKey={`${metric}:${win}`} />
           </div>
         </>
       )}

@@ -71,8 +71,14 @@ gone — hardware facts wear neutral `.tag`s.
   Only floating layers (menus, modals, palette, toasts) get a real shadow:
   `0 8px 24px rgba(0,0,0,.45)` class of offset+blur — never colored halos.
 - Motion: 120–180ms ease-out, state-conveying only (hover/focus/open). Page
-  transition is a 150ms opacity fade, no translate. No blink/pulse keyframes
-  anywhere; reduced-motion kills the rest.
+  transition is a 150ms opacity fade, no translate. Floating layers enter
+  from their trigger (menus/bell 130ms, 4px from the opening edge; modals,
+  drawer, palette, toasts keep their existing entrances); the pinned save
+  bar rises 6px when a form goes dirty. The ONE authored moment: trend
+  charts trace their line left to right (550ms, `cubic-bezier(0.16,1,0.3,1)`)
+  with the area fading in behind — replayed on metric/window switch via
+  `drawKey`, never on silent refresh. No blink/pulse keyframes anywhere;
+  reduced-motion kills everything via the global rule.
 
 ## Component grammar
 
