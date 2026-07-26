@@ -34,6 +34,7 @@ func (a *API) apiRoutes() []route {
 		{"GET", "/api/nodes/{id}", "fleet", "Get one machine", a.handleGetNode, false},
 		{"GET", "/api/nodes/{id}/fs", "fleet", "Browse a machine's filesystem (for bind mounts)", a.handleNodeFS, false},
 		{"GET", "/api/overview", "fleet", "Aggregated KPIs for the active organization", a.handleOverview, false},
+		{"GET", "/api/metrics/history", "fleet", "Metric history for the fleet, a machine, or an app (?scope=fleet|node|service&id=&window=24h|7d)", a.handleMetricsHistory, false},
 		{"GET", "/api/events", "fleet", "Event feed (org-scoped)", a.handleEvents, false},
 		{"GET", "/api/alerts", "fleet", "Open alerts (use ?all=true to include resolved)", a.handleAlerts, false},
 		{"GET", "/api/join-command", "fleet", "Command for joining a new machine to this organization", a.handleJoinCommand, false},

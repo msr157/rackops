@@ -17,6 +17,9 @@ import (
 type API struct {
 	Store *Store
 	Hub   *Hub
+	// History records downsampled metric rings for charts and deltas
+	// (nil = endpoints answer with empty series; ingest skips recording).
+	History *History
 	// Mesh is the WireGuard hub (nil = mesh disabled).
 	Mesh *MeshHub
 	// DashFS is the embedded dashboard filesystem (nil = API only).
@@ -161,6 +164,9 @@ func (a *API) handleIngest(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	})
+
+	// Fold this report into the metric history rings (charts, deltas).
+	a.History.Observe(rep.NodeID, rep.Metrics, rep.Containers)
 
 	// Process task results.
 	for _, res := range rep.TaskResults {

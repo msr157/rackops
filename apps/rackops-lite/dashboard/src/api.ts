@@ -150,10 +150,22 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   return r.json();
 }
 
+// One downsampled point of metric history. tempC is only present for nodes.
+export interface MetricPoint { t: number; cpuPct: number; memUsedMb: number; tempC?: number }
+export interface MetricsHistory {
+  scope: 'fleet' | 'node' | 'service';
+  id?: string;
+  window: '24h' | '7d';
+  stepSec: number;
+  points: MetricPoint[];
+}
+
 export const api = {
   overview: () => req<Overview>('/api/overview'),
   nodes: () => req<Node[]>('/api/nodes'),
   node: (id: string) => req<Node>(`/api/nodes/${id}`),
+  metricsHistory: (scope: 'fleet' | 'node' | 'service', id?: string, window: '24h' | '7d' = '24h') =>
+    req<MetricsHistory>(`/api/metrics/history?scope=${scope}${id ? `&id=${encodeURIComponent(id)}` : ''}&window=${window}`),
   events: () => req<EventItem[]>('/api/events'),
   alerts: () => req<Alert[]>('/api/alerts'),
   projects: () => req<Project[]>('/api/projects'),

@@ -163,6 +163,7 @@ func runServer(args []string) {
 		JoinToken: token,
 		InstallID: server.LoadOrCreateInstallID(*dataDir),
 		DashFS:    server.DashboardFS(),
+		History:   server.NewHistory(*dataDir),
 	}
 
 	// Node-down watchdog.
