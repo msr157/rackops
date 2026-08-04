@@ -20,22 +20,22 @@ export default function Footer() {
             <ul>
               <li><a href="#platform">Platform</a></li>
               <li><a href="#ai">Intelligence</a></li>
-              <li><a href="#editions">Editions</a></li>
+              <li><a href="#install-lite">Install RackOps Lite</a></li>
             </ul>
           </div>
           <div className="footer-col">
             <h4 className="mono-label">Access</h4>
             <ul>
-              <li><a href="#access">Early access</a></li>
-              <li><a href="#editions">RackOps Lite</a></li>
-              <li><a href="#editions">RackOps Enterprise</a></li>
+              <li><a href="https://github.com/msr157/rackops/releases/latest">Latest release</a></li>
+              <li><a href="#access">Enterprise early access</a></li>
+              <li><a href="https://github.com/msr157/rackops">GitHub source</a></li>
             </ul>
           </div>
         </div>
       </div>
       <div className="footer-bottom">
         <div className="container">
-          <p className="mono-label">© 2026 RACKOPS — MIT LICENSE</p>
+          <p className="mono-label">© 2026 RACKOPS / MIT LICENSE</p>
           <p className="mono-label">Made with care from India</p>
           <p className="mono-label footer-eof">[EOF]</p>
         </div>

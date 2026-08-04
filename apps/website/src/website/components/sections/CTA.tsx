@@ -52,14 +52,15 @@ export default function CTA() {
   return (
     <section className="section cta-section" id="access" ref={sectionRef}>
       <div className="container">
-        <h2 className="reveal">Get on the list.</h2>
+        <h2 className="reveal">Need RackOps Enterprise?</h2>
         <p className="section-body reveal">
-          RackOps is pre-launch. Early access opens in waves — first come, first racked.
+          Join early access for multi-server fleets, identity controls, high availability,
+          and private deployments.
         </p>
 
         <form className="cta-prompt reveal" onSubmit={handleSubmit}>
           <label className="cta-path mono-label" htmlFor="cta-email">
-            ~/rackops $ join --early-access
+            ~/rackops $ join --enterprise
           </label>
           
           {status === 'success' ? (

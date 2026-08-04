@@ -54,12 +54,14 @@ server. CLI + agent run on each machine.
 
 ## Brand Commitments
 
-- Name: **RackOps** (this tier is LITE; version shown in sidebar).
-- Taste anchors (user-pinned): EnvKit and Cloudflare dashboards — crisp,
-  professional, hairline-bordered consoles. Craft bar: Linear/Vercel-class.
-- Direction (user-chosen 2026-07-26): **refined dark console** — cool dark
-  neutrals, calm single accent, zero hardware skeuomorphism. Accent choice
-  delegated to the design system.
+- Name: **RackOps** (this tier is LITE; version shown in the sidebar fleet card).
+- Taste anchor (user-pinned 2026-08-01, supersedes EnvKit/Cloudflare): the
+  **NetBird admin console** — one quiet near-black surface, list/table-first
+  pages, almost no boxes, played straight at reference craft level.
+- Direction (user-chosen 2026-08-01): **quiet console** — pure-neutral dark,
+  NetBird-minimal density (no dashboard charts/deltas), single accent =
+  the marketing site's **signal green** (product and rackops.dev now share
+  one brand color).
 - Voice: plain-language, consequence-literate ops copy ("Data in managed
   volumes stays on disk", "your apps keep running"). Never marketing-speak
   inside the product.

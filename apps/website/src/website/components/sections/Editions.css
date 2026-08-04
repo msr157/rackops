@@ -1,77 +1,314 @@
-.editions-grid {
+.editions-layout {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1.65fr) minmax(280px, 0.65fr);
   gap: 24px;
+  align-items: start;
   margin-top: 64px;
 }
 
-.edition {
-  position: relative;
-  border: 1px solid var(--rule);
+.lite-installer,
+.enterprise-edition {
+  border: 1px solid var(--rule-strong);
   border-radius: var(--radius);
-  padding: 40px 36px 44px;
+}
+
+.lite-installer {
+  scroll-margin-top: calc(var(--nav-height) + 24px);
+  overflow: hidden;
+  background: var(--bg-1);
+}
+
+.lite-installer-header {
   display: flex;
-  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 32px;
+  padding: 36px;
 }
 
-.edition.flagship {
-  border-color: var(--signal-dim);
+.install-availability {
+  margin-bottom: 14px;
 }
 
-.edition-corner {
-  position: absolute;
-  top: 16px;
-  right: 16px;
-}
-
-.edition h3 {
-  font-size: clamp(24px, 2.6vw, 34px);
+.lite-installer h3,
+.enterprise-edition h3 {
+  font-size: clamp(26px, 3vw, 38px);
   font-weight: 500;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.025em;
+  line-height: 1.1;
 }
 
-.edition-tagline {
-  margin-top: 12px;
-}
-
-.edition-line {
-  margin-top: 20px;
+.lite-installer-header > div > p:last-child,
+.enterprise-copy {
+  max-width: 54ch;
+  margin-top: 16px;
   color: var(--ink-2);
   font-size: 15px;
-  line-height: 1.6;
+  line-height: 1.7;
 }
 
-.edition-features {
-  list-style: none;
-  margin: 28px 0 36px;
-  display: flex;
-  flex-direction: column;
-}
-
-.edition-features li {
-  font-family: var(--font-mono);
-  font-size: 13px;
+.release-link {
+  flex: none;
   color: var(--ink-2);
-  padding: 10px 0;
+  text-decoration: none;
+  border-bottom: 1px solid var(--rule-strong);
+  padding-bottom: 5px;
+  transition: color var(--transition), border-color var(--transition);
+}
+
+.release-link:hover,
+.release-link:focus-visible {
+  color: var(--signal);
+  border-color: var(--signal);
+}
+
+.install-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-top: 1px solid var(--rule);
   border-bottom: 1px solid var(--rule);
 }
 
-.edition-features li:first-child {
+.install-tabs button {
+  min-height: 50px;
+  padding: 12px 16px;
+  border: 0;
+  border-right: 1px solid var(--rule);
+  background: transparent;
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+
+.install-tabs button:last-child {
+  border-right: 0;
+}
+
+.install-tabs button:hover {
+  color: var(--ink);
+  background: var(--surface);
+}
+
+.install-tabs button[aria-selected='true'] {
+  color: var(--signal);
+  background: var(--surface);
+  box-shadow: inset 0 -1px 0 var(--signal);
+}
+
+.install-tabs button:focus-visible,
+.install-copy:focus-visible,
+.install-command pre:focus-visible,
+.release-link:focus-visible {
+  outline: 1px solid var(--signal);
+  outline-offset: -3px;
+}
+
+.install-panel {
+  padding: 32px 36px 36px;
+  animation: install-panel-in 0.28s ease-out both;
+}
+
+@keyframes install-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.install-summary {
+  color: var(--ink-2);
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+.install-steps {
+  list-style: none;
+  display: grid;
+  gap: 30px;
+  margin-top: 32px;
+}
+
+.install-steps h4 {
+  font-size: 17px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+.install-steps > li > p {
+  margin-top: 6px;
+  color: var(--ink-2);
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.install-command {
+  margin-top: 16px;
+  border: 1px solid var(--rule-strong);
+  background: var(--bg-0);
+}
+
+.install-command-bar {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.install-copy {
+  border: 0;
+  background: transparent;
+  color: var(--signal);
+  cursor: pointer;
+  padding: 4px;
+}
+
+.install-copy:hover {
+  color: var(--ink);
+}
+
+.install-command pre {
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 18px;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.8;
+  white-space: pre;
+  scrollbar-color: var(--rule-strong) transparent;
+}
+
+.install-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   border-top: 1px solid var(--rule);
 }
 
-.edition-plus {
-  color: var(--signal);
-  margin-right: 8px;
+.install-facts > div {
+  padding: 18px 20px;
+  border-right: 1px solid var(--rule);
 }
 
-.edition .btn {
-  margin-top: auto;
-  align-self: flex-start;
+.install-facts > div:last-child {
+  border-right: 0;
 }
 
-@media (max-width: 820px) {
-  .editions-grid {
+.install-facts dt,
+.install-facts dd {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.install-facts dt {
+  color: var(--ink-3);
+}
+
+.install-facts dd {
+  margin-top: 6px;
+  color: var(--ink-2);
+}
+
+.enterprise-edition {
+  position: sticky;
+  top: calc(var(--nav-height) + 24px);
+  padding: 32px;
+  background: var(--bg-0);
+}
+
+.enterprise-status {
+  margin-bottom: 18px;
+  color: var(--warn);
+}
+
+.enterprise-capabilities {
+  list-style: none;
+  display: grid;
+  gap: 12px;
+  margin: 28px 0 34px;
+}
+
+.enterprise-capabilities li {
+  padding-top: 12px;
+  border-top: 1px solid var(--rule);
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.enterprise-edition .btn {
+  width: 100%;
+  padding-inline: 16px;
+}
+
+@media (max-width: 920px) {
+  .editions-layout {
     grid-template-columns: 1fr;
+  }
+
+  .enterprise-edition {
+    position: static;
+  }
+}
+
+@media (max-width: 640px) {
+  .editions-layout {
+    margin-top: 40px;
+  }
+
+  .lite-installer-header {
+    flex-direction: column;
+    padding: 28px 22px;
+  }
+
+  .install-tabs {
+    display: flex;
+    overflow-x: auto;
+  }
+
+  .install-tabs button {
+    flex: 0 0 auto;
+    min-width: 132px;
+  }
+
+  .install-panel {
+    padding: 26px 22px 30px;
+  }
+
+  .install-facts {
+    grid-template-columns: 1fr;
+  }
+
+  .install-facts > div {
+    border-right: 0;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .install-facts > div:last-child {
+    border-bottom: 0;
+  }
+
+  .enterprise-edition {
+    padding: 28px 22px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .install-panel {
+    animation: none;
   }
 }

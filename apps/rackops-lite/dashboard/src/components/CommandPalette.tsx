@@ -32,22 +32,20 @@ interface Entry {
 // IP.
 export function CommandPalette({ open, ...rest }: {
   open: boolean; onClose: () => void; onAddMachine: () => void; onCopilot: () => void;
-  seed?: string;
 }) {
   // Mounted only while open, so its focus trap and focus-restore run per
-  // opening and every session starts on a cleared query (or the keystroke
-  // that opened it, when the topbar search box handed off).
+  // opening and every session starts on a cleared query.
   return open ? <Palette {...rest} /> : null;
 }
 
-function Palette({ onClose, onAddMachine, onCopilot, seed }: {
-  onClose: () => void; onAddMachine: () => void; onCopilot: () => void; seed?: string;
+function Palette({ onClose, onAddMachine, onCopilot }: {
+  onClose: () => void; onAddMachine: () => void; onCopilot: () => void;
 }) {
   const navigate = useNavigate();
   const { services, nodes, refresh, loaded } = useData();
   const toast = useToast();
   const confirm = useConfirm();
-  const [q, setQ] = useState(seed ?? '');
+  const [q, setQ] = useState('');
   const [hl, setHl] = useState(0);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
   // Scrolling the list under a resting cursor fires mouseenter on whatever
@@ -87,6 +85,7 @@ function Palette({ onClose, onAddMachine, onCopilot, seed }: {
       { key: 'apps', group: 'Pages', label: 'Apps', icon: <Boxes size={14} />, run: go('/apps') },
       { key: 'machines', group: 'Pages', label: 'Machines', icon: <HardDrive size={14} />, run: go('/machines') },
       { key: 'network', group: 'Pages', label: 'Network', icon: <Network size={14} />, run: go('/network') },
+      { key: 'copilot-page', group: 'Pages', label: 'Copilot', icon: <Bot size={14} />, run: go('/copilot') },
       { key: 'settings', group: 'Pages', label: 'Settings', icon: <Settings size={14} />, run: go('/settings') },
     ];
 

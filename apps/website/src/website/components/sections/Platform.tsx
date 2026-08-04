@@ -69,8 +69,8 @@ export default function Platform() {
             {LAYERS.map((l, i) => (
               <li
                 key={l.id}
-                className={`platform-row reveal ${i === active ? 'active' : ''}`}
-                style={{ transitionDelay: `${i * 60}ms` }}
+                className={`platform-row ${i === active ? 'active' : ''}`}
+                aria-current={i === active ? 'step' : undefined}
               >
                 <span className="platform-row-id mono-label">{l.id}</span>
                 <span className="platform-row-name">{l.name}</span>

@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useId, useMemo, useState } from 'react';
-import { AlertTriangle, Bell, Building2, Key, RotateCw, Zap } from 'lucide-react';
+import { AlertTriangle, Bell, Building2, Key, RotateCw, Settings as SettingsIcon, Zap } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../api';
 import type { Settings } from '../api';
 import { useToast, cleanError } from '../components/toast';
 import { OrgPanel } from '../components/OrgPanel';
-import { Field, InfoTip, Spinner } from '../components/ui';
+import { Crumbs, Field, InfoTip, Spinner, Switch, useUnsavedChanges } from '../components/ui';
 
 // The active tab lives in the URL (?tab=…), so refresh keeps the tab and Back
 // walks through tabs the operator actually visited. Unknown values fall back
@@ -104,6 +104,7 @@ export function SettingsPage() {
   // Dirty means "differs from what the server has" — meaningless before the
   // server has answered, so it stays false (and Save stays disabled) until then.
   const dirty = loaded && JSON.stringify(s) !== savedState;
+  useUnsavedChanges(dirty);
 
   const loadSettings = useCallback(() => {
     setLoadFailed(false);
@@ -135,6 +136,10 @@ export function SettingsPage() {
   const vendorProv: VendorId | null =
     prov === 'anthropic' ? 'anthropic' : prov === 'gemini' ? 'gemini' : prov === 'openai' ? 'openai' : null;
   const provGroup = useId();
+  // Toggle blocks label their switches by id, so the switch announces the
+  // block's title instead of "switch, on".
+  const deployToggleId = useId();
+  const alertToggleId = useId();
   // Under Auto, each provider's credentials expand in place instead of all
   // three vendors' fields stacking up at once.
   const [expanded, setExpanded] = useState<VendorId | null>(null);
@@ -205,6 +210,7 @@ export function SettingsPage() {
 
   return (
     <div className="page" style={{ maxWidth: 760 }}>
+      <Crumbs items={[{ label: 'Settings', icon: <SettingsIcon size={13} aria-hidden /> }]} />
       <div className="page-title">Settings</div>
       <div className="page-sub">Organization, Copilot providers, and notifications</div>
 
@@ -223,7 +229,8 @@ export function SettingsPage() {
       {tab === 'organization' && <OrgPanel />}
 
       {tab === 'copilot' && (
-        <div className="card">
+        <section>
+          <div className="section-title" style={{ marginTop: 4 }}>AI Copilot provider</div>
           <div className="dim" style={{ marginBottom: 14 }}>
             The Copilot answers questions about your fleet using live telemetry.
             <InfoTip wide>
@@ -255,7 +262,7 @@ export function SettingsPage() {
               </div>
             </fieldset>
             {prov === 'auto' && (
-              <div className="card inset" style={{ marginBottom: 14, padding: '4px 14px 10px' }}>
+              <div style={{ marginBottom: 14 }}>
                 <div className="list">
                   {(['anthropic', 'gemini', 'openai'] as VendorId[]).map((v) => {
                     const vName = v === 'anthropic' ? 'Anthropic' : v === 'gemini' ? 'Gemini' : 'OpenAI-compatible';
@@ -314,11 +321,12 @@ export function SettingsPage() {
               )}
             </div>
           </fieldset>
-        </div>
+        </section>
       )}
 
       {tab === 'notifications' && (
-        <div className="card">
+        <section>
+          <div className="section-title" style={{ marginTop: 4 }}>Notifications</div>
           <div className="dim" style={{ marginBottom: 14 }}>
             Get pinged when deploys finish or alerts fire, per organization.
             <InfoTip>
@@ -361,19 +369,29 @@ export function SettingsPage() {
                   value={s.genericWebhook ?? ''} onChange={(e) => set({ genericWebhook: e.target.value })} />
               )}
             </Field>
-            <div className="row" style={{ gap: 20, marginBottom: 16 }}>
-              <label className="check">
-                <input type="checkbox" checked={s.notifyDeploys} onChange={(e) => set({ notifyDeploys: e.target.checked })} /> Deploy events
-              </label>
-              <label className="check">
-                <input type="checkbox" checked={s.notifyAlerts} onChange={(e) => set({ notifyAlerts: e.target.checked })} /> Alerts
-              </label>
+            {/* Genuine booleans wear toggle blocks; they stay part of the same
+                draft and only take effect with the section's Save below. */}
+            <div className="setting toggle">
+              <div style={{ minWidth: 0 }}>
+                <div className="setting-title" id={deployToggleId}>Deploy events</div>
+                <div className="setting-desc">Send a notification when a deploy finishes or fails.</div>
+              </div>
+              <Switch checked={s.notifyDeploys} ariaLabelledBy={deployToggleId}
+                onChange={(v) => set({ notifyDeploys: v })} />
+            </div>
+            <div className="setting toggle">
+              <div style={{ minWidth: 0 }}>
+                <div className="setting-title" id={alertToggleId}>Alerts</div>
+                <div className="setting-desc">Send a notification when an alert fires on a machine or app.</div>
+              </div>
+              <Switch checked={s.notifyAlerts} ariaLabelledBy={alertToggleId}
+                onChange={(v) => set({ notifyAlerts: v })} />
             </div>
             <button className="btn primary" disabled={saving || !dirty} onClick={save}>
               {saving ? <Spinner size={13} /> : null} {!loaded || dirty ? 'Save settings' : 'Saved'}
             </button>
           </fieldset>
-        </div>
+        </section>
       )}
     </div>
   );

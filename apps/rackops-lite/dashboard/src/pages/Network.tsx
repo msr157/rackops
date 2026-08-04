@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Globe, Shield, Waypoints, Boxes, AlertTriangle, Plus, Trash2, RefreshCw, ChevronDown,
-  ChevronRight, Lock, Rocket, Cloud, ArrowRight, ArrowLeft, Route, SlidersHorizontal, Network,
+  ChevronRight, Lock, Rocket, Cloud, ArrowRight, ArrowLeft, Route, Network,
 } from 'lucide-react';
 import { api } from '../api';
 import type { Domain, IngressConfig, MeshStatus, ClusterStatus, NetworkDiagnosis } from '../api';
@@ -10,7 +10,7 @@ import { useData } from '../data';
 import { useToast, cleanError } from '../components/toast';
 import { useConfirm } from '../components/confirm';
 import {
-  EmptyState, Field, IconChip, InfoTip, Led, CopyBtn, CopyField, Modal, Pill, Skeleton,
+  Crumbs, EmptyState, Field, InfoTip, Led, CopyBtn, CopyField, Modal, Pill, RowMenu, Skeleton,
   SkeletonRows, Spinner, UrlChip, publicUrls,
 } from '../components/ui';
 
@@ -61,9 +61,9 @@ const WIZ_OPTIONS: { id: WizChoice; title: string; sub: string }[] = [
 ];
 
 // NetworkPage: fleet-level connectivity, state first and configuration last.
-// The strip answers "is anything public and healthy?", routes and domains show
-// what exists, and the edge/mesh configuration lives at the bottom. Per-app
-// routing lives on each app's Networking tab.
+// The status stripes answer "is anything public and healthy?", routes and
+// domains show what exists, and the edge/mesh configuration lives at the
+// bottom. Per-app routing lives on each app's Networking tab.
 export function NetworkPage() {
   const { nodes, services, nodeName, refresh, loaded } = useData();
   const toast = useToast();
@@ -265,7 +265,7 @@ export function NetworkPage() {
   const routesLoading = !loaded || ingressState === 'loading';
 
   // Dirty means: the user touched the form AND its values differ from the
-  // saved config. The banner only appears against a live edge; on first
+  // saved config. The apply notice only appears against a live edge; on first
   // enable the form is simply new, not drifted.
   const savedAcme = ingress?.acmeEmail ?? '';
   const effAcme = autoTls ? acmeEmail.trim() : '';
@@ -295,102 +295,115 @@ export function NetworkPage() {
   // How each machine is reachable, for annotating the edge's node picker.
   const reachability = new Map((diagnosis?.nodes ?? []).map((n) => [n.id, n.reachability] as const));
 
-  // Strip chip tones: ok when healthy, crit when failed, warn while settling,
-  // none while off, disabled, loading, or unknown. The word rides beside the
-  // chip, so color never travels alone.
-  const edgeTone = ingressState !== 'ready' || !ingress?.enabled ? undefined
-    : ingress.status === 'running' ? ('ok' as const)
-    : ingress.status === 'failed' ? ('crit' as const)
-    : ('warn' as const);
-  const meshTone = meshState === 'ready' && meshStatus?.enabled ? ('ok' as const) : undefined;
-  const routesTone = loaded && publicApps.length > 0 ? ('ok' as const) : undefined;
+  // One pill per fact, shared between the status stripes and the section
+  // headers: color never travels without the word.
+  const edgePill = ingressState === 'loading' ? <Skeleton width={90} height={20} radius={20} />
+    : ingressState === 'error' ? <Pill status="unknown">status unknown</Pill>
+    : !ingress?.enabled ? <Pill status="off" />
+    : ingress.status === 'running' ? <Pill status="running">running on {nodeName(ingress.nodeId)}</Pill>
+    : ingress.status === 'failed' ? <Pill status="failed" />
+    : <Pill status="starting">starting…</Pill>;
+  const meshPill = meshState === 'loading' ? <Skeleton width={74} height={20} radius={20} />
+    : meshState === 'error' ? <Pill status="unknown">status unknown</Pill>
+    : meshStatus?.enabled ? <Pill status="ok">active</Pill>
+    : <Pill status="off" />;
 
   return (
     <div className="page">
+      <Crumbs items={[{ label: 'Network', icon: <Network size={13} aria-hidden /> }]} />
       <div className="page-title">Network</div>
       <div className="page-sub">How the internet reaches your rack: public routes, domains, and the edge</div>
 
-      {/* One-line answer before anything else: edge, mesh, and what's live. */}
-      <div className="card row wrap" style={{ padding: '10px 14px', marginBottom: 16, gap: 16 }}>
-        <span className="row" style={{ gap: 8 }}>
-          <IconChip sm tone={edgeTone}><Globe size={14} /></IconChip>
-          {ingressState === 'loading' ? <Skeleton width={90} height={20} radius={20} />
-            : ingressState === 'error' ? <Pill status="unknown">edge status unknown</Pill>
-            : !ingress?.enabled ? <Pill status="off">edge off</Pill>
-            : ingress.status === 'running' ? <Pill status="running">edge running on {nodeName(ingress.nodeId)}</Pill>
-            : ingress.status === 'failed' ? <Pill status="failed">edge failed</Pill>
-            : <Pill status="starting">edge starting…</Pill>}
-        </span>
-        <span className="row" style={{ gap: 8 }}>
-          <IconChip sm tone={meshTone}><Network size={14} /></IconChip>
-          {meshState === 'loading' ? <Skeleton width={74} height={20} radius={20} />
-            : meshState === 'error' ? <Pill status="unknown">mesh status unknown</Pill>
-            : meshStatus?.enabled ? <Pill status="ok">mesh active</Pill>
-            : <Pill status="off">mesh off</Pill>}
-        </span>
-        <span className="row" style={{ gap: 8 }}>
-          <IconChip sm tone={routesTone}><Route size={14} /></IconChip>
-          {loaded
-            ? <span className="dim">{publicApps.length} route{publicApps.length === 1 ? '' : 's'} live</span>
-            : <Skeleton width={70} height={14} />}
-        </span>
+      {/* One-glance answer before anything else: edge, mesh, and what's live. */}
+      <div className="kv-rows">
+        <div className="kv-row">
+          <span className="kv-label"><Shield size={14} aria-hidden /> Edge proxy</span>
+          <span className="kv-val">{edgePill}</span>
+        </div>
+        <div className="kv-row">
+          <span className="kv-label"><Waypoints size={14} aria-hidden /> WireGuard mesh</span>
+          <span className="kv-val">{meshPill}</span>
+        </div>
+        <div className="kv-row">
+          <span className="kv-label"><Route size={14} aria-hidden /> Public routes</span>
+          <span className="kv-val">
+            {loaded
+              ? <Pill status={publicApps.length > 0 ? 'ok' : 'off'}>{publicApps.length} live</Pill>
+              : <Skeleton width={70} height={20} radius={20} />}
+          </span>
+        </div>
+        {cluster?.enabled && (
+          <div className="kv-row">
+            <span className="kv-label"><Boxes size={14} aria-hidden /> Control plane (HA)</span>
+            <span className="kv-val">
+              <Pill status="ok">{(cluster.peers ?? []).length} replica{(cluster.peers ?? []).length === 1 ? '' : 's'}</Pill>
+            </span>
+          </div>
+        )}
       </div>
 
       {lanOnly && (
-        <div className="card warn row spread" style={{ marginBottom: 16 }}>
-          <div>
-            <strong className="row" style={{ gap: 7 }}><AlertTriangle size={13} style={{ color: 'var(--warn)' }} aria-hidden /> Your apps are LAN-only right now</strong>
-            <div className="dim" style={{ marginTop: 4 }}>
-              No machine here holds a public IP, so domains and instant URLs only work inside your network.
-            </div>
-          </div>
-          <button className="btn" style={{ flex: 'none' }} disabled={!diagnosis} onClick={openWizard}>
+        <div className="notice warn" style={{ marginTop: 16, marginBottom: 0 }}>
+          <AlertTriangle size={14} style={{ color: 'var(--warn)', flex: 'none' }} aria-hidden />
+          <span style={{ minWidth: 0 }}>
+            <strong>Your apps are LAN-only right now.</strong>{' '}
+            <span className="dim">No machine here holds a public IP, so domains and instant URLs only work inside your network.</span>
+          </span>
+          <button className="btn" style={{ marginLeft: 'auto', flex: 'none' }} disabled={!diagnosis} onClick={openWizard}>
             <Rocket size={13} aria-hidden /> Get public access
           </button>
         </div>
       )}
 
       {/* Public routes: the state of the world, first. */}
-      <div className="section-title" style={{ marginTop: 20 }}><Route size={15} aria-hidden /> Public routes</div>
-      <div className="stack" style={{ gap: 8 }}>
-        {routesLoading && <SkeletonRows count={2} height={44} />}
-        {!routesLoading && publicApps.map((s) => {
-          const urls = publicUrls(s, ingress);
-          const backing = domains.find((d) => (!d.wildcard && d.name === s.domain) || (d.wildcard && (s.domain || '').endsWith('.' + d.name.slice(2))));
-          return (
-            <div key={s.id} className="card row spread" style={{ padding: '11px 14px' }}>
-              <div className="row wrap" style={{ minWidth: 0 }}>
-                <Led status={s.status} label />
-                <strong>{s.name}</strong>
-                {urls.map((u) => <UrlChip key={u.url} url={u.url} />)}
-                {s.quickTunnelUrl && <span className="badge neutral"><Cloud size={10} aria-hidden /> tunnel</span>}
-                {backing && backing.status !== 'verified' && <Pill status="pending">DNS not verified</Pill>}
-                {s.domain && ingress?.enabled && s.nodeId !== ingress.nodeId && <span className="badge neutral">via mesh relay</span>}
-              </div>
-              <Link to={`/apps/${s.id}/networking`} className="btn sm" style={{ flexShrink: 0 }}>
-                Manage <ArrowRight size={11} aria-hidden />
-              </Link>
-            </div>
-          );
-        })}
-        {!routesLoading && publicApps.length === 0 && (
-          <EmptyState icon={<Globe size={18} />} title="Nothing is public yet">
-            <div>Open any app's <strong>Networking</strong> tab to give it an instant URL, a tunnel, or a domain.</div>
-          </EmptyState>
-        )}
+      <div className="section-title"><Route size={15} aria-hidden /> Public routes</div>
+      <div className="dim" style={{ marginBottom: 12 }}>
+        Every app the internet can reach, and the address it answers at.
       </div>
+      {routesLoading && <SkeletonRows count={2} height={44} />}
+      {!routesLoading && publicApps.length > 0 && (
+        <div className="list">
+          {publicApps.map((s) => {
+            const urls = publicUrls(s, ingress);
+            const backing = domains.find((d) => (!d.wildcard && d.name === s.domain) || (d.wildcard && (s.domain || '').endsWith('.' + d.name.slice(2))));
+            return (
+              <div key={s.id} className="list-row">
+                <span className="row wrap" style={{ minWidth: 0 }}>
+                  <Led status={s.status} label />
+                  <strong>{s.name}</strong>
+                  {urls.map((u) => <UrlChip key={u.url} url={u.url} />)}
+                  {s.quickTunnelUrl && <span className="badge neutral"><Cloud size={10} aria-hidden /> tunnel</span>}
+                  {backing && backing.status !== 'verified' && <Pill status="pending">DNS not verified</Pill>}
+                  {s.domain && ingress?.enabled && s.nodeId !== ingress.nodeId && <span className="badge neutral">via mesh relay</span>}
+                </span>
+                <Link to={`/apps/${s.id}/networking`} className="btn sm" style={{ marginLeft: 'auto', flexShrink: 0 }}>
+                  Manage <ArrowRight size={11} aria-hidden />
+                </Link>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {!routesLoading && publicApps.length === 0 && (
+        <EmptyState icon={<Globe size={18} />} title="Nothing is public yet">
+          <div>Open any app's <strong>Networking</strong> tab to give it an instant URL, a tunnel, or a domain.</div>
+        </EmptyState>
+      )}
 
       {/* Domains */}
       <div className="section-title">
-        <Globe size={15} aria-hidden /> Your domains
+        <Globe size={15} aria-hidden /> Domains
         <InfoTip wide>
           Add a domain you own and RackOps shows the exact DNS record to create at your registrar,
           then keeps verifying DNS, routing, and the HTTPS certificate. A wildcard
           (<code>*.example.com</code>) gives every app its own subdomain from one record.
         </InfoTip>
       </div>
-      <div className="card">
-        <Field label="Add a domain" error={domainError || undefined}>
+      <div className="dim" style={{ marginBottom: 12 }}>
+        Domains you own, pointed at the edge and verified continuously.
+      </div>
+      <div className="toolbar" style={{ alignItems: 'flex-end' }}>
+        <Field label="Add a domain" error={domainError || undefined} style={{ marginBottom: 0, flex: 1, maxWidth: 480 }}>
           {(p) => (
             <div className="row">
               <input className="input" {...p}
@@ -404,304 +417,328 @@ export function NetworkPage() {
             </div>
           )}
         </Field>
+      </div>
 
-        {domainsState === 'loading' && <SkeletonRows count={2} height={40} />}
-        {domainsState === 'error' && (
-          <LoadError onRetry={() => { setDomainsState('loading'); load(); }}>
-            Your domains didn&rsquo;t load.
-          </LoadError>
-        )}
-        {domainsState === 'ready' && domains.length > 0 && (
-          <div className="list">
-            {domains.map((d) => {
-              const open = expanded === d.id;
-              const panelId = `domain-${d.id}`;
-              return (
-                <Fragment key={d.id}>
-                  <div className="list-row">
-                    <button type="button" className="row disclosure" style={{ gap: 8 }}
-                      aria-expanded={open} aria-controls={panelId}
-                      onClick={() => setExpanded(open ? '' : d.id)}>
-                      {open ? <ChevronDown size={13} aria-hidden /> : <ChevronRight size={13} aria-hidden />}
-                      <span className="mono">{d.name}</span>
-                      {d.wildcard && <span className="badge neutral">wildcard</span>}
-                      <DomainBadge d={d} />
-                      {d.certOk && <Pill status="ok">TLS</Pill>}
-                    </button>
-                    {/* Fixed width so the label swap to "Checking…" doesn't jitter the row. */}
-                    <button className="btn sm" style={{ minWidth: 104, flex: 'none' }} disabled={checking === d.id}
-                      aria-label={`Verify ${d.name} now`} onClick={() => verify(d.id)}>
-                      <RefreshCw size={11} className={checking === d.id ? 'spin' : ''} aria-hidden />
-                      {checking === d.id ? 'Checking…' : 'Verify now'}
-                    </button>
-                  </div>
-
-                  {open && (
-                    <div className="card inset" id={panelId} style={{ margin: '2px 0 12px 21px' }}>
-                      <div className="dim" style={{ marginBottom: 10 }}>
-                        Create this record at your registrar (GoDaddy, Namecheap, Cloudflare DNS, …):
-                      </div>
-                      <dl className="kv" style={{ marginBottom: 12 }}>
-                        <dt>Type</dt>
-                        <dd>A</dd>
-                        <dt>Host / Name</dt>
-                        <dd>
-                          <span className="row" style={{ gap: 8 }}>
-                            {recordHost(d.name)}
-                            <CopyBtn text={recordHost(d.name)} />
-                          </span>
-                        </dd>
-                        <dt>Value / Points to</dt>
-                        <dd>
-                          <span className="row" style={{ gap: 8 }}>
-                            {d.expectedIp || '(enable the edge first)'}
-                            {d.expectedIp ? <CopyBtn text={d.expectedIp} /> : null}
-                          </span>
-                        </dd>
-                        <dt>TTL</dt>
-                        <dd>300</dd>
-                      </dl>
-
-                      <div style={{ lineHeight: 2 }}>
-                        <div className="row" style={{ gap: 8 }}>
-                          <Led status={d.status === 'verified' ? 'ok' : d.status === 'misconfigured' ? 'error' : 'pending'} />
-                          <strong>DNS</strong>
-                          <span className="dim">
-                            {d.status === 'verified'
-                              ? <>resolves to <span className="mono">{d.expectedIp}</span></>
-                              : (d.message || 'not checked yet')}
-                          </span>
-                        </div>
-                        <div className="row" style={{ gap: 8 }}>
-                          <Led status={d.edgeOk ? 'ok' : 'pending'} />
-                          <strong>Edge</strong>
-                          <span className="dim">{d.edgeOk
-                            ? 'your edge answers at that address, traffic will route'
-                            : edgeReady ? 'edge did not answer there (port forwarding / firewall / another server on the port)' : 'enable the edge to check'}</span>
-                        </div>
-                        {tlsOn && !d.wildcard && (
-                          <div className="row" style={{ gap: 8 }}>
-                            <Led status={d.certOk ? 'ok' : 'pending'} />
-                            <strong>Certificate</strong>
-                            <span className="dim">{d.certOk
-                              ? `issued by ${d.certIssuer}${d.certExpiry ? `, expires ${new Date(d.certExpiry).toLocaleDateString()}` : ''}`
-                              : 'not issued yet: needs DNS verified, port 80 reachable from the internet, then an app routed to it'}</span>
-                          </div>
-                        )}
-                        {tlsOn && d.wildcard && (
-                          <div className="faint"><Lock size={10} aria-hidden /> Certificates issue per subdomain automatically as apps are routed.</div>
-                        )}
-                        {d.lastChecked && <div className="faint">last checked {new Date(d.lastChecked).toLocaleTimeString()} (rechecks every 30s until verified, then hourly)</div>}
-                      </div>
-
-                      {/* The one destructive action lives at the bottom of the
-                          expanded panel, labeled, away from Verify. */}
-                      <hr className="divider" />
-                      <div className="row">
-                        <button className="btn sm danger" style={{ marginLeft: 'auto' }} disabled={removing === d.id}
-                          onClick={() => removeDomain(d)}>
-                          {removing === d.id ? <Spinner size={12} /> : <Trash2 size={12} aria-hidden />} Remove domain
+      {domainsState === 'loading' && <SkeletonRows count={2} height={40} />}
+      {domainsState === 'error' && (
+        <LoadError onRetry={() => { setDomainsState('loading'); load(); }}>
+          Your domains didn&rsquo;t load.
+        </LoadError>
+      )}
+      {domainsState === 'ready' && domains.length > 0 && (
+        <div className="table-wrap">
+          <table className="table">
+            <caption className="sr-only">Domains with verification and certificate status</caption>
+            <thead>
+              <tr>
+                <th>Domain</th>
+                <th>Status</th>
+                <th>Cert</th>
+                <th style={{ width: 48 }}><span className="sr-only">Actions</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              {domains.map((d) => {
+                const open = expanded === d.id;
+                const panelId = `domain-${d.id}`;
+                return (
+                  <Fragment key={d.id}>
+                    <tr>
+                      <td>
+                        <button type="button" className="row disclosure" style={{ gap: 8 }}
+                          aria-expanded={open} aria-controls={panelId}
+                          onClick={() => setExpanded(open ? '' : d.id)}>
+                          {open ? <ChevronDown size={13} aria-hidden /> : <ChevronRight size={13} aria-hidden />}
+                          <span className="mono" style={{ fontWeight: 500 }}>{d.name}</span>
+                          {d.wildcard && <span className="badge neutral">wildcard</span>}
                         </button>
-                      </div>
-                    </div>
-                  )}
-                </Fragment>
-              );
-            })}
-          </div>
-        )}
-        {domainsState === 'ready' && domains.length === 0 && (
-          <div className="faint" style={{ lineHeight: 1.7 }}>
-            No domains yet. Add one and you'll get the exact DNS record to create, or add a wildcard
+                        <span className="cell-sub mono" style={{ paddingLeft: 21 }}>
+                          {d.expectedIp ? `A → ${d.expectedIp}` : 'no target IP yet'}
+                        </span>
+                      </td>
+                      <td>
+                        <span className="row" style={{ gap: 8 }}>
+                          <DomainBadge d={d} />
+                          {checking === d.id && <Spinner size={12} />}
+                        </span>
+                      </td>
+                      <td>
+                        {d.certOk ? <Pill status="ok">TLS</Pill>
+                          : !tlsOn ? <span className="faint">HTTPS off</span>
+                          : d.wildcard ? <span className="dim">per subdomain</span>
+                          : <span className="dim">not issued</span>}
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
+                        {removing === d.id ? <Spinner size={14} /> : (
+                          <RowMenu label={`Actions for ${d.name}`} items={[
+                            {
+                              label: checking === d.id ? 'Checking…' : 'Verify now',
+                              icon: <RefreshCw size={13} aria-hidden />,
+                              disabled: checking === d.id,
+                              onSelect: () => verify(d.id),
+                            },
+                            {
+                              label: open ? 'Hide DNS setup' : 'DNS setup',
+                              icon: open ? <ChevronDown size={13} aria-hidden /> : <ChevronRight size={13} aria-hidden />,
+                              onSelect: () => setExpanded(open ? '' : d.id),
+                            },
+                            {
+                              label: 'Remove domain',
+                              icon: <Trash2 size={13} aria-hidden />,
+                              danger: true,
+                              onSelect: () => removeDomain(d),
+                            },
+                          ]} />
+                        )}
+                      </td>
+                    </tr>
+
+                    {open && (
+                      <tr id={panelId}>
+                        <td colSpan={4}>
+                          <div className="dim" style={{ margin: '2px 0 10px' }}>
+                            Create this record at your registrar (GoDaddy, Namecheap, Cloudflare DNS, …):
+                          </div>
+                          <div className="kv-rows" style={{ maxWidth: 560, marginBottom: 14 }}>
+                            <div className="kv-row">
+                              <span className="kv-label">Type</span>
+                              <span className="kv-val mono">A</span>
+                            </div>
+                            <div className="kv-row">
+                              <span className="kv-label">Host / Name</span>
+                              <span className="kv-val mono">{recordHost(d.name)}</span>
+                              <CopyBtn text={recordHost(d.name)} />
+                            </div>
+                            <div className="kv-row">
+                              <span className="kv-label">Value / Points to</span>
+                              <span className="kv-val mono">{d.expectedIp || '(enable the edge first)'}</span>
+                              {d.expectedIp ? <CopyBtn text={d.expectedIp} /> : null}
+                            </div>
+                            <div className="kv-row">
+                              <span className="kv-label">TTL</span>
+                              <span className="kv-val mono">300</span>
+                            </div>
+                          </div>
+
+                          <div style={{ lineHeight: 2 }}>
+                            <div className="row" style={{ gap: 8 }}>
+                              <Led status={d.status === 'verified' ? 'ok' : d.status === 'misconfigured' ? 'error' : 'pending'} />
+                              <strong>DNS</strong>
+                              <span className="dim">
+                                {d.status === 'verified'
+                                  ? <>resolves to <span className="mono">{d.expectedIp}</span></>
+                                  : (d.message || 'not checked yet')}
+                              </span>
+                            </div>
+                            <div className="row" style={{ gap: 8 }}>
+                              <Led status={d.edgeOk ? 'ok' : 'pending'} />
+                              <strong>Edge</strong>
+                              <span className="dim">{d.edgeOk
+                                ? 'your edge answers at that address, traffic will route'
+                                : edgeReady ? 'edge did not answer there (port forwarding / firewall / another server on the port)' : 'enable the edge to check'}</span>
+                            </div>
+                            {tlsOn && !d.wildcard && (
+                              <div className="row" style={{ gap: 8 }}>
+                                <Led status={d.certOk ? 'ok' : 'pending'} />
+                                <strong>Certificate</strong>
+                                <span className="dim">{d.certOk
+                                  ? `issued by ${d.certIssuer}${d.certExpiry ? `, expires ${new Date(d.certExpiry).toLocaleDateString()}` : ''}`
+                                  : 'not issued yet: needs DNS verified, port 80 reachable from the internet, then an app routed to it'}</span>
+                              </div>
+                            )}
+                            {tlsOn && d.wildcard && (
+                              <div className="faint"><Lock size={10} aria-hidden /> Certificates issue per subdomain automatically as apps are routed.</div>
+                            )}
+                            {d.lastChecked && <div className="faint">last checked {new Date(d.lastChecked).toLocaleTimeString()} (rechecks every 30s until verified, then hourly)</div>}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {domainsState === 'ready' && domains.length === 0 && (
+        <EmptyState icon={<Globe size={18} />} title="No domains yet">
+          <div>
+            Add one above and you'll get the exact DNS record to create, or add a wildcard
             like <span className="mono">*.example.com</span> once and every app can have its
             own <span className="mono">name.example.com</span>.
           </div>
-        )}
-      </div>
+        </EmptyState>
+      )}
 
-      {/* Configuration: the edge form, mesh, and control plane, after the state. */}
-      <div className="section-title" id="network-config"><SlidersHorizontal size={15} aria-hidden /> Configuration</div>
-      <div className="grid-2">
-        {/* Edge config */}
-        <form className="card" onSubmit={submitEdge}>
-          <div className="section-title" style={{ margin: '0 0 12px' }}>
-            <Shield size={15} aria-hidden /> Edge proxy
-            <span style={{ marginLeft: 'auto' }}>
-              {ingressState === 'loading' ? <Skeleton width={64} height={20} radius={20} />
-                : ingressState === 'error' ? null
-                : !ingress?.enabled ? <Pill status="off" />
-                : ingress.status === 'running' ? <Pill status="running">running on {nodeName(ingress.nodeId)}</Pill>
-                : ingress.status === 'failed' ? <Pill status="failed" />
-                : <Pill status="starting">starting…</Pill>}
-            </span>
-          </div>
-          <div className="dim" style={{ marginBottom: 12 }}>
-            One Traefik instance routes every domain and instant URL to the right app, across machines, over the mesh.
-            <InfoTip wide>
-              Pick the machine the internet can reach (a public IP or a forwarded port). Apps on
-              other machines are still reachable through it: traffic rides the encrypted mesh.
-              Automatic HTTPS issues Let&rsquo;s Encrypt certificates for your verified domains.
-            </InfoTip>
-          </div>
-          {ingressState === 'loading' && <SkeletonRows count={4} height={36} />}
-          {ingressState === 'error' && (
-            <LoadError onRetry={() => { setIngressState('loading'); load(); }}>
-              The edge configuration didn&rsquo;t load.
-            </LoadError>
-          )}
-          {ingressState === 'ready' && (
-            <>
-              {ingress?.status === 'failed' && ingress.statusMsg && (
-                <div className="card inset crit" style={{ marginBottom: 12, whiteSpace: 'pre-wrap', fontSize: 12.5, lineHeight: 1.6 }}>
-                  {ingress.statusMsg}
-                </div>
+      {/* Configuration, after the state: the edge form, then mesh, then HA. */}
+      <div className="section-title" id="network-config">
+        <Shield size={15} aria-hidden /> Edge proxy
+        <span style={{ marginLeft: 'auto' }}>{ingressState === 'error' ? null : edgePill}</span>
+      </div>
+      <div className="dim" style={{ marginBottom: 14 }}>
+        One Traefik instance routes every domain and instant URL to the right app, across machines, over the mesh.
+        <InfoTip wide>
+          Pick the machine the internet can reach (a public IP or a forwarded port). Apps on
+          other machines are still reachable through it: traffic rides the encrypted mesh.
+          Automatic HTTPS issues Let&rsquo;s Encrypt certificates for your verified domains.
+        </InfoTip>
+      </div>
+      <form onSubmit={submitEdge} style={{ maxWidth: 560 }}>
+        {ingressState === 'loading' && <SkeletonRows count={4} height={36} />}
+        {ingressState === 'error' && (
+          <LoadError onRetry={() => { setIngressState('loading'); load(); }}>
+            The edge configuration didn&rsquo;t load.
+          </LoadError>
+        )}
+        {ingressState === 'ready' && (
+          <>
+            {ingress?.status === 'failed' && ingress.statusMsg && (
+              <div className="notice crit" style={{ whiteSpace: 'pre-wrap', fontSize: 12.5, lineHeight: 1.6 }}>
+                <AlertTriangle size={14} style={{ color: 'var(--crit)', flex: 'none' }} aria-hidden />
+                <span style={{ minWidth: 0, flex: 1 }}>{ingress.statusMsg}</span>
+              </div>
+            )}
+            <Field label="Run the edge on">
+              {(p) => (
+                <select className="input" {...p} value={ingressNode}
+                  onChange={(e) => { markTouched(); setIngressNode(e.target.value); }}>
+                  <option value="">Select a machine</option>
+                  {nodes.map((n) => {
+                    const r = reachability.get(n.id);
+                    const note = r === 'direct' ? 'public IP, recommended'
+                      : r === 'nat' ? 'behind NAT'
+                      : (n.publicIp || n.ip);
+                    return <option key={n.id} value={n.id}>{n.name} ({note})</option>;
+                  })}
+                </select>
               )}
-              <Field label="Run the edge on">
+            </Field>
+            <div className="grid-2">
+              <Field label="HTTP port">
                 {(p) => (
-                  <select className="input" {...p} value={ingressNode}
-                    onChange={(e) => { markTouched(); setIngressNode(e.target.value); }}>
-                    <option value="">Select a machine</option>
-                    {nodes.map((n) => {
-                      const r = reachability.get(n.id);
-                      const note = r === 'direct' ? 'public IP, recommended'
-                        : r === 'nat' ? 'behind NAT'
-                        : (n.publicIp || n.ip);
-                      return <option key={n.id} value={n.id}>{n.name} ({note})</option>;
-                    })}
-                  </select>
+                  <input className="input mono" {...p} inputMode="numeric" value={httpPort}
+                    onChange={(e) => { markTouched(); setHttpPort(e.target.value.replace(/\D/g, '')); }} />
                 )}
               </Field>
-              <div className="grid-2">
-                <Field label="HTTP port">
-                  {(p) => (
-                    <input className="input mono" {...p} inputMode="numeric" value={httpPort}
-                      onChange={(e) => { markTouched(); setHttpPort(e.target.value.replace(/\D/g, '')); }} />
-                  )}
-                </Field>
-                <Field label="HTTPS port">
-                  {(p) => (
-                    <input className="input mono" {...p} inputMode="numeric" value={httpsPort}
-                      onChange={(e) => { markTouched(); setHttpsPort(e.target.value.replace(/\D/g, '')); }} />
-                  )}
-                </Field>
-              </div>
-              <label className="check" style={{ marginBottom: autoTls ? 10 : 14 }}>
-                <input type="checkbox" checked={autoTls}
-                  onChange={(e) => { markTouched(); setAutoTls(e.target.checked); if (!e.target.checked) setAcmeError(''); }} />
-                Automatic HTTPS (Let's Encrypt)
-              </label>
-              {autoTls && (
-                <Field label="Certificate email" error={acmeError || undefined}
-                  hint={acmeError ? undefined
-                    : `Certificates issue automatically. Port ${httpPort || '80'} must be reachable from the internet; HTTP redirects to HTTPS.`}>
-                  {(p) => (
-                    <input className="input" {...p} type="email" placeholder="you@example.com" value={acmeEmail}
-                      onChange={(e) => { markTouched(); setAcmeEmail(e.target.value); if (acmeError) setAcmeError(''); }} />
-                  )}
-                </Field>
-              )}
+              <Field label="HTTPS port">
+                {(p) => (
+                  <input className="input mono" {...p} inputMode="numeric" value={httpsPort}
+                    onChange={(e) => { markTouched(); setHttpsPort(e.target.value.replace(/\D/g, '')); }} />
+                )}
+              </Field>
+            </div>
+            <label className="check" style={{ marginBottom: autoTls ? 10 : 14 }}>
+              <input type="checkbox" checked={autoTls}
+                onChange={(e) => { markTouched(); setAutoTls(e.target.checked); if (!e.target.checked) setAcmeError(''); }} />
+              Automatic HTTPS (Let's Encrypt)
+            </label>
+            {autoTls && (
+              <Field label="Certificate email" error={acmeError || undefined}
+                hint={acmeError ? undefined
+                  : `Certificates issue automatically. Port ${httpPort || '80'} must be reachable from the internet; HTTP redirects to HTTPS.`}>
+                {(p) => (
+                  <input className="input" {...p} type="email" placeholder="you@example.com" value={acmeEmail}
+                    onChange={(e) => { markTouched(); setAcmeEmail(e.target.value); if (acmeError) setAcmeError(''); }} />
+                )}
+              </Field>
+            )}
 
-              {/* One apply intent at a time: while a live edge has unapplied
-                  edits, the dirty banner carries Update + Discard; otherwise
-                  the plain action row does. */}
-              {ingress?.enabled && edgeDirty && !edgeDeploying ? (
-                <div className="dirty-banner" style={{ margin: 0 }}>
-                  <span>Unapplied changes. The running edge still uses the last applied settings.</span>
-                  <span className="row" style={{ gap: 8 }}>
-                    <button type="button" className="btn" disabled={!!busy} onClick={discardEdits}>Discard</button>
-                    <button type="submit" className="btn primary" disabled={!!busy || !ingressNode}>
-                      {busy === 'apply' && <Spinner size={13} />} Update edge
-                    </button>
-                  </span>
-                </div>
-              ) : (
+            {/* One apply intent at a time: while a live edge has unapplied
+                edits, the warn notice carries Update + Discard; otherwise
+                the plain action row does. */}
+            {ingress?.enabled && edgeDirty && !edgeDeploying ? (
+              <div className="notice warn" style={{ margin: 0 }}>
+                <span style={{ minWidth: 0 }}>Unapplied changes. The running edge still uses the last applied settings.</span>
+                <span className="row" style={{ gap: 8, marginLeft: 'auto' }}>
+                  <button type="button" className="btn" disabled={!!busy} onClick={discardEdits}>Discard</button>
+                  <button type="submit" className="btn primary" disabled={!!busy || !ingressNode}>
+                    {busy === 'apply' && <Spinner size={13} />} Update edge
+                  </button>
+                </span>
+              </div>
+            ) : (
+              <div className="row">
+                <button type="submit" className="btn primary"
+                  disabled={!!busy || edgeDeploying || !ingressNode || (!!ingress?.enabled && !edgeDirty)}
+                  title={ingress?.enabled && !edgeDirty && !edgeDeploying ? 'No changes to apply yet' : undefined}>
+                  {busy === 'apply' || edgeDeploying ? <Spinner size={13} /> : null}
+                  {edgeDeploying ? 'Deploying…' : ingress?.enabled ? 'Update edge' : 'Enable edge'}
+                </button>
+              </div>
+            )}
+
+            {ingress?.enabled && (
+              <>
+                <hr className="divider" />
                 <div className="row">
-                  <button type="submit" className="btn primary"
-                    disabled={!!busy || edgeDeploying || !ingressNode || (!!ingress?.enabled && !edgeDirty)}
-                    title={ingress?.enabled && !edgeDirty && !edgeDeploying ? 'No changes to apply yet' : undefined}>
-                    {busy === 'apply' || edgeDeploying ? <Spinner size={13} /> : null}
-                    {edgeDeploying ? 'Deploying…' : ingress?.enabled ? 'Update edge' : 'Enable edge'}
+                  <span className="faint">Disabling takes every public route down; apps keep running.</span>
+                  <button type="button" className="btn danger" style={{ marginLeft: 'auto', flex: 'none' }}
+                    disabled={!!busy || edgeDeploying} onClick={disableEdge}>
+                    {busy === 'disable' && <Spinner size={13} />} Disable edge
                   </button>
                 </div>
-              )}
+              </>
+            )}
+          </>
+        )}
+      </form>
 
-              {ingress?.enabled && (
-                <>
-                  <hr className="divider" />
-                  <div className="row">
-                    <span className="faint">Disabling takes every public route down; apps keep running.</span>
-                    <button type="button" className="btn danger" style={{ marginLeft: 'auto', flex: 'none' }}
-                      disabled={!!busy || edgeDeploying} onClick={disableEdge}>
-                      {busy === 'disable' && <Spinner size={13} />} Disable edge
-                    </button>
-                  </div>
-                </>
-              )}
-            </>
-          )}
-        </form>
-
-        {/* Mesh */}
-        <div className="card">
-          <div className="section-title" style={{ margin: '0 0 12px' }}>
-            <Waypoints size={15} aria-hidden /> WireGuard mesh
-            <InfoTip wide>
-              An encrypted private network between your machines. Each machine dials out to the
-              server, so it works behind CGNAT with zero port forwarding; the edge proxy uses it
-              to reach apps on other machines.
-            </InfoTip>
-            <span style={{ marginLeft: 'auto' }}>
-              {meshState === 'loading' ? <Skeleton width={60} height={20} radius={20} />
-                : meshState === 'error' ? null
-                : meshStatus?.enabled ? <Pill status="ok">active</Pill>
-                : <Pill status="disabled" />}
-            </span>
+      {/* Mesh */}
+      <div className="section-title">
+        <Waypoints size={15} aria-hidden /> WireGuard mesh
+        <InfoTip wide>
+          An encrypted private network between your machines. Each machine dials out to the
+          server, so it works behind CGNAT with zero port forwarding; the edge proxy uses it
+          to reach apps on other machines.
+        </InfoTip>
+        <span style={{ marginLeft: 'auto' }}>{meshState === 'error' ? null : meshPill}</span>
+      </div>
+      {meshState === 'loading' && <SkeletonRows count={3} height={28} />}
+      {meshState === 'error' && (
+        <LoadError onRetry={() => { setMeshState('loading'); load(); }}>
+          The mesh status didn&rsquo;t load.
+        </LoadError>
+      )}
+      {meshState === 'ready' && (meshStatus?.enabled ? (
+        <>
+          <div className="dim" style={{ marginBottom: 12, lineHeight: 1.7 }}>
+            Hub <span className="mono">{meshStatus.hubIp}</span> on UDP <span className="mono">:{meshStatus.udpPort}</span>.
+            Machines dial out, so it works behind CGNAT with no port forwarding.
           </div>
-          {meshState === 'loading' && <SkeletonRows count={3} height={28} />}
-          {meshState === 'error' && (
-            <LoadError onRetry={() => { setMeshState('loading'); load(); }}>
-              The mesh status didn&rsquo;t load.
-            </LoadError>
-          )}
-          {meshState === 'ready' && (meshStatus?.enabled ? (
-            <>
-              <div className="dim" style={{ marginBottom: 10, lineHeight: 1.7 }}>
-                Hub <span className="mono">{meshStatus.hubIp}</span> on UDP <span className="mono">:{meshStatus.udpPort}</span>.
-                Machines dial out, so it works behind CGNAT with no port forwarding.
-              </div>
-              <div className="list">
-                {(meshStatus.peers ?? []).map((p) => (
-                  <div className="list-row spread" key={p.nodeId}>
-                    <span>{nodeName(p.nodeId)}</span>
-                    <span className="mono dim">{p.meshIp}</span>
-                  </div>
-                ))}
-              </div>
-              {(meshStatus.peers ?? []).length === 0 && <div className="faint">No machines have joined the mesh yet.</div>}
-            </>
-          ) : <div className="faint">Mesh is disabled (start the server with a mesh port).</div>)}
-        </div>
-
-        {/* Control plane (HA): its own card, not a footnote of the mesh. */}
-        {cluster?.enabled && (
-          <div className="card">
-            <div className="section-title" style={{ margin: '0 0 12px' }}>
-              <Boxes size={15} aria-hidden /> Control plane (HA)
-            </div>
-            <div className="dim" style={{ marginBottom: 10 }}>
-              Server replicas keeping the control plane available; one leads at a time.
-            </div>
-            <div className="list">
-              {(cluster.peers ?? []).map((p) => (
-                <div className="list-row spread" key={p.id}>
-                  <span className="mono" style={{ fontSize: 12 }}>{p.id} <span className="faint">{p.addr}</span></span>
-                  <span className={`badge ${p.role === 'leader' ? 'accent' : 'neutral'}`}>{p.role}</span>
+          {(meshStatus.peers ?? []).length > 0 ? (
+            <div className="kv-rows" style={{ maxWidth: 560 }}>
+              {(meshStatus.peers ?? []).map((p) => (
+                <div className="kv-row" key={p.nodeId}>
+                  <span className="kv-label">{nodeName(p.nodeId)}</span>
+                  <span className="kv-val mono">{p.meshIp}</span>
                 </div>
               ))}
             </div>
+          ) : <div className="faint">No machines have joined the mesh yet.</div>}
+        </>
+      ) : <div className="faint">Mesh is disabled (start the server with a mesh port).</div>)}
+
+      {/* Control plane (HA): its own section, not a footnote of the mesh. */}
+      {cluster?.enabled && (
+        <>
+          <div className="section-title"><Boxes size={15} aria-hidden /> Control plane (HA)</div>
+          <div className="dim" style={{ marginBottom: 12 }}>
+            Server replicas keeping the control plane available; one leads at a time.
           </div>
-        )}
-      </div>
+          <div className="kv-rows" style={{ maxWidth: 560 }}>
+            {(cluster.peers ?? []).map((p) => (
+              <div className="kv-row" key={p.id}>
+                <span className="kv-label mono" style={{ fontSize: 12 }}>{p.id}</span>
+                <span className="mono faint">{p.addr}</span>
+                <span className="kv-val">
+                  <span className={`badge ${p.role === 'leader' ? 'accent' : 'neutral'}`}>{p.role}</span>
+                </span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
 
       {/* Public access wizard: pick a route, then follow only that procedure. */}
       {wizardOpen && diagnosis && (
@@ -720,7 +757,7 @@ export function NetworkPage() {
                       background: wizChoice === o.id ? 'var(--accent-dim)' : undefined,
                     }}>
                     <input type="radio" name="public-access" checked={wizChoice === o.id}
-                      style={{ accentColor: 'var(--accent-strong)', marginTop: 3 }}
+                      style={{ accentColor: 'var(--accent)', marginTop: 3 }}
                       onChange={() => setWizChoice(o.id)} />
                     <span style={{ minWidth: 0 }}>
                       <span className="row wrap" style={{ gap: 8 }}>
@@ -738,17 +775,15 @@ export function NetworkPage() {
                 {whyOpen ? <ChevronDown size={13} aria-hidden /> : <ChevronRight size={13} aria-hidden />} Why?
               </button>
               {whyOpen && (
-                <div className="card inset" style={{ marginTop: 8 }}>
-                  <div className="list">
-                    {(diagnosis.nodes ?? []).map((n) => (
-                      <div className="list-row spread" key={n.id}>
-                        <span>{n.name} <span className="mono faint">{n.lanIp}{n.publicIp ? ` → ${n.publicIp}` : ''}</span></span>
-                        {n.reachability === 'direct' && <Pill status="ok">publicly addressed</Pill>}
-                        {n.reachability === 'nat' && <Pill status="pending">behind NAT/router</Pill>}
-                        {n.reachability === 'unknown' && <Pill status="unknown">detecting…</Pill>}
-                      </div>
-                    ))}
-                  </div>
+                <div className="list" style={{ marginTop: 8 }}>
+                  {(diagnosis.nodes ?? []).map((n) => (
+                    <div className="list-row spread" key={n.id}>
+                      <span>{n.name} <span className="mono faint">{n.lanIp}{n.publicIp ? ` → ${n.publicIp}` : ''}</span></span>
+                      {n.reachability === 'direct' && <Pill status="ok">publicly addressed</Pill>}
+                      {n.reachability === 'nat' && <Pill status="pending">behind NAT/router</Pill>}
+                      {n.reachability === 'unknown' && <Pill status="unknown">detecting…</Pill>}
+                    </div>
+                  ))}
                 </div>
               )}
               <div className="row" style={{ marginTop: 16, justifyContent: 'flex-end' }}>
@@ -760,10 +795,10 @@ export function NetworkPage() {
               {wizChoice === 'forward' && (
                 <>
                   <div className="section-title" style={{ marginTop: 0 }}>Step 2: port forward your router</div>
-                  <div className="card inset dim" style={{ lineHeight: 1.8 }}>
+                  <div className="dim" style={{ lineHeight: 1.8 }}>
                     <ol style={{ margin: 0, paddingLeft: 18 }}>
                       <li>In your router, forward TCP <b>80</b> and <b>443</b> to the edge machine's LAN IP.</li>
-                      <li>In the Configuration section at the bottom of this page, set the edge's HTTP/HTTPS ports to 80 and 443.</li>
+                      <li>In the Edge proxy section at the bottom of this page, set the HTTP/HTTPS ports to 80 and 443.</li>
                       <li>Domains then point at your public IP; instant URLs use it automatically.</li>
                     </ol>
                     <div className="faint" style={{ marginTop: 8 }}>
@@ -775,7 +810,7 @@ export function NetworkPage() {
               {wizChoice === 'vps' && (
                 <>
                   <div className="section-title" style={{ marginTop: 0 }}>Step 2: set up a VPS anchor</div>
-                  <div className="card inset dim" style={{ lineHeight: 1.8 }}>
+                  <div className="dim" style={{ lineHeight: 1.8 }}>
                     <ol style={{ margin: 0, paddingLeft: 18 }}>
                       <li>Get any small VPS with a public IP (Hetzner, DigitalOcean, Oracle free tier).</li>
                       <li>
@@ -795,7 +830,7 @@ export function NetworkPage() {
               {wizChoice === 'tunnel' && (
                 <>
                   <div className="section-title" style={{ marginTop: 0 }}>Step 2: start a quick tunnel</div>
-                  <div className="card inset dim" style={{ lineHeight: 1.8 }}>
+                  <div className="dim" style={{ lineHeight: 1.8 }}>
                     <ol style={{ margin: 0, paddingLeft: 18 }}>
                       <li>Open any app's <b>Networking</b> tab.</li>
                       <li>

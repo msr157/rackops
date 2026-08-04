@@ -1,252 +1,234 @@
 # RackOps Lite dashboard — design system
 
-**World: "Machined console."** A refined dark control plane in the
-Linear/Vercel/Cloudflare craft register. Cool graphite neutrals, one calm azure
-accent, hairline borders, flat surfaces, mono for data. No hardware
-skeuomorphism: the previous world's phosphor-amber glows, LED blink animations,
-rack mounting-hole rails, and gradient slats are removed, not softened.
+**World: "Quiet console."** A NetBird-register dark admin console: one
+continuous near-black neutral surface, content sitting directly on the canvas,
+hierarchy from hairlines, whitespace, and type scale — almost never from boxes.
+One signal-green accent (shared with the rackops.dev marketing site) does all
+brand work. Square by default; radius only on controls and floating layers.
 
-Provenance: full visual-world replacement, user-directed 2026-07-26
-("refined dark console", accent delegated). Mode: **Operate** on every routed
-page. Physical scene: an operator checking their rack from a laptop in the
-evening or a dim office — dark, calm, zero spectacle.
+Provenance: full visual-world replacement, user-directed 2026-08-01 with five
+NetBird admin screenshots as the pinned reference ("look how good this is"),
+explicitly rejecting the previous card-heavy look ("too many boxes with rounded
+corners"). Accent chosen by user: the website's signal green. Density chosen by
+user: **NetBird-minimal** — the 2026-07-27 "reference register" richness
+(hero chart, KPI deltas, sparklines) is REMOVED, not restyled. Mode: **Operate**
+on every routed page. Physical scene unchanged: an operator checking their rack
+from a laptop in the evening — dark, calm, zero spectacle.
 
-**2026-07-27 revision ("reference register"):** the user supplied two light
-admin-kit references (DealPort, Orbix) and chose to keep the dark palette
-while adopting their structure: a time dimension everywhere (charts, "vs 24h"
-deltas, fed by `/api/metrics/history`), real tables for comparison surfaces,
-bigger hierarchy (22px titles, 28px KPI values), tinted icon chips and status
-pills as landmarks, a real topbar search input, and a notification bell. A
-light theme / toggle was explicitly deferred, not rejected.
+Direction contract —
+THESIS: the console is one quiet dark surface where lists ARE the pages;
+it refuses the card-grid dashboard.
+OWN-WORLD: pure-neutral near-black, hairline-separated full-bleed tables and
+key-value stripes, signal-green primaries with near-black text, white-active
+segmented filters, uppercase tracked table headers, ghost-row empty states.
+STORY: the operator lands, reads one status line, scans a table, acts from the
+toolbar or a row kebab.
+FIRST VIEWPORT (any list page): breadcrumb → count-in-title → one gray
+description line → toolbar (search · filters · refresh · primary right) →
+the table, edge to edge.
+FORM: NetBird console canon, played straight at reference craft level.
 
 ## Tokens (authoritative; exact values live in `src/index.css`)
 
-### Color — chassis
+### Color — chassis (pure neutral, no blue cast)
 | Token | Value | Role |
 |---|---|---|
-| `--bg` | `#0B0E11` | app canvas |
-| `--bg-1` | `#12161A` | cards, sidebar-adjacent surfaces |
-| `--bg-2` | `#181D22` | inputs, hovered rows, inset panels |
-| `--bg-3` | `#1F252B` | menus, highest raised fills |
-| `--border` | `rgba(255,255,255,0.08)` | hairline |
-| `--border-hi` | `rgba(255,255,255,0.15)` | strong hairline (controls, overlays) |
+| `--bg` | `#0A0A0B` | the one canvas (header, sidebar, and content share it) |
+| `--bg-1` | `#101013` | barely-raised fills: table header band, kv stripe, hover |
+| `--bg-2` | `#16161A` | inputs, secondary-button fill, selected rows |
+| `--bg-3` | `#1D1D22` | menus, popovers, highest raised fills |
+| `--border` | `rgba(255,255,255,0.07)` | hairline |
+| `--border-hi` | `rgba(255,255,255,0.14)` | control borders, icon-square buttons |
 
 ### Color — ink
 | Token | Value | Role |
 |---|---|---|
-| `--text` / `--fg` | `#E7EAEE` | primary ink |
-| `--dim` | `#9CA6B0` | secondary ink |
-| `--faint` | `#8C96A2` | tertiary ink — still ≥4.5:1 on every surface up to `--bg-3` |
+| `--text` / `--fg` | `#EDEEF0` | primary ink |
+| `--dim` | `#9EA1A8` | secondary ink (descriptions, secondary cell lines) |
+| `--faint` | `#7E8188` | tertiary ink — clears 4.5:1 only up to `--bg-2`; a global CSS rule promotes `.faint` to `--dim` inside `--bg-3` popovers (menus, bell, rowmenu, chat history) |
 
-### Color — accent (azure) and status
+### Color — accent (signal green) and status
 | Token | Value | Role |
 |---|---|---|
-| `--accent` | `#57A2FF` | links, active nav, selection text, focus ring |
-| `--accent-hi` | `#82BAFF` | hover state of accent text |
-| `--accent-strong` | `#2969CC` | primary button fill (white text, 5.3:1) |
-| `--accent-strong-hi` | `#2C6FD1` | primary button hover fill (white text, 4.9:1) |
-| `--accent-dim` | `rgba(87,162,255,0.12)` | selected/active backgrounds |
-| `--ok` | `#4ACE7F` | healthy (dot, badge, meter) |
+| `--accent` | `#3DF582` | links, active tab ink+underline, focus ring, brand marks |
+| `--accent-hi` | `#6FF8A4` | hover of accent text |
+| `--accent-ink` | `#07150C` | text ON green fills (≥12:1) |
+| `--accent-dim` | `rgba(61,245,130,0.10)` | selected/active tinted fills (sparing) |
+| `--ok` | `#4ACE7F` | healthy status dot/pill (green family is shared with the accent on purpose — status always carries a word, accent never sits on a status surface) |
 | `--warn` | `#E5A83B` | building/pending/warning |
 | `--crit` | `#F3655F` | failed/offline/danger |
-| `*-dim` | 12% alpha of each | tinted badge/banner fills |
+| `*-dim` | 10–12% alpha | tinted banner/pill fills |
 
-Status is semantic only: never used decoratively, never for hardware-vendor
-tags, always paired with a word or icon. The old purple/GPU and cyan colors are
-gone — hardware facts wear neutral `.tag`s.
+Nav active state is NEUTRAL (raised `--bg-2` pill, white ink) — the accent
+never colors navigation, exactly as the reference reserves its orange.
 
 ### Type
-- `--ui`: Inter Variable (self-hosted) — the only UI family. Space Grotesk is
-  removed from the product.
-- `--mono`: IBM Plex Mono — data, ids, metrics, terminal, kbd. Never as a
-  "technical costume" on prose.
-- Scale (rem-fixed): greeting 24px/650 · page title 22px/650/-0.015em ·
-  KPI value 28px/600 mono · section 14px/600 · body 13.5px/400 · secondary
-  12.5px · label 12px/500 (sentence case — the old tracked-uppercase eyebrow
-  grammar is retired) · micro-mono 11px (kbd, timestamps, chart axes).
+- `--ui`: Inter Variable (self-hosted, air-gap requirement) — the only family.
+- `--mono`: IBM Plex Mono — IPs, ids, versions, terminal, kbd. Never a costume.
+- Scale: page title 26px/650/-0.015em (count baked in: "4 Apps") · entity name
+  24px/650 · section heading 14px/600 · body 13.5px/400 · secondary 12.5px
+  `--dim` · **table header 11px/600 UPPERCASE +0.06em `--faint`** (the one
+  place tracked uppercase exists) · micro-mono 11px. Breadcrumb 12.5px.
 
-### Space and width (layout pass, 2026-07-27)
-- Spacing scale: `--s-1..--s-7` (4/8/12/16/20/24/32). Authoritative for new
-  work; legacy one-offs migrate as surfaces get touched. Rhythm rule: the
-  gap from a header to its own content must never rival the gap between
-  sections (section break = 28px top, header-to-content ≤ 10px).
-- Page widths are roles, not per-page numbers: **operate** surfaces (Home,
-  Apps, Machines, detail pages, Network) run the full 1400px `.main`;
-  **focused task forms** (Deploy, Settings, Support, AppDetail's Settings
-  tab) cap at 760-820px; the **reading** surface (Changelog) at 850px.
-- Home is `.home-grid`: main 3fr (apps preview, then the ambient feed) +
-  rail 2fr (rack + storage), named grid areas so the single-column collapse
-  order is apps → rack → feed (priority, not DOM accident). The grid hides
-  entirely on an empty fleet — banner + checklist own onboarding.
-- Attention list caps at 8 rows (worst first: down apps, dark machines,
-  then alerts) with a "Show all N issues" disclosure, and closes with a
-  generous 24px before routine content.
-- Table name cells truncate (`.t-name`, 260px) instead of widening columns;
-  detail-page titles ellipsize. `.empty.slim` is the quiet variant for
-  routine per-section absences; full-size empties own whole pages.
-- Danger zones detach from routine card stacks with extra lead space.
-- Toasts hop above a pinned save bar (`body:has(.dirty-banner.pinned)`).
+### Space, shape, depth
+- Spacing scale `--s-1..--s-7` (4/8/12/16/20/24/32) survives. Row height in
+  tables is generous: two-line cells, ~64px.
+- Radius: `--r-sm` 6 (chips, kbd), `--r-md` 8 (buttons, inputs, icon-squares,
+  toggle blocks), `--r-lg` 10 (menus, modals, toasts ONLY). **Tables, kv
+  stripes, sections, in-flow banners, and the page itself are square (0).**
+- Depth: flat everywhere; real offset+blur shadow only on floating layers
+  (menu, modal, palette, toast, drawer). No glows, no gradients.
+- Motion: 120–180ms ease-out, state-conveying only. Reduced-motion kills all.
 
-### Shape, depth, motion
-- Radius: 6 / 8 / 10 (`--r-sm/md/lg`). Cards 10, controls 8, chips/badges full.
-- Depth: cards are FLAT (border only, no shadow, no inset edge-light).
-  Only floating layers (menus, modals, palette, toasts) get a real shadow:
-  `0 8px 24px rgba(0,0,0,.45)` class of offset+blur — never colored halos.
-- Motion: 120–180ms ease-out, state-conveying only (hover/focus/open). Page
-  transition is a 150ms opacity fade, no translate. Floating layers enter
-  from their trigger (menus/bell 130ms, 4px from the opening edge; modals,
-  drawer, palette, toasts keep their existing entrances); the pinned save
-  bar rises 6px when a form goes dirty. The ONE authored moment: trend
-  charts trace their line left to right (550ms, `cubic-bezier(0.16,1,0.3,1)`)
-  with the area fading in behind — replayed on metric/window switch via
-  `drawKey`, never on silent refresh. No blink/pulse keyframes anywhere;
-  reduced-motion kills everything via the global rule.
+## Chrome
+
+- **Top header (56px, full-width)**: brand wordmark + LITE tag left, then
+  sidebar-collapse toggle; right side: help link (Support), notification bell,
+  avatar circle (initials) opening the account menu (Profile, Log out).
+  Hairline bottom border. No search box, no primary button in the chrome.
+- **Update strip**: when an update is available, a full-width signal-green
+  band ABOVE the header: "NEW" pill, one line, "See what's new →" to
+  /changelog, dismiss X (session-dismissed). This replaces the sidebar
+  update-chip. The offline banner remains a full-width crit strip under the
+  header and outranks everything.
+- **Sidebar (232px)**: org switcher at top; `Operate` group (Home, Apps,
+  Machines, Network, Copilot), gap, `Workspace` group (Settings, Support,
+  What's new). Active = raised neutral pill. Attention count chip stays on
+  Home only. Bottom: **fleet card** — the one bordered card in the chrome:
+  machines online n/n with dot, thin usage meter, version line; hosts the
+  "Update available" CTA when the strip was dismissed.
+- **Page-owned primaries**: "Deploy app" lives in the Apps toolbar and as the
+  Home hero action — never in global chrome. "Add machine" lives in Machines'
+  toolbar. ⌘K/Ctrl-K opens the palette (its own input); page-toolbar search
+  inputs are plain local filters with no kbd chip.
+
+## Page anatomy
+
+- **List page** (Apps, Machines): breadcrumb (icon + section) → count-in-title
+  → one `--dim` description line → **toolbar**: search input (magnifier,
+  placeholder, kbd chip) · `Seg` status filter (white-active) · bordered
+  refresh icon-square · primary right. → **the table, full-bleed**.
+- **Detail page** (AppDetail, MachineDetail): breadcrumb ("Apps › name") →
+  **entity header**: status dot + 24px name, one `--dim` meta line under;
+  top-right `Cancel` + `Save changes` (disabled until dirty — replaces the
+  bottom save bar everywhere). → **icon tabs**: icon+label, active = accent
+  ink + 2px accent underline, hairline under the whole row. → content.
+- **Overview tabs / info surfaces**: two columns — left a **kv stripe stack**
+  (`.kv-rows`: full-width rows, icon + label left, value right in mono where
+  it's data, per-row copy button, alternating `--bg-1` stripes, square,
+  hairline-separated); right **setting blocks** (`.setting`): bold 14px label
+  + `--dim` description + control (switch right for toggles), separated by
+  whitespace and headings, NEVER boxed unless it is a toggle block
+  (`--bg-1` fill, radius 8).
+- **Forms pages** (Settings, Profile, Support compose): section heading +
+  description + controls, stacked with generous whitespace; page-level dirty
+  state saves from the page header, section-instant actions keep explicit
+  Apply buttons. Focused flows (Deploy wizard, Auth) stay centered ≤760px.
+- **Empty states** (`.empty-ghost`): decorative ghosted skeleton rows behind a
+  centered icon-square, bold title, two `--dim` lines. The action does NOT
+  move into the empty state — it stays in the toolbar.
 
 ## Component grammar
 
-- **Status dot** (`.led` classes kept for API compatibility): 7px flat circle,
-  no glow, no animation. Always adjacent to a word (`StatusBadge`) or an
-  sr-only label. `ledClass()` in `ui.tsx` stays the single status→state map.
-- **Badges** (`.badge.ok|warn|crit|accent|neutral`): 11px, tinted fill + status
-  ink. Hue-named classes (`green/red/yellow/amber/gray/purple/cyan`) are gone.
-- **Buttons**: `.btn` neutral (transparent→`--bg-2` hover, `--border-hi`
-  border); `.btn.primary` solid `--accent-strong`, white text; `.btn.danger`
-  red text/border on hover; `.btn.ghost`; `.sm`. All states: hover, focus ring,
-  disabled 45%, busy (Spinner inside, label stays).
-- **Inputs**: `--bg-2` fill, hairline border, focus = accent border. One
-  `Field` component owns label association; error text under the control.
-- **Nav**: active item = `--accent-dim` fill + `--accent` ink (filled pill, no
-  left bar). Sidebar sections are 11px sentence-case dim labels.
-- **KPI/stat tile**: label 12px `--dim` sentence case, value 22px mono
-  `--text`, unit 12px `--dim`. Value ink never wears a data color (dataviz
-  rule: text wears text tokens).
-- **Meters** (`UsageBar`): 4px track `rgba(255,255,255,0.07)`, fill
-  ok/warn/crit by threshold, scaleX animation only. Always beside a numeric
-  readout. Percentages only — never feed it a temperature.
-- **Sparkline**: single-series accent bars at 70% opacity, no axis chrome,
-  `aria-hidden` with the numeric value visible beside it.
-- **The rack** (signature, de-skeuomorphed): a flat bordered panel; each
-  machine is a row with a mono slot number in a hairline-separated left rail
-  column, status dot + word, name, and meters. No mounting holes, no gradients.
-- **Lists**: `.list` panel of hairline-separated `.list-row`s replaces ad-hoc
-  inline `borderTop` rows (members, tokens, deployments, tickets).
-- **Key–value**: `.kv` grid (dt `--dim` 12.5px / dd mono 12.5px) replaces raw
-  `<table>`s in AppDetail and Profile.
-- **Overlays**: shared `useDialogBehavior` (Esc/trap/restore) is mandatory.
-  Modal 560 default; drawer 420 right; palette 560 top-centered. Overlay
-  scrim `rgba(5,8,12,0.65)`.
-- **Toasts**: BOTTOM-right (never over the topbar primary), neutral raised
-  surface, status icon in status ink, NO colored side-stripe. Errors persist
-  until dismissed (`role="alert"`); info/ok auto-dismiss with pause-on-hover.
-- **Banners** (offline, update, dirty-config): full tinted border + `*-dim`
-  fill, icon, one-line message, actions right (`.offline-banner`,
-  `.update-banner`, `.dirty-banner`). Offline outranks everything (crit);
-  update is accent. Status-edged cards use `.card.ok/.warn/.crit/.accent` —
-  never hand-rolled rgba border literals.
-- **Terminal/logs**: `#0A0C0F`, mono 12px/1.7, timestamps `--faint`, kind tag
-  `--accent`. Max-heights per context.
-- **Empty states**: solid hairline border (not dashed), icon in a soft
-  `--bg-2` circle, title + one sentence + one primary action.
-- **Skeletons**: `--bg-2` blocks with 1.4s sweep; every async list shows
-  skeletons until `loaded`, never a false empty.
-- **Icon chips** (`.icon-chip`, `IconChip`): a lucide glyph in a soft tinted
-  34px (28px `.sm`) container — the landmark for KPI tiles, feed rows, empty
-  states, template tiles. Tone carries meaning (`ok/warn/crit/accent`);
-  neutral is the default for identity and inventory facts.
-- **Status pills** (`.pill`, `Pill`): dot + word in a tinted capsule — the
-  status language inside tables and dense lists. Bare `StatusBadge` stays for
-  inline headers. Color never travels without the word.
-- **Data tables** (`.table-wrap`/`table.table`, `DataTable`): the comparison
-  surface (Apps, Machines). Sticky header, hairline rows, sortable columns
-  via `.th-sort` + `aria-sort`, numeric cells `.num` right-aligned mono, row
-  click navigates with a real `<Link>` in the name cell for keyboards.
-  Narrative surfaces (attention, feeds, wizards) stay cards.
-- **Trend charts** (`TrendChart`): the one time-series primitive. Self-drawn
-  SVG (no chart library, air-gap safe), accent line + gradient fill, HTML
-  text overlay (never stretched SVG text), hover guide + tooltip, `.chart-x`
-  time ticks. One metric per chart; `Seg` switches metric and window
-  (24h fine / 7d coarse from `/api/metrics/history`). Gaps mean offline —
-  never zero-filled. Under ~2 points it renders its own "collecting" state.
-- **Deltas** (`Delta`, `trendDelta`): "↑ 12%" vs 24h ago beside a value.
-  Direction is meaning-aware (caller sets `goodWhenUp`); renders nothing when
-  history can't honestly support the comparison (<20h span, near-zero base).
-- **Segmented switch** (`.seg`, `Seg`): pill-tabs for chart metric/window.
-  Not a filter (filters use `.btn.chip-on`), not navigation (tabs use `.tabs`).
+- **Table** (`table.table`): full-bleed; header band `--bg-1` with 11px
+  uppercase tracked `--faint` labels + sort glyphs (`aria-sort`); tall
+  two-line rows — primary 13.5px `--text` + secondary 12.5px `--dim`;
+  status dot before name; mono for addresses/versions; hairline separators,
+  square corners; hover `--bg-1`; row kebab = `.icon-sq` at row end opening
+  the row menu; name cell holds the real `<Link>`.
+- **kv stripes** (`.kv-rows` / `.kv-row`): label (icon + 13px `--dim`) left,
+  value right-aligned (`--text`, mono when data), optional copy icon button.
+- **Setting block** (`.setting`, `.setting.toggle`): toggle variant is a
+  `--bg-1` radius-8 block with a `.switch` on the right; plain variant is
+  unboxed heading + description + control.
+- **Switch** (`.switch`): 36×20 track, `--bg-3` off / `--accent` on, white
+  knob, keyboard focusable, `role="switch"`.
+- **Buttons**: `.btn` secondary (dark `--bg-2` fill + `--border-hi`, white
+  ink); `.btn.primary` solid `--accent` with `--accent-ink` text; `.btn.danger`
+  crit outline; `.btn.ghost`; `.icon-sq` bordered 32px icon-square (refresh,
+  kebab, copy — allowed icon-only with `aria-label`+`title`). All states:
+  hover, focus ring (2px `--accent`, offset 2), disabled 45%, busy keeps label.
+- **Segmented** (`.seg`): joined; **active segment = white fill, near-black
+  text** (the reference's signature inversion). Status filters + view switches.
+- **Tabs** (`.tabs`): icon+label, accent underline. Navigation only.
+- **Status pills / dots**: dot (7px flat) + word; pills tinted 10% fills.
+  Color never travels without the word. `ledClass()` stays the single map.
+- **Inputs**: 38px, `--bg-2` fill, hairline, radius 8, focus = accent border;
+  `Field` owns label association; kbd chips inside search inputs.
+- **Meters** (`UsageBar`): 4px track, ok/warn/crit fill by threshold. The only
+  quantitative graphic in the product now — charts, sparklines, and deltas are
+  REMOVED (`charts.tsx` deleted; `/api/metrics/history` stays server-side,
+  unused by the UI).
+- **Banners**: in-flow notices are square, tinted 10% fill + 1px full tinted
+  border, icon + one line + actions right. Chrome strips (update, offline) are
+  full-width and square.
+- **Overlays**: shared `useDialogBehavior` mandatory. Modal 560 radius-10;
+  drawer 420 right (square edge); palette 560 top-centered; toasts BOTTOM-right,
+  neutral raised, status icon in status ink, errors persist.
+- **Empty/skeleton/terminal**: skeletons on every async list until `loaded`;
+  terminal `#060607`, mono 12px/1.7; ghost-row empties per above.
+- **Copilot chat**: full-page at `/copilot` (history rail of past chats left —
+  hairline-separated rows, not boxes — thread right in a square hairline
+  frame) and the 420px drawer; both share bubbles: user = `--accent-dim`
+  fill, bot = `--bg-1`, radius 8 max.
 
-## Interaction grammar (post-audit, 2026-07-26)
+## Interaction grammar
 
-- **Account menu**: Profile/Support/Log out live in the sidebar's bottom
-  account row (`.account-trigger` + `.org-menu.up`) — logout is always a
-  two-step. Settings is a main-nav destination.
-- **Nav badges mean attention only** (`.count.attn`, crit ink). Inventory
-  totals are never badged.
-- **Save bars ride the bottom**: draft-based forms use `.dirty-banner.pinned`
-  after the content so Save is always in reach of the edited field.
-- **Selected filter chips** wear `.btn.chip-on`, never `.btn.primary` —
-  solid azure means "the one action" and nothing else.
-- **Radio-cards** compose from `.card.clickable` + `.card.accent` selected
-  state, `role=radio`/`aria-checked`.
-- **Instant vs draft actions never share a card stack**: a control that fires
-  an API on change gets an explicit Apply button or lives on an
-  instant-action-only surface.
-- **Update signal** is the sidebar `.update-chip`; the Changelog page hosts
-  the update action. No global banners except the offline banner.
-- **Copy bans**: zero em-dashes in visible strings; max one middot (·) per
-  metadata line; one label per intent per surface; `<option>` labels carry
-  names only (descriptions go in Field hints).
-
-## Interaction grammar additions (reference register, 2026-07-27)
-
-- **Sidebar sections**: `Operate` (Home, Apps, Machines, Network) and
-  `Workspace` (Settings, Support, What's new). The account menu keeps only
-  Profile and Log out — Support moved to the nav.
-- **Topbar order**: search input → (spacer) → bell → Copilot → Deploy app.
-  The search box is a real input that hands its first keystroke to the
-  command palette (`seed`); ⌘K/Ctrl K still toggles it.
-- **Bell semantics**: the badge counts open alerts ONLY (never routine
-  activity); the panel lists open alerts (clickable, → machine) then recent
-  activity (non-interactive rows, neutral dots). Empty state: "Nothing needs
-  your attention."
-- **Home order**: greeting + date + quick actions → status banner →
-  attention list → checklist (only when calm) → KPI row with deltas → fleet
-  hero chart → apps + activity feed | rack + storage. Quick actions never
-  duplicate chrome verbs (Deploy lives in the topbar) and Add machine yields
-  to the banner primary on an empty rack.
-- **The time dimension is server truth**: every chart and delta reads
-  `/api/metrics/history` (24h @ 1min, 7d @ 15min, org-scoped). No component
-  accumulates client-side history; deltas are null, not 0%, when the rings
-  are too young.
+- Account menu = header avatar (Profile, Log out). Two-step logout preserved.
+- Toolbar order on list pages: search → filters/segments → refresh → primary.
+- Row actions: kebab menu (Start/Stop/Restart/Logs/Delete per state); primary
+  navigation = row click + real link on the name.
+- Save: ENTITY drafts (AppDetail) save from the entity header —
+  `Cancel` + `Save changes` (+ `Save & redeploy` where the backend
+  distinguishes), disabled until dirty. Section-scoped settings forms
+  (Settings tabs) keep one explicit Save per section, beside the controls it
+  saves. Closing/reloading the tab with a dirty draft warns
+  (`useUnsavedChanges`); in-app route blocking needs the data router and is
+  deferred. Instant-action surfaces keep explicit Apply. `.dirty-banner` is
+  retired.
+- Home order (minimal): title + one-line fleet status → attention rows (plain
+  hairline rows, worst first) → setup checklist (only while onboarding) →
+  machines summary rows → recent activity list. No charts, no KPI grid.
+- Nav badges mean attention only. Bell badge counts open alerts only.
+- Copy bans survive: zero em-dashes in visible strings; max one middot per
+  metadata line. `<option>` labels carry names plus at most one short
+  parenthetical of load-bearing state ("(offline)", "(score 87)") — decorative
+  descriptions still live in Field hints.
+- Filtered tables report what they hid: "Showing X of N" under the table
+  whenever search/segments shrink the row set (and a clear-filters row when
+  they shrink it to zero).
 
 ## Hard rules
 
-1. Never render unreachable/loading as empty — gate empties on `loaded`,
-   show the offline banner when `!reachable`.
-2. No glows, blinks, gradient surfaces, colored left-stripes, or nested cards
-   beyond card > inset.
-3. Inline styles only for genuinely dynamic values (computed widths, heights);
-   everything reusable lives in `index.css` classes.
-4. Status color is never decoration; identity facts are neutral.
-5. AA contrast on all ink tokens against all four surfaces; focus ring
-   (2px `--accent`, 2px offset) on every interactive element.
-6. Icon-only buttons are banned in primary chrome — visible labels, or
-   `aria-label` + `title` only for tight table-row actions. One standing
-   exception: the notification bell (`.bell-btn`), a universal convention,
-   with `aria-label` + `title` and a badge that only ever counts open alerts.
-7. Keep the `rackops-org-changed` + localStorage org contract and all API
-   behavior intact — this is a reskin plus UX repair, not a rewrite.
+1. Never render unreachable/loading as empty — gate on `loaded`, show the
+   offline strip when `!reachable`.
+2. No glows, gradients, colored side-stripes, nested boxes, or decorative
+   shadows. A box must earn its border: floating layers, toggle blocks, and
+   the fleet card only.
+3. Inline styles only for genuinely dynamic values; reusable rules live in
+   `index.css`.
+4. Status color never decorates; identity facts are neutral; accent never
+   colors status and never colors nav.
+5. AA contrast on all ink tokens on all surfaces; focus ring on everything
+   interactive; keyboard path for every flow; `prefers-reduced-motion` global.
+6. Icon-only buttons are allowed as `.icon-sq`, the bell, and the standing
+   micro-affordances (toast/strip dismiss X, password eye, chat-row delete,
+   composer Send) — every one with `aria-label` (+`title` where hoverable).
+   Anything else in chrome or sections carries a visible label.
+7. The `rackops-org-changed` + localStorage org contract and all API behavior
+   stay intact. Air-gap: no CDN assets ever.
 
-## Migration map (old world → new)
+## Migration map (Machined console → Quiet console)
 
 | Old | New |
 |---|---|
-| `var(--amber)` as brand accent | `var(--accent)` |
-| `var(--amber)` as warning/pending | `var(--warn)` |
-| `--display` font refs | remove (single family) |
-| `.badge.green/.red/.yellow` | `.badge.ok/.crit/.warn` |
-| `.badge.amber` | `.badge.accent` (or `.warn` if it meant warning) |
-| `.badge.gray/.purple/.cyan` | `.badge.neutral` or `.tag` |
-| `.hero-banner` | `.status-banner` |
-| LED glow/blink semantics | flat dot; urgency via banners/badges |
-| tracked-uppercase `.eyebrow` | same class, restyled sentence-case label |
-| raw `<table>` key-values | `.kv` |
-| inline `borderTop` row lists | `.list` / `.list-row` |
+| `.card` stacks as page structure | full-bleed sections, `.kv-rows`, `.setting` blocks |
+| azure `--accent #57A2FF` | signal green `#3DF582` (+ `--accent-ink` on fills) |
+| blue-graphite chassis (`#0B0E11`…) | pure-neutral (`#0A0A0B`…) |
+| topbar search + global Deploy + sidebar account | header (bell/help/avatar) + page-owned primaries + toolbar search |
+| `.dirty-banner` bottom save bar | header Cancel/Save (disabled-until-dirty) |
+| sidebar `.update-chip` | full-width update strip above header + fleet card CTA |
+| `TrendChart`/`Delta`/`Sparkline`/KPI hero | removed (UsageBar only) |
+| radius-10 bordered tables/cards | square full-bleed tables/stripes |
+| accent-tinted active nav pill | neutral raised nav pill |
+| sentence-case table headers | 11px uppercase tracked headers (tables only) |

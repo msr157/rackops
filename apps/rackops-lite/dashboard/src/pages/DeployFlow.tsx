@@ -3,14 +3,14 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   Rocket, Package, Container, GitBranch, Layers, Sparkles, Plus, Trash2, ArrowLeft, ArrowRight,
   Globe, Check, CheckCircle2, ScrollText, Bot, Server, House, Wrench, Gamepad2, Database, KeyRound,
-  Search, RotateCw, Activity, Box, Clapperboard, HardDrive, Music, Shield,
+  Search, RotateCw, Activity, Box, Boxes, Clapperboard, HardDrive, Music, Shield,
 } from 'lucide-react';
 import { api, subscribeLogChunks } from '../api';
 import type { Template, EnvVar, PlacementScore, Service, Deployment, LogChunk } from '../api';
 import { useData } from '../data';
 import { useToast, cleanError } from '../components/toast';
 import {
-  EmptyState, Field, IconChip, Led, PasswordInput, Skeleton, Spinner, UrlChip, dnsLabel, publicUrls,
+  Crumbs, EmptyState, Field, IconChip, Led, PasswordInput, Skeleton, Spinner, UrlChip, dnsLabel, publicUrls,
 } from '../components/ui';
 
 type Source = 'template' | 'image' | 'git' | 'compose';
@@ -318,6 +318,10 @@ export function DeployFlow() {
 
   return (
     <div className="page" style={{ maxWidth: 760 }}>
+      <Crumbs items={[
+        { label: 'Apps', to: '/apps', icon: <Boxes size={13} aria-hidden /> },
+        { label: 'Deploy' },
+      ]} />
       <div className="page-title">Deploy an app</div>
       <div className="page-sub">From zero to a running app. RackOps picks the best machine for it.</div>
 
@@ -342,10 +346,9 @@ export function DeployFlow() {
                 <button key={s.key} type="button" role="radio" aria-checked={selected}
                   tabIndex={selected ? 0 : -1}
                   ref={(el) => { sourceRefs.current[i] = el; }}
-                  className="card clickable"
+                  className={`card clickable${selected ? ' accent' : ''}`}
                   style={{
                     textAlign: 'center', padding: '14px 8px', fontFamily: 'inherit',
-                    borderColor: selected ? 'var(--accent)' : undefined,
                     background: selected ? 'var(--accent-dim)' : undefined,
                   }}
                   onClick={() => setSource(s.key)}
@@ -400,9 +403,8 @@ export function DeployFlow() {
                     const selected = tpl?.id === t.id;
                     return (
                       <button key={t.id} type="button" role="radio" aria-checked={selected}
-                        className="card clickable" style={{
+                        className={`card clickable${selected ? ' accent' : ''}`} style={{
                           textAlign: 'left', fontFamily: 'inherit', padding: 12,
-                          borderColor: selected ? 'var(--accent)' : undefined,
                           background: selected ? 'var(--accent-dim)' : undefined,
                         }} onClick={() => pickTemplate(t)}>
                         <div className="row" style={{ gap: 10, alignItems: 'flex-start' }}>

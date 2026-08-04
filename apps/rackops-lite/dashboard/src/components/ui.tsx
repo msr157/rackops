@@ -1,5 +1,6 @@
-import { useId, useState } from 'react';
-import { Copy, Check, X, ExternalLink, Loader, Info, Eye, EyeOff } from 'lucide-react';
+import { useEffect, useId, useRef, useState } from 'react';
+import { Copy, Check, X, ExternalLink, Loader, Info, Eye, EyeOff, MoreVertical, ChevronRight } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import type { Service, IngressConfig } from '../api';
 import { useDialogBehavior } from './useDialog';
 
@@ -133,45 +134,133 @@ export function IconChip({ tone, sm, children }: {
   return <span className={`icon-chip ${tone ?? ''} ${sm ? 'sm' : ''}`} aria-hidden>{children}</span>;
 }
 
-// Delta: "how does now compare to before" beside a KPI value. The caller
-// says which direction is good — more apps running is good, more CPU is not.
-export function Delta({ pct, goodWhenUp, label }: {
-  pct: number | null; goodWhenUp?: boolean; label?: string;
-}) {
-  // No history yet (fresh install, new machine): say nothing rather than "0%".
-  if (pct === null || !Number.isFinite(pct)) return null;
-  const flat = Math.abs(pct) < 1;
-  const tone = flat ? 'flat' : (pct > 0) === !!goodWhenUp ? 'good' : 'bad';
-  const arrow = flat ? '→' : pct > 0 ? '↑' : '↓';
-  return (
-    <span className={`delta ${tone}`} title={label ?? 'vs 24 hours ago'}>
-      <span aria-hidden>{arrow}</span>
-      {Math.abs(pct).toFixed(Math.abs(pct) >= 10 ? 0 : 1)}%
-      <span className="sr-only">{pct > 0 ? 'up' : flat ? 'unchanged' : 'down'} {label ?? 'vs 24 hours ago'}</span>
-    </span>
-  );
-}
+/* ---- Segmented switch: white-active, the register's signature ---- */
 
-/* ---- KPI + usage bars ---- */
-
-// The one KPI tile. `chip` puts an IconChip at the row's right edge (the
-// reference-register form); bare `icon` keeps the inline eyebrow glyph.
-// Both feed the same .kpi-row slot — one component, one structure.
-export function Kpi({ icon, label, chip, value, unit, delta, children }: {
-  icon?: React.ReactNode; label: string; chip?: React.ReactNode;
-  value: React.ReactNode; unit?: string; delta?: React.ReactNode; children?: React.ReactNode;
+// Status filters and small view switches. The active segment inverts to
+// white with near-black text; never used for navigation.
+export function Seg<T extends string>({ value, onChange, options, label }: {
+  value: T; onChange: (v: T) => void;
+  options: ReadonlyArray<readonly [T, string]>; label: string;
 }) {
   return (
-    <div className="card">
-      {chip
-        ? <div className="row spread"><span className="eyebrow">{label}</span>{chip}</div>
-        : <div className="eyebrow">{icon} {label}</div>}
-      <div className="kpi-value">{value} {unit && <span className="unit">{unit}</span>}</div>
-      {delta && <div className="kpi-delta">{delta}</div>}
-      {children}
+    <div className="seg" role="group" aria-label={label}>
+      {options.map(([v, text]) => (
+        <button key={v} type="button" className={v === value ? 'on' : ''}
+          aria-pressed={v === value} onClick={() => onChange(v)}>
+          {text}
+        </button>
+      ))}
     </div>
   );
 }
+
+/* ---- Switch: the boolean control on setting blocks ---- */
+
+export function Switch({ checked, onChange, disabled, ariaLabel, ariaLabelledBy }: {
+  checked: boolean; onChange: (v: boolean) => void; disabled?: boolean;
+  ariaLabel?: string; ariaLabelledBy?: string;
+}) {
+  return (
+    <button type="button" className="switch" role="switch" aria-checked={checked}
+      aria-label={ariaLabel} aria-labelledby={ariaLabelledBy} disabled={disabled}
+      onClick={() => onChange(!checked)} />
+  );
+}
+
+/* ---- Breadcrumbs ---- */
+
+export interface Crumb { label: React.ReactNode; to?: string; icon?: React.ReactNode }
+
+// The wayfinding line above every page title: section icon + name, then the
+// entity. The last crumb is the current place and stays plain text.
+export function Crumbs({ items }: { items: Crumb[] }) {
+  return (
+    <nav className="crumbs" aria-label="Breadcrumb">
+      {items.map((c, i) => (
+        <span key={i} className="row" style={{ gap: 7, minWidth: 0 }}>
+          {i > 0 && <ChevronRight size={12} className="crumb-sep" aria-hidden />}
+          {c.to
+            ? <Link to={c.to}>{c.icon}{c.label}</Link>
+            : <span className="crumb-here" aria-current="page">{c.icon}{c.label}</span>}
+        </span>
+      ))}
+    </nav>
+  );
+}
+
+/* ---- RowMenu: the kebab at the end of a table row ---- */
+
+export interface RowMenuItem {
+  label: string; icon?: React.ReactNode;
+  danger?: boolean; disabled?: boolean;
+  onSelect: () => void;
+}
+
+// A bordered icon-square opening a small action menu. Outside click closes;
+// Escape closes without bubbling into row/dialog handlers.
+export function RowMenu({ label, items }: { label: string; items: RowMenuItem[] }) {
+  const [open, setOpen] = useState(false);
+  const boxRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey, true);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey, true);
+    };
+  }, [open]);
+
+  return (
+    <div className="rowmenu" ref={boxRef} onClick={(e) => e.stopPropagation()}>
+      <button ref={triggerRef} type="button" className="icon-sq" aria-haspopup="menu"
+        aria-expanded={open} aria-label={label} title={label}
+        onClick={() => setOpen((v) => !v)}>
+        <MoreVertical size={15} />
+      </button>
+      {open && (
+        <div className="rowmenu-pop" role="menu" aria-label={label}>
+          {items.map((it) => (
+            <button key={it.label} role="menuitem" className={`org-item ${it.danger ? 'danger' : ''}`}
+              disabled={it.disabled}
+              onClick={() => { setOpen(false); it.onSelect(); }}>
+              {it.icon} {it.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---- Unsaved-changes guard ---- */
+
+// Warns before the tab closes or reloads while a draft is dirty. In-app
+// route changes are not interceptable under BrowserRouter (useBlocker needs
+// the data router), so the draft surfaces also keep Save/Cancel visibly
+// disabled-or-armed in their headers as the primary signal.
+export function useUnsavedChanges(dirty: boolean) {
+  useEffect(() => {
+    if (!dirty) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => { e.preventDefault(); };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [dirty]);
+}
+
+/* ---- Usage bars ---- */
 
 // Every usage sits beside its own numeric readout, so the bar itself is
 // decoration. It scales rather than animating width — no layout work per tick.

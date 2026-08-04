@@ -7,7 +7,7 @@ import { api, subscribe } from '../api';
 import type { SupportTicket } from '../api';
 import { useToast, cleanError } from '../components/toast';
 import { useConfirm } from '../components/confirm';
-import { EmptyState, Field, InfoTip, Led, SkeletonRows, Spinner, timeAgo } from '../components/ui';
+import { Crumbs, EmptyState, Field, InfoTip, Pill, SkeletonRows, Spinner, timeAgo } from '../components/ui';
 
 const CATEGORIES = [
   ['general', 'General question'],
@@ -84,12 +84,14 @@ export function SupportPage() {
   const active = tickets.filter((t) => t.status !== 'resolved');
   const resolved = tickets.filter((t) => t.status === 'resolved');
   const current = tickets.find((t) => t.id === open);
-  // The empty state carries its own New ticket action, and the compose form
-  // is the action — one visible way in at a time.
-  const showNewTicket = !composing && !(loaded && tickets.length === 0 && !current);
+  // One visible way in at a time: the header button yields only while the
+  // compose form (the action itself) is open. The empty state never carries
+  // its own copy of the action; the header owns it.
+  const showNewTicket = !composing;
 
   return (
     <div className="page" style={{ maxWidth: 760 }}>
+      <Crumbs items={[{ label: 'Support', icon: <LifeBuoy size={13} aria-hidden /> }]} />
       <div className="row spread" style={{ marginBottom: 4 }}>
         <div className="page-title">Support</div>
         {showNewTicket && (
@@ -123,7 +125,7 @@ export function SupportPage() {
               an empty inbox, and never a silent nothing when the fetch failed. */}
           {!loaded && !loadFailed && <SkeletonRows count={3} height={46} />}
           {!loaded && loadFailed && (
-            <div className="card row">
+            <div className="notice crit">
               <AlertTriangle size={14} style={{ color: 'var(--crit)' }} aria-hidden />
               <span className="dim" style={{ flex: 1 }}>
                 Couldn&rsquo;t load your tickets. The server didn&rsquo;t answer.
@@ -133,10 +135,7 @@ export function SupportPage() {
           )}
           {loaded && tickets.length === 0 && (
             <EmptyState icon={<LifeBuoy size={18} />} title="No tickets yet">
-              <div style={{ marginBottom: 14 }}>Stuck on something? Open a ticket. A human answers.</div>
-              <button className="btn primary" onClick={() => setComposing(true)}>
-                <Plus size={13} /> New ticket
-              </button>
+              <div>Stuck on something? Open a ticket with the button above. A human answers.</div>
             </EmptyState>
           )}
           {active.length > 0 && <TicketList title="Active" items={active} onOpen={setOpen} />}
@@ -170,28 +169,22 @@ function TicketList({ title, items, onOpen }: {
   return (
     <>
       <div className="section-title">{title}</div>
-      <div className="card" style={{ padding: '3px 16px', marginBottom: 18 }}>
-        <div className="list">
-          {/* Opening a ticket is a state change, not navigation — so each row
-              is a button, which Tab reaches and Enter activates. The inline
-              resets strip button chrome the .list-row grammar doesn't cover;
-              the hairline top border stays with the class. */}
-          {items.map((t) => (
-            <button key={t.id} type="button" className="list-row ticket-row"
-              style={{ background: 'none', borderLeft: 'none', borderRight: 'none', borderBottom: 'none', cursor: 'pointer' }}
-              onClick={() => onOpen(t.id)}>
-              <div className="row" style={{ minWidth: 0, flex: 1 }}>
-                <Led status={ticketLed(t.status)} />
-                <strong style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.subject}</strong>
-                <span className="tag">{t.category}</span>
-                <SeverityTag severity={t.severity} />
-              </div>
-              <span className="faint" style={{ whiteSpace: 'nowrap' }}>
-                {statusLabel(t.status)} · {timeAgo(t.updatedAt)}
-              </span>
-            </button>
-          ))}
-        </div>
+      <div className="list" style={{ marginBottom: 18 }}>
+        {/* Opening a ticket is a state change, not navigation — so each row
+            is a button, which Tab reaches and Enter activates. .ticket-row
+            strips the button chrome; the hairline stays with .list-row. */}
+        {items.map((t) => (
+          <button key={t.id} type="button" className="list-row ticket-row"
+            onClick={() => onOpen(t.id)}>
+            <div className="row" style={{ minWidth: 0, flex: 1 }}>
+              <strong style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.subject}</strong>
+              <span className="tag">{t.category}</span>
+              <SeverityTag severity={t.severity} />
+            </div>
+            <Pill status={ticketLed(t.status)}>{statusLabel(t.status)}</Pill>
+            <span className="faint" style={{ whiteSpace: 'nowrap' }}>{timeAgo(t.updatedAt)}</span>
+          </button>
+        ))}
       </div>
     </>
   );
@@ -233,8 +226,8 @@ function Compose({ onDone, onCancel }: { onDone: (id: string) => void; onCancel:
   };
 
   return (
-    <div className="card" style={{ marginBottom: 18 }}>
-      <div className="eyebrow" style={{ marginBottom: 12 }}><LifeBuoy size={12} /> New support ticket</div>
+    <section style={{ marginBottom: 18 }}>
+      <div className="section-title" style={{ marginTop: 4 }}>New support ticket</div>
       <Field label="Subject">
         {(p) => (
           <input className="input" {...p} value={subject} placeholder="One line: what's wrong?"
@@ -273,7 +266,7 @@ function Compose({ onDone, onCancel }: { onDone: (id: string) => void; onCancel:
         </button>
         <button className="btn ghost" disabled={busy} onClick={cancel}>Cancel</button>
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -324,7 +317,7 @@ function Thread({ ticket, onBack, onChanged, onDirty }: {
   };
 
   return (
-    <div className="card">
+    <section>
       <div className="row spread wrap" style={{ marginBottom: 4 }}>
         <div className="row" style={{ minWidth: 0 }}>
           <button className="btn sm ghost" onClick={onBack} aria-label="Back to all tickets"><ArrowLeft size={14} /></button>
@@ -333,9 +326,7 @@ function Thread({ ticket, onBack, onChanged, onDirty }: {
           <SeverityTag severity={ticket.severity} />
         </div>
         <div className="row">
-          <span className="row faint" style={{ gap: 6 }}>
-            <Led status={ticketLed(ticket.status)} /> {statusLabel(ticket.status)}
-          </span>
+          <Pill status={ticketLed(ticket.status)}>{statusLabel(ticket.status)}</Pill>
           {ticket.status !== 'resolved' && (
             <button className="btn sm" disabled={resolving} onClick={resolve}>
               {resolving ? <Spinner size={12} /> : <CheckCircle2 size={12} />} Mark resolved
@@ -344,14 +335,14 @@ function Thread({ ticket, onBack, onChanged, onDirty }: {
         </div>
       </div>
 
+      {/* The thread speaks the product's one bubble grammar: support (agent)
+          on the left as the bot surface, the operator on the right in the
+          accent-tinted fill. */}
       <div ref={listRef} className="stack"
         style={{ gap: 10, margin: '14px 0', maxHeight: '55vh', overflowY: 'auto', paddingRight: 2 }}>
         {ticket.messages.map((m) => (
-          <div key={m.id} className={`card inset ${m.author === 'agent' ? 'accent' : ''}`} style={{
-            marginLeft: m.author === 'agent' ? 0 : 24,
-            marginRight: m.author === 'agent' ? 24 : 0,
-          }}>
-            <div className="row spread" style={{ marginBottom: 6 }}>
+          <div key={m.id} className={`chat-msg ${m.author === 'agent' ? 'bot' : 'user'}`}>
+            <div className="row spread" style={{ marginBottom: 6, gap: 14 }}>
               <strong className="row" style={{ gap: 6, fontSize: 12.5 }}>
                 <MessageSquareText size={12} style={{ color: m.author === 'agent' ? 'var(--accent)' : 'var(--faint)' }} aria-hidden />
                 {m.author === 'agent' ? `${m.name} (RackOps)` : m.name || 'You'}
@@ -381,6 +372,6 @@ function Thread({ ticket, onBack, onChanged, onDirty }: {
           {busy ? <Spinner size={13} /> : <Send size={13} />} Send
         </button>
       </div>
-    </div>
+    </section>
   );
 }

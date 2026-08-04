@@ -1,16 +1,16 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
-  AlertTriangle, BookOpenText, Bot, Check, Copy, KeyRound, Plus, RotateCw, ShieldCheck, Trash2, UserRound,
+  AlertTriangle, BookOpenText, CalendarDays, Check, Copy, KeyRound, Mail, Plus, RotateCw, ShieldCheck, Trash2, UserRound,
 } from 'lucide-react';
 import { api } from '../api';
 import type { APIToken, User } from '../api';
 import { useToast, cleanError } from '../components/toast';
 import { useConfirm } from '../components/confirm';
-import { Field, InfoTip, PasswordInput, SkeletonRows, Spinner, timeAgo } from '../components/ui';
+import { Crumbs, Field, InfoTip, PasswordInput, SkeletonRows, Spinner, timeAgo } from '../components/ui';
 
 // A key is shown in full exactly once, at creation. Everything about that
-// moment — the highlighted card, the MCP snippet below picking it up, revoking
-// it clearing the card — matches on this id, never on the (reusable) name.
+// moment — the accent notice, the MCP snippet below picking it up, revoking
+// it clearing the notice — matches on this id, never on the (reusable) name.
 interface FreshKey { id: string; name: string; token: string }
 
 // Profile: the signed-in operator's own account — identity, password, and the
@@ -19,18 +19,18 @@ export function ProfilePage() {
   const [fresh, setFresh] = useState<FreshKey | null>(null);
 
   return (
-    <div className="page">
+    <div className="page" style={{ maxWidth: 820 }}>
+      <Crumbs items={[{ label: 'Profile', icon: <UserRound size={13} aria-hidden /> }]} />
       <div className="page-title">Profile</div>
       <div className="page-sub">Your API keys, AI-tool access, account, and password</div>
 
       {/* API keys lead: they are what operators come here for. Identity and
-          password housekeeping follow. */}
-      <div className="stack">
-        <ApiKeysCard fresh={fresh} onFresh={setFresh} />
-        <McpCard freshToken={fresh?.token} />
-        <AccountCard />
-        <ChangePasswordCard />
-      </div>
+          password housekeeping follow. Sections sit on the canvas; the
+          section-title rhythm carries the separation, not boxes. */}
+      <ApiKeysSection fresh={fresh} onFresh={setFresh} />
+      <McpSection freshToken={fresh?.token} />
+      <AccountSection />
+      <ChangePasswordSection />
     </div>
   );
 }
@@ -67,7 +67,7 @@ function CopyGuard({ text }: { text: string }) {
   );
 }
 
-function AccountCard() {
+function AccountSection() {
   const [me, setMe] = useState<User | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -78,15 +78,28 @@ function AccountCard() {
   useEffect(load, [load]);
 
   return (
-    <div className="card">
-      <div className="eyebrow" style={{ marginBottom: 12 }}><UserRound size={12} /> Account</div>
+    <section>
+      <div className="section-title">Account</div>
       {me ? (
-        <dl className="kv">
-          <dt>Name</dt><dd>{me.fullName || '(not set)'}</dd>
-          <dt>Email</dt><dd>{me.email}</dd>
-          <dt>Role</dt><dd>{me.role}</dd>
-          <dt>Member since</dt><dd>{new Date(me.createdAt).toLocaleDateString()}</dd>
-        </dl>
+        // Identity facts are kv stripes: neutral label left, value right.
+        <div className="kv-rows">
+          <div className="kv-row">
+            <span className="kv-label"><UserRound size={13} aria-hidden /> Name</span>
+            <span className="kv-val">{me.fullName || '(not set)'}</span>
+          </div>
+          <div className="kv-row">
+            <span className="kv-label"><Mail size={13} aria-hidden /> Email</span>
+            <span className="kv-val mono">{me.email}</span>
+          </div>
+          <div className="kv-row">
+            <span className="kv-label"><ShieldCheck size={13} aria-hidden /> Role</span>
+            <span className="kv-val">{me.role}</span>
+          </div>
+          <div className="kv-row">
+            <span className="kv-label"><CalendarDays size={13} aria-hidden /> Member since</span>
+            <span className="kv-val">{new Date(me.createdAt).toLocaleDateString()}</span>
+          </div>
+        </div>
       ) : failed ? (
         <div className="row">
           <AlertTriangle size={14} style={{ color: 'var(--crit)' }} aria-hidden />
@@ -94,13 +107,13 @@ function AccountCard() {
           <button className="btn sm" onClick={load}><RotateCw size={12} /> Retry</button>
         </div>
       ) : (
-        <SkeletonRows count={4} height={16} />
+        <SkeletonRows count={4} height={46} />
       )}
-    </div>
+    </section>
   );
 }
 
-function ChangePasswordCard() {
+function ChangePasswordSection() {
   const toast = useToast();
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
@@ -120,8 +133,8 @@ function ChangePasswordCard() {
   };
 
   return (
-    <div className="card">
-      <div className="eyebrow" style={{ marginBottom: 12 }}><ShieldCheck size={12} /> Change password</div>
+    <section>
+      <div className="section-title">Change password</div>
       <div className="grid-3">
         <Field label="Current password">
           {(p) => <PasswordInput {...p} value={current} onChange={setCurrent} autoComplete="current-password" />}
@@ -139,7 +152,7 @@ function ChangePasswordCard() {
       <button className="btn primary" disabled={busy || !current || !next || !confirm} onClick={submit}>
         {busy ? <Spinner size={12} /> : <ShieldCheck size={12} />} Update password
       </button>
-    </div>
+    </section>
   );
 }
 
@@ -151,7 +164,7 @@ const EXPIRY_OPTIONS = [
   { value: '1y', label: '1 year' },
 ];
 
-function ApiKeysCard({ fresh, onFresh }: {
+function ApiKeysSection({ fresh, onFresh }: {
   fresh: FreshKey | null; onFresh: (k: FreshKey | null) => void;
 }) {
   const toast = useToast();
@@ -197,9 +210,9 @@ function ApiKeysCard({ fresh, onFresh }: {
   };
 
   return (
-    <div className="card">
-      <div className="eyebrow" style={{ marginBottom: 6 }}>
-        <KeyRound size={12} /> API keys
+    <section>
+      <div className="section-title" style={{ marginTop: 4 }}>
+        API keys
         <InfoTip wide>
           API keys let tools call the RackOps API as you: the CLI, scripts, VS Code via MCP,
           or anything speaking HTTP. A key has exactly your permissions, and revoking it here
@@ -231,7 +244,8 @@ function ApiKeysCard({ fresh, onFresh }: {
       </div>
 
       {fresh && (
-        <div className="card inset" style={{ borderColor: 'rgba(87, 162, 255, 0.45)', marginBottom: 14 }}>
+        // The shown-once moment earns the one accent notice on the page.
+        <div className="notice accent" style={{ display: 'block', marginBottom: 14 }}>
           <div className="row spread" style={{ marginBottom: 8, alignItems: 'flex-start' }}>
             <div>
               <strong>{fresh.name}</strong>
@@ -286,14 +300,14 @@ function ApiKeysCard({ fresh, onFresh }: {
           <BookOpenText size={12} /> API reference (Swagger)
         </a>
       </div>
-    </div>
+    </section>
   );
 }
 
-// McpCard: ready-to-paste MCP config so VS Code / Claude / Cursor can manage
+// McpSection: ready-to-paste MCP config so VS Code / Claude / Cursor can manage
 // the fleet through `rackops mcp` with one of the keys above. While a freshly
 // created key is on screen, it is injected here so the snippet is paste-ready.
-function McpCard({ freshToken }: { freshToken?: string }) {
+function McpSection({ freshToken }: { freshToken?: string }) {
   const origin = window.location.origin;
   const config = `{
   "mcpServers": {
@@ -308,9 +322,9 @@ function McpCard({ freshToken }: { freshToken?: string }) {
   }
 }`;
   return (
-    <div className="card">
-      <div className="eyebrow" style={{ marginBottom: 6 }}>
-        <Bot size={12} /> Connect AI tools (MCP)
+    <section>
+      <div className="section-title">
+        Connect AI tools (MCP)
         <InfoTip wide>
           The RackOps binary doubles as an MCP server: <code>rackops mcp</code> speaks the Model
           Context Protocol over stdio, so AI assistants can list machines, deploy apps, read logs,
@@ -331,13 +345,13 @@ function McpCard({ freshToken }: { freshToken?: string }) {
       {freshToken && (
         <div className="faint" style={{ marginTop: 10 }}>
           Your new key is filled in above; paste the snippet as-is. It disappears from here when
-          you dismiss the key card.
+          you dismiss the key notice.
         </div>
       )}
       <div className="faint" style={{ marginTop: 10 }}>
         The <code className="mono">rackops</code> binary must be installed where the AI tool runs
         (the same one-line installer works on a workstation).
       </div>
-    </div>
+    </section>
   );
 }

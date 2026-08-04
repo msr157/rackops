@@ -43,7 +43,7 @@ export default function Hero() {
       <div className="container hero-layout">
         <p className="hero-status mono-label" aria-label="Status">
           <span className="hero-status-dot" />
-          SYS:ONLINE — THE INFRASTRUCTURE OPERATING SYSTEM
+          SYS:ONLINE / RACKOPS LITE AVAILABLE NOW
         </p>
         <h1 className="hero-title">
           <span className="hero-line">
@@ -57,13 +57,12 @@ export default function Hero() {
           </span>
         </h1>
         <p className="hero-subtitle hero-reveal">
-          RackOps is one control plane for every machine you own — hardware, deployments,
-          storage, network, and the AI that watches all of it. On-prem, hybrid, or under
-          your desk.
+          See every machine, deploy workloads, and manage storage and networking from one
+          control plane. RackOps Lite is available now.
         </p>
         <div className="hero-actions hero-reveal">
-          <a href="#access" className="btn btn-solid">
-            Request early access
+          <a href="#install-lite" className="btn btn-solid">
+            Install RackOps Lite
           </a>
           <a href="#platform" className="btn btn-outline">
             See the platform

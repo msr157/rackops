@@ -8,7 +8,7 @@ import { api } from '../api';
 import type { VersionInfo } from '../api';
 import { useToast, cleanError } from '../components/toast';
 import { useConfirm } from '../components/confirm';
-import { Spinner } from '../components/ui';
+import { Crumbs, Spinner } from '../components/ui';
 
 // A change line: the optional lead is the feature name the sentence already
 // opens with, bolded as a scanning anchor; lead + text is the exact history.
@@ -135,44 +135,41 @@ export function ChangelogPage() {
   const liveIdx = runningIdx >= 0 ? runningIdx : 0;
 
   return (
-    <div className="page">
-      <div className="page-title row"><Sparkles size={20} style={{ color: 'var(--accent)' }} aria-hidden /> What&rsquo;s new</div>
+    <div className="page" style={{ maxWidth: 850 }}>
+      <Crumbs items={[{ label: 'What’s new', icon: <Sparkles size={13} aria-hidden /> }]} />
+      <div className="page-title">What&rsquo;s new</div>
       <div className="page-sub">Every user-visible RackOps change, with direct paths to the features that shipped.</div>
 
       {stalled && info && (
-        <div className="card warn" role="alert" style={{ maxWidth: 850, marginBottom: 14 }}>
-          <div className="row wrap">
-            <AlertTriangle size={16} style={{ color: 'var(--warn)', flexShrink: 0 }} aria-hidden />
-            <span style={{ flex: 1, minWidth: 240 }}>
-              The server has not come back on {info.latest} yet. It may still be restarting.
-              Check the server log (<code className="mono">journalctl -u rackops</code>), then reload.
-            </span>
-            <button className="btn sm" onClick={() => window.location.reload()}>
-              <RotateCw size={12} aria-hidden /> Reload page
-            </button>
-          </div>
+        <div className="notice warn" role="alert">
+          <AlertTriangle size={16} style={{ color: 'var(--warn)', flexShrink: 0 }} aria-hidden />
+          <span style={{ flex: 1, minWidth: 240 }}>
+            The server has not come back on {info.latest} yet. It may still be restarting.
+            Check the server log (<code className="mono">journalctl -u rackops</code>), then reload.
+          </span>
+          <button className="btn sm" onClick={() => window.location.reload()}>
+            <RotateCw size={12} aria-hidden /> Reload page
+          </button>
         </div>
       )}
 
       {info?.updateAvailable && (
-        <div className="card accent" style={{ maxWidth: 850, marginBottom: 18 }}>
-          <div className="row wrap">
-            <ArrowUpCircle size={16} style={{ color: 'var(--accent)', flexShrink: 0 }} aria-hidden />
-            <span style={{ flex: 1, minWidth: 240 }}>
-              <strong>RackOps {info.latest} is available.</strong>{' '}
-              <span className="dim">You are running v{info.current}.</span>{' '}
-              {info.releaseUrl && (
-                <a href={info.releaseUrl} target="_blank" rel="noreferrer">
-                  Release notes on GitHub <ExternalLink size={11} aria-hidden />
-                </a>
-              )}
-            </span>
-            <button className="btn primary" disabled={updating} onClick={update}>
-              {updating
-                ? <><Spinner size={13} /> Updating…</>
-                : <><ArrowUpCircle size={13} aria-hidden /> Update now</>}
-            </button>
-          </div>
+        <div className="notice accent">
+          <ArrowUpCircle size={16} style={{ color: 'var(--accent)', flexShrink: 0 }} aria-hidden />
+          <span style={{ flex: 1, minWidth: 240 }}>
+            <strong>RackOps {info.latest} is available.</strong>{' '}
+            <span className="dim">You are running v{info.current}.</span>{' '}
+            {info.releaseUrl && (
+              <a href={info.releaseUrl} target="_blank" rel="noreferrer">
+                Release notes on GitHub <ExternalLink size={11} aria-hidden />
+              </a>
+            )}
+          </span>
+          <button className="btn primary" disabled={updating} onClick={update}>
+            {updating
+              ? <><Spinner size={13} /> Updating…</>
+              : <><ArrowUpCircle size={13} aria-hidden /> Update now</>}
+          </button>
         </div>
       )}
 
@@ -182,7 +179,10 @@ export function ChangelogPage() {
           // sticky topbar.
           <article className="release-entry" key={release.version} id={anchorId(release.version)} style={{ scrollMarginTop: 64 }}>
             <div className="release-rail" aria-hidden><span className={index === liveIdx ? 'live' : ''} /></div>
-            <div className="card release-card">
+            {/* Releases sit on the canvas; the rail and whitespace carry the
+                structure, not a border. Padding keeps the rail dot on the
+                version line's center. */}
+            <div className="release-card" style={{ paddingTop: 12, paddingLeft: 8 }}>
               <div className="row wrap">
                 <GitBranch size={14} aria-hidden />
                 <strong className="mono">{release.version}</strong>

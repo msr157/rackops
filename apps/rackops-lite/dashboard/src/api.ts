@@ -55,6 +55,8 @@ export interface Overview {
 }
 export interface Alert { id: string; nodeId?: string; level: string; kind: string; message: string; createdAt: string; resolved: boolean }
 export interface EventItem { id: string; kind: string; message: string; createdAt: string }
+/** One prior exchange replayed to the Co-Pilot for multi-turn context. */
+export interface ChatTurn { role: 'user' | 'assistant'; content: string }
 export interface PlacementScore { nodeId: string; score: number; reasons: string[]; viable: boolean }
 export interface EnvDef { key: string; label: string; default: string; secret: boolean; required: boolean; generate?: boolean }
 export interface Template {
@@ -233,7 +235,8 @@ export const api = {
     req<{ ok: boolean; message: string }>('/api/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }) }),
   resetPassword: (token: string, password: string) =>
     req<{ token: string; user: User }>('/api/auth/reset-password', { method: 'POST', body: JSON.stringify({ token, password }) }),
-  assistant: (message: string) => req<{ answer: string; provider: string }>('/api/assistant', { method: 'POST', body: JSON.stringify({ message }) }),
+  assistant: (message: string, history?: ChatTurn[], page?: string) =>
+    req<{ answer: string; provider: string }>('/api/assistant', { method: 'POST', body: JSON.stringify({ message, history, page }) }),
   testAssistant: () => req<{ ok: boolean; provider: string; error?: string }>('/api/assistant/test', { method: 'POST' }),
   joinCommand: () => req<{ command: string; token: string }>('/api/join-command'),
   // Organizations

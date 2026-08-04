@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { Routes, Route, NavLink, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import {
-  LayoutGrid, Boxes, HardDrive, Network as NetworkIcon, Settings, LogOut, Rocket, Bot, Search,
-  UserRound, LifeBuoy, CloudOff, RotateCw, Server, ChevronsUpDown, Bell, Sparkles,
-  AlertTriangle, AlertCircle,
+  LayoutGrid, Boxes, HardDrive, Network as NetworkIcon, Settings, LogOut, Bot,
+  UserRound, LifeBuoy, CloudOff, RotateCw, Server, Bell, Sparkles,
+  AlertTriangle, AlertCircle, PanelLeft, CircleHelp, X,
 } from 'lucide-react';
 import { api, getToken, clearToken, getActiveOrg } from './api';
 import type { VersionInfo, User } from './api';
@@ -14,7 +14,7 @@ import { CopilotProvider, useCopilot } from './components/CopilotDrawer';
 import { CommandPalette } from './components/CommandPalette';
 import { AddMachineModal } from './components/AddMachineModal';
 import { OrgSwitcher } from './components/OrgSwitcher';
-import { Led, timeAgo } from './components/ui';
+import { Led, UsageBar, timeAgo } from './components/ui';
 import { AuthScreen } from './pages/Auth';
 import { InvitationPage } from './pages/Invitation';
 import { HomePage } from './pages/Home';
@@ -23,6 +23,7 @@ import { AppDetail } from './pages/AppDetail';
 import { DeployFlow } from './pages/DeployFlow';
 import { MachinesPage, MachineDetail } from './pages/Machines';
 import { NetworkPage } from './pages/Network';
+import { CopilotPage } from './pages/Copilot';
 import { SettingsPage } from './pages/SettingsPage';
 import { ProfilePage } from './pages/Profile';
 import { SupportPage } from './pages/Support';
@@ -86,12 +87,13 @@ function BootScreen() {
 }
 
 // ConnectionBanner is the difference between "you have nothing" and "we can't
-// see your rack right now". It stays until the poll gets an answer back.
+// see your rack right now". A full-width strip directly under the header;
+// it outranks everything and stays until the poll gets an answer back.
 function ConnectionBanner() {
   const { reachable, lastSync, refresh } = useData();
   if (reachable) return null;
   return (
-    <div className="offline-banner" role="alert">
+    <div className="offline-strip" role="alert">
       <CloudOff size={16} style={{ color: 'var(--crit)', flexShrink: 0 }} aria-hidden />
       <span style={{ flex: 1 }}>
         <strong>Can&rsquo;t reach the RackOps server</strong>
@@ -107,21 +109,40 @@ function ConnectionBanner() {
   );
 }
 
+// UpdateStrip: the one green band in the chrome. Dismissing it (per version,
+// per session) moves the signal into the sidebar fleet card.
+function UpdateStrip({ version, onDismiss }: { version: VersionInfo; onDismiss: () => void }) {
+  const latest = version.latest.replace(/^v/, '');
+  return (
+    <div className="update-strip">
+      <span className="strip-pill">NEW</span>
+      <span>RackOps v{latest} is available.</span>
+      <NavLink to="/changelog">See what&rsquo;s new</NavLink>
+      <button className="strip-close" onClick={onDismiss} aria-label="Dismiss update notice">
+        <X size={14} />
+      </button>
+    </div>
+  );
+}
+
+function stripKey(v: VersionInfo) { return `rackops-update-strip:${v.latest}`; }
+
 function Shell({ onLogout }: { onLogout: () => void }) {
   const { overview, services, nodes, alerts, loaded } = useData();
   const { setOpen: setCopilotOpen } = useCopilot();
-  const navigate = useNavigate();
   const { pathname } = useLocation();
   const [paletteOpen, setPaletteOpen] = useState(false);
-  // The topbar search box hands its first keystroke to the palette, so typing
-  // in the box and typing in the palette are the same gesture.
-  const [paletteSeed, setPaletteSeed] = useState('');
   const [addMachine, setAddMachine] = useState(false);
+  const [railHidden, setRailHidden] = useState(false);
   const [version, setVersion] = useState<VersionInfo | null>(null);
   const [me, setMe] = useState<User | null>(null);
+  const [stripDismissed, setStripDismissed] = useState(false);
 
   useEffect(() => {
-    api.versionCheck().then(setVersion).catch(() => {});
+    api.versionCheck().then((v) => {
+      setVersion(v);
+      try { setStripDismissed(!!v && sessionStorage.getItem(stripKey(v)) === '1'); } catch { /* private mode */ }
+    }).catch(() => {});
     api.me().then(setMe).catch(() => {});
   }, []);
 
@@ -130,7 +151,6 @@ function Shell({ onLogout }: { onLogout: () => void }) {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
-        setPaletteSeed('');
         setPaletteOpen((v) => !v);
       }
     };
@@ -138,13 +158,17 @@ function Shell({ onLogout }: { onLogout: () => void }) {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  // This audience is mostly on Linux, where advertising ⌘K is just wrong.
-  const shortcutHint = /Mac|iPhone|iPad/.test(navigator.userAgent) ? '⌘K' : 'Ctrl K';
-
   const failing = services.filter((s) => s.status === 'failed').length;
   const openAlerts = alerts.filter((a) => !a.resolved).length;
   const machinesOffline = nodes.filter((n) => n.status === 'offline').length;
   const attention = failing + openAlerts + machinesOffline;
+
+  const updateAvailable = !!version?.updateAvailable;
+  const showStrip = updateAvailable && !stripDismissed;
+  const dismissStrip = () => {
+    if (version) { try { sessionStorage.setItem(stripKey(version), '1'); } catch { /* private mode */ } }
+    setStripDismissed(true);
+  };
 
   // Only attention is badged: a number in the rail always means "needs your
   // attention", never an inventory total the page itself already shows.
@@ -154,6 +178,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
     { to: '/apps', label: 'Apps', icon: <Boxes size={16} /> },
     { to: '/machines', label: 'Machines', icon: <HardDrive size={16} /> },
     { to: '/network', label: 'Network', icon: <NetworkIcon size={16} /> },
+    { to: '/copilot', label: 'Copilot', icon: <Bot size={16} /> },
   ];
   const navWorkspace: NavItem[] = [
     { to: '/settings', label: 'Settings', icon: <Settings size={16} /> },
@@ -170,82 +195,80 @@ function Shell({ onLogout }: { onLogout: () => void }) {
     </NavLink>
   ));
 
+  const memPct = overview && overview.totalMemMb > 0
+    ? (overview.usedMemMb / overview.totalMemMb) * 100 : 0;
+
   return (
     <>
-      <aside className="sidebar">
-        {/* Two sibling links, never nested: the wordmark goes home, the
-            version goes to the changelog. */}
-        <div className="brand">
-          <div className="brand-mark" aria-hidden><Server size={15} /></div>
-          <div className="brand-col">
-            <NavLink to="/" className="brand-name">RackOps</NavLink>
-            <NavLink to="/changelog" className="brand-ver" title="What's new">
-              LITE{version ? ` · v${version.current}` : ''}
-            </NavLink>
-            {/* The quiet update signal. The changelog page hosts the action. */}
-            {version?.updateAvailable && (
-              <NavLink to="/changelog" className="update-chip">
-                v{version.latest.replace(/^v/, '')} available
-              </NavLink>
-            )}
-          </div>
-        </div>
+      {showStrip && version && <UpdateStrip version={version} onDismiss={dismissStrip} />}
 
-        <OrgSwitcher me={me} />
-
-        {/* aria-label carries the name at narrow widths, where the visible
-            label is hidden and the item would otherwise be an unnamed icon. */}
-        <div className="nav-section">Operate</div>
-        {renderNav(navOperate)}
-        <div className="nav-section">Workspace</div>
-        {renderNav(navWorkspace)}
-
-        <div className="sidebar-footer">
-          {/* Before anything has loaded there is no count to report — "0/0"
-              would be an assertion the dashboard cannot yet make. */}
-          <div className="sidebar-fleet">
-            <Led status={!loaded ? 'pending'
-              : overview && overview.nodesOnline === overview.nodesTotal && overview.nodesTotal > 0 ? 'running'
-              : overview?.nodesOnline ? 'building' : 'stopped'} />
-            <span className="nav-label">
-              {loaded && overview ? `${overview.nodesOnline}/${overview.nodesTotal} machines online` : 'checking machines…'}
-            </span>
-          </div>
+      <header className="topnav">
+        <NavLink to="/" className="topnav-brand" aria-label="RackOps home">
+          <span className="brand-mark" aria-hidden><Server size={15} /></span>
+          <span className="brand-name">RackOps</span>
+          <span className="lite-tag">LITE</span>
+        </NavLink>
+        <button className="icon-sq quiet" onClick={() => setRailHidden((v) => !v)}
+          aria-label={railHidden ? 'Show sidebar' : 'Hide sidebar'}
+          title={railHidden ? 'Show sidebar' : 'Hide sidebar'}
+          aria-pressed={railHidden}>
+          <PanelLeft size={15} />
+        </button>
+        <div className="topnav-right">
+          <NavLink to="/support" className="icon-sq quiet" aria-label="Support" title="Support">
+            <CircleHelp size={16} />
+          </NavLink>
+          <NotificationBell />
           <AccountMenu me={me} onLogout={onLogout} />
         </div>
-      </aside>
+      </header>
 
-      <div className="shell-right">
-        <header className="topbar">
-          {/* A real input, but the palette is the engine: a click or the
-              first keystroke opens it, seeded with what was typed. (Click,
-              not focus — the palette restores focus here on close, and a
-              focus trigger would reopen it in a loop.) */}
-          <div className="gsearch">
-            <Search size={14} aria-hidden />
-            <input value="" placeholder="Search apps, machines, actions…" aria-label="Search"
-              onClick={() => { setPaletteSeed(''); setPaletteOpen(true); }}
-              onChange={(e) => { setPaletteSeed(e.target.value); setPaletteOpen(true); }}
-              onKeyDown={(e) => { if (e.key === 'Enter') { setPaletteSeed(''); setPaletteOpen(true); } }} />
-            <kbd>{shortcutHint}</kbd>
-          </div>
-          <div style={{ marginLeft: 'auto' }} className="row">
-            <NotificationBell />
-            <button className="btn ghost" onClick={() => setCopilotOpen(true)}>
-              <Bot size={14} /> Copilot
-            </button>
-            {/* Hidden while the wizard is open: the most prominent button on
-                screen must never be one that visibly does nothing. */}
-            {!pathname.startsWith('/apps/new') && (
-              <button className="btn primary" onClick={() => navigate('/apps/new')}>
-                <Rocket size={14} /> Deploy app
-              </button>
-            )}
-          </div>
-        </header>
+      <ConnectionBanner />
+
+      <div className="app-body">
+        {!railHidden && (
+          <aside className="sidebar">
+            <OrgSwitcher me={me} />
+
+            {/* aria-label carries the name at narrow widths, where the visible
+                label is hidden and the item would otherwise be an unnamed icon. */}
+            <div className="nav-section">Operate</div>
+            {renderNav(navOperate)}
+            <div className="nav-section">Workspace</div>
+            {renderNav(navWorkspace)}
+
+            <div className="sidebar-footer">
+              {/* Before anything has loaded there is no count to report — "0/0"
+                  would be an assertion the dashboard cannot yet make. */}
+              <div className="fleet-card">
+                <div className="fleet-line">
+                  <Led status={!loaded ? 'pending'
+                    : overview && overview.nodesOnline === overview.nodesTotal && overview.nodesTotal > 0 ? 'running'
+                    : overview?.nodesOnline ? 'building' : 'stopped'} />
+                  <span>
+                    {loaded && overview ? `${overview.nodesOnline}/${overview.nodesTotal} machines online` : 'checking machines…'}
+                  </span>
+                </div>
+                {loaded && overview && overview.totalMemMb > 0 && (
+                  <div>
+                    <span className="faint">
+                      {(overview.usedMemMb / 1024).toFixed(0)}/{(overview.totalMemMb / 1024).toFixed(0)} GB memory in use
+                    </span>
+                    <UsageBar pct={memPct} />
+                  </div>
+                )}
+                <span className="fleet-ver">{version ? `v${version.current}` : ''}</span>
+                {updateAvailable && stripDismissed && (
+                  <NavLink to="/changelog" className="btn sm primary" style={{ justifyContent: 'center' }}>
+                    Update available
+                  </NavLink>
+                )}
+              </div>
+            </div>
+          </aside>
+        )}
 
         <main className="main">
-          <ConnectionBanner />
           <Routes>
             <Route path="/" element={<HomePage onAddMachine={() => setAddMachine(true)} />} />
             <Route path="/apps" element={<AppsPage />} />
@@ -255,6 +278,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
             <Route path="/machines" element={<MachinesPage onAddMachine={() => setAddMachine(true)} />} />
             <Route path="/machines/:id" element={<MachineDetail />} />
             <Route path="/network" element={<NetworkPage />} />
+            <Route path="/copilot" element={<CopilotPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/profile" element={<ProfilePage />} />
             <Route path="/support" element={<SupportPage />} />
@@ -264,8 +288,9 @@ function Shell({ onLogout }: { onLogout: () => void }) {
         </main>
       </div>
 
-      <CommandPalette open={paletteOpen} seed={paletteSeed} onClose={() => setPaletteOpen(false)}
-        onAddMachine={() => setAddMachine(true)} onCopilot={() => setCopilotOpen(true)} />
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)}
+        onAddMachine={() => setAddMachine(true)}
+        onCopilot={() => { if (pathname !== '/copilot') setCopilotOpen(true); }} />
       {addMachine && <AddMachineModal onClose={() => setAddMachine(false)} />}
     </>
   );
@@ -352,9 +377,8 @@ function NotificationBell() {
   );
 }
 
-// AccountMenu: one row at the very bottom of the sidebar opening an upward
-// menu. Log out lives inside it, so ending the session is a deliberate
-// two-step, never a misclick under Settings.
+// AccountMenu: the avatar at the header's right edge. Log out lives inside
+// the menu, so ending the session is a deliberate two-step, never a misclick.
 function AccountMenu({ me, onLogout }: { me: User | null; onLogout: () => void }) {
   const [open, setOpen] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
@@ -381,17 +405,16 @@ function AccountMenu({ me, onLogout }: { me: User | null; onLogout: () => void }
 
   return (
     <div className="account" ref={boxRef}>
-      <button ref={triggerRef} className="account-trigger" onClick={() => setOpen((v) => !v)}
-        aria-haspopup="menu" aria-expanded={open} aria-label={`Account: ${name}`}>
-        <span className="avatar" aria-hidden>{initial}</span>
-        <span className="nav-label account-names">
-          <span className="account-name">{name}</span>
-          {!!me?.fullName && !!me?.email && <span className="faint">{me.email}</span>}
-        </span>
-        <ChevronsUpDown size={13} aria-hidden />
+      <button ref={triggerRef} className="avatar-btn" onClick={() => setOpen((v) => !v)}
+        aria-haspopup="menu" aria-expanded={open} aria-label={`Account: ${name}`} title={name}>
+        {initial}
       </button>
       {open && (
-        <div className="org-menu up" role="menu">
+        <div className="org-menu right" role="menu">
+          <div className="org-menu-label">
+            {name}
+            {!!me?.fullName && !!me?.email && <span style={{ display: 'block' }} className="faint">{me.email}</span>}
+          </div>
           <NavLink to="/profile" role="menuitem" className="org-item" onClick={() => setOpen(false)}>
             <UserRound size={14} /> Profile
           </NavLink>

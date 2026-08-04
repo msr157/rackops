@@ -13,12 +13,29 @@ import (
 	"github.com/rackops/rackops/internal/types"
 )
 
+// chatTurn is one prior exchange in a conversation, oldest first.
+type chatTurn struct {
+	Role    string `json:"role"` // user | assistant
+	Content string `json:"content"`
+}
+
+// maxHistoryTurns bounds how much conversation is replayed to a provider so a
+// long-running chat page can't grow requests without limit.
+const maxHistoryTurns = 20
+
 // handleAssistant answers operator questions grounded in live fleet state.
 // Providers: anthropic | gemini | openai (incl. Ollama-compatible) — or the
-// built-in rule engine when no key is configured.
+// built-in rule engine when no key is configured. Multi-turn: the client may
+// send prior turns in `history`; single-message callers (CLI `rackops ask`)
+// simply omit it.
 func (a *API) handleAssistant(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Message string `json:"message"`
+		Message string     `json:"message"`
+		History []chatTurn `json:"history"`
+		// Page is a short client-provided description of what the operator is
+		// currently looking at ("the app "media" — logs tab, status failed"),
+		// so answers can address the screen in front of them.
+		Page string `json:"page"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Message) == "" {
 		http.Error(w, "message required", http.StatusBadRequest)
@@ -31,34 +48,27 @@ func (a *API) handleAssistant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s := a.Store.SettingsFor(org.ID)
-
-	provider := s.AIProvider
-	if provider == "" || provider == "auto" {
-		switch {
-		case s.AnthropicKey != "":
-			provider = "anthropic"
-		case s.GeminiKey != "":
-			provider = "gemini"
-		case s.OpenAIKey != "" || s.OpenAIBase != "":
-			provider = "openai"
-		default:
-			provider = "builtin"
-		}
-	}
+	provider := resolveAIProvider(s)
 
 	system := "You are the RackOps AI Co-Pilot, an infrastructure operations assistant. " +
 		"You have the live fleet state below. Answer concisely and concretely; use numbers from the data. " +
 		"When asked where to run a workload, reason from CPU/memory/thermal headroom.\n\nFLEET STATE:\n" + ctxJSON
+	if page := clampString(strings.TrimSpace(req.Page), 600); page != "" {
+		system += "\n\nThe operator is currently viewing " + page +
+			". When the question is about \"this\" page/app/machine, that is what they mean."
+	}
+
+	turns := append(sanitizeHistory(req.History), chatTurn{Role: "user", Content: req.Message})
 
 	var answer string
 	var err error
 	switch provider {
 	case "anthropic":
-		answer, err = askAnthropic(s.AnthropicKey, s.AnthropicModel, system, req.Message)
+		answer, err = askAnthropic(s.AnthropicKey, s.AnthropicModel, system, turns)
 	case "gemini":
-		answer, err = askGemini(s.GeminiKey, s.GeminiModel, system, req.Message)
+		answer, err = askGemini(s.GeminiKey, s.GeminiModel, system, turns)
 	case "openai":
-		answer, err = askOpenAI(s.OpenAIKey, s.OpenAIBase, s.OpenAIModel, system, req.Message)
+		answer, err = askOpenAI(s.OpenAIKey, s.OpenAIBase, s.OpenAIModel, system, turns)
 	default:
 		answer = a.builtinAssistant(req.Message)
 	}
@@ -71,6 +81,46 @@ func (a *API) handleAssistant(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]string{"answer": answer, "provider": provider})
 }
 
+// resolveAIProvider picks the effective provider: an explicit setting wins,
+// otherwise the first configured key, otherwise the built-in rule engine.
+func resolveAIProvider(s Settings) string {
+	if p := s.AIProvider; p != "" && p != "auto" {
+		return p
+	}
+	switch {
+	case s.AnthropicKey != "":
+		return "anthropic"
+	case s.GeminiKey != "":
+		return "gemini"
+	case s.OpenAIKey != "" || s.OpenAIBase != "":
+		return "openai"
+	default:
+		return "builtin"
+	}
+}
+
+// sanitizeHistory keeps only well-formed turns and caps replayed length.
+func sanitizeHistory(h []chatTurn) []chatTurn {
+	out := make([]chatTurn, 0, len(h))
+	for _, t := range h {
+		if (t.Role == "user" || t.Role == "assistant") && strings.TrimSpace(t.Content) != "" {
+			t.Content = clampString(t.Content, 8000)
+			out = append(out, t)
+		}
+	}
+	if len(out) > maxHistoryTurns {
+		out = out[len(out)-maxHistoryTurns:]
+	}
+	return out
+}
+
+func clampString(s string, max int) string {
+	if len(s) > max {
+		return s[:max]
+	}
+	return s
+}
+
 // handleAssistantTest sends a trivial prompt through the configured provider
 // so users can validate keys from Settings without a chat round-trip.
 func (a *API) handleAssistantTest(w http.ResponseWriter, r *http.Request) {
@@ -79,27 +129,16 @@ func (a *API) handleAssistantTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s := a.Store.SettingsFor(org.ID)
-	provider := s.AIProvider
-	if provider == "" || provider == "auto" {
-		switch {
-		case s.AnthropicKey != "":
-			provider = "anthropic"
-		case s.GeminiKey != "":
-			provider = "gemini"
-		case s.OpenAIKey != "" || s.OpenAIBase != "":
-			provider = "openai"
-		default:
-			provider = "builtin"
-		}
-	}
+	provider := resolveAIProvider(s)
+	ping := []chatTurn{{Role: "user", Content: "Reply with the single word: OK"}}
 	var err error
 	switch provider {
 	case "anthropic":
-		_, err = askAnthropic(s.AnthropicKey, s.AnthropicModel, "You are a health check.", "Reply with the single word: OK")
+		_, err = askAnthropic(s.AnthropicKey, s.AnthropicModel, "You are a health check.", ping)
 	case "gemini":
-		_, err = askGemini(s.GeminiKey, s.GeminiModel, "You are a health check.", "Reply with the single word: OK")
+		_, err = askGemini(s.GeminiKey, s.GeminiModel, "You are a health check.", ping)
 	case "openai":
-		_, err = askOpenAI(s.OpenAIKey, s.OpenAIBase, s.OpenAIModel, "You are a health check.", "Reply with the single word: OK")
+		_, err = askOpenAI(s.OpenAIKey, s.OpenAIBase, s.OpenAIModel, "You are a health check.", ping)
 	default:
 		writeJSON(w, map[string]any{"ok": true, "provider": "builtin", "note": "rule engine active — no key needed"})
 		return
@@ -266,13 +305,17 @@ func (a *API) builtinAssistant(msg string) string {
 
 // ---- Providers ----
 
-func askAnthropic(key, model, system, msg string) (string, error) {
+func askAnthropic(key, model, system string, turns []chatTurn) (string, error) {
 	if model == "" {
 		model = "claude-opus-4-8"
 	}
+	msgs := make([]map[string]string, 0, len(turns))
+	for _, t := range turns {
+		msgs = append(msgs, map[string]string{"role": t.Role, "content": t.Content})
+	}
 	body, _ := json.Marshal(map[string]any{
 		"model": model, "max_tokens": 1024, "system": system,
-		"messages": []map[string]string{{"role": "user", "content": msg}},
+		"messages": msgs,
 	})
 	req, _ := http.NewRequest("POST", "https://api.anthropic.com/v1/messages", bytes.NewReader(body))
 	req.Header.Set("x-api-key", key)
@@ -292,13 +335,23 @@ func askAnthropic(key, model, system, msg string) (string, error) {
 	return out.Content[0].Text, nil
 }
 
-func askGemini(key, model, system, msg string) (string, error) {
+func askGemini(key, model, system string, turns []chatTurn) (string, error) {
 	if model == "" {
 		model = "gemini-3.5-flash"
 	}
+	contents := make([]map[string]any, 0, len(turns))
+	for _, t := range turns {
+		role := "user"
+		if t.Role == "assistant" {
+			role = "model"
+		}
+		contents = append(contents, map[string]any{
+			"role": role, "parts": []map[string]string{{"text": t.Content}},
+		})
+	}
 	body, _ := json.Marshal(map[string]any{
 		"system_instruction": map[string]any{"parts": []map[string]string{{"text": system}}},
-		"contents":           []map[string]any{{"parts": []map[string]string{{"text": msg}}}},
+		"contents":           contents,
 	})
 	u := "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent?key=" + key
 	req, _ := http.NewRequest("POST", u, bytes.NewReader(body))
@@ -321,19 +374,21 @@ func askGemini(key, model, system, msg string) (string, error) {
 	return out.Candidates[0].Content.Parts[0].Text, nil
 }
 
-func askOpenAI(key, base, model, system, msg string) (string, error) {
+func askOpenAI(key, base, model, system string, turns []chatTurn) (string, error) {
 	if base == "" {
 		base = "https://api.openai.com/v1"
 	}
 	if model == "" {
 		model = "gpt-5.5"
 	}
+	msgs := make([]map[string]string, 0, len(turns)+1)
+	msgs = append(msgs, map[string]string{"role": "system", "content": system})
+	for _, t := range turns {
+		msgs = append(msgs, map[string]string{"role": t.Role, "content": t.Content})
+	}
 	body, _ := json.Marshal(map[string]any{
-		"model": model,
-		"messages": []map[string]string{
-			{"role": "system", "content": system},
-			{"role": "user", "content": msg},
-		},
+		"model":    model,
+		"messages": msgs,
 	})
 	req, _ := http.NewRequest("POST", strings.TrimSuffix(base, "/")+"/chat/completions", bytes.NewReader(body))
 	if key != "" {

@@ -1,16 +1,35 @@
 import { useCallback, useEffect, useId, useState } from 'react';
 import {
-  AlertTriangle, Building2, Check, Copy, Link2, Pencil, Plus, RefreshCw, Shield, Trash2,
-  UserPlus, UsersRound, X,
+  AlertTriangle, Building2, CalendarDays, Check, Copy, Pencil, Plus, RefreshCw, Shield, Trash2,
+  UserPlus, UsersRound,
 } from 'lucide-react';
 import { api, getActiveOrg, setActiveOrg } from '../api';
 import type { Invitation, Organization, OrgMember, OrgPermissions, Project, User } from '../api';
 import { useToast, cleanError } from './toast';
 import { useConfirm } from './confirm';
-import { EmptyState, Field, InfoTip, Modal, SkeletonRows, Spinner, timeAgo } from './ui';
+import type { RowMenuItem } from './ui';
+import { EmptyState, Field, InfoTip, Modal, Pill, RowMenu, SkeletonRows, Spinner, timeAgo } from './ui';
 
-// OrgPanel: the Settings → Organization tab. Rename/delete the active org,
-// manage members (role + granular permissions), and mint invitation links.
+// The identity mark on member/invitation rows: a neutral initial disc.
+// Inline-styled because the design system has no non-interactive avatar class
+// (`.avatar-btn` is the header trigger, with hover affordances a static mark
+// must not borrow) and this surface may not add CSS.
+const initialDisc: React.CSSProperties = {
+  width: 28, height: 28, borderRadius: '50%', flex: 'none',
+  background: 'var(--bg-2)', border: '1px solid var(--border-hi)',
+  display: 'grid', placeItems: 'center',
+  fontSize: 11, fontWeight: 600, color: 'var(--dim)',
+};
+
+function Initial({ name }: { name: string }) {
+  return <span style={initialDisc} aria-hidden>{(name.trim().charAt(0) || '?').toUpperCase()}</span>;
+}
+
+const clip: React.CSSProperties = { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
+
+// OrgPanel: the Settings → Organization tab. Manage members (role + granular
+// permissions) and invitation links, rename the active org, and — last, on its
+// own — delete it. Plain sections on the canvas, in the register of Profile.
 export function OrgPanel() {
   const toast = useToast();
   const confirm = useConfirm();
@@ -187,148 +206,171 @@ export function OrgPanel() {
   };
 
   return (
-    <div className="stack">
+    <>
       {/* Members lead: they are the day-to-day work of this tab. Identity
-          follows; deletion lives alone in the danger zone at the bottom. */}
-      <div className="card">
-        <div className="row spread" style={{ marginBottom: 4 }}>
-          <div className="eyebrow" style={{ margin: 0 }}>
-            <UsersRound size={12} aria-hidden /> Members
-            <InfoTip wide>
-              Owners hold the organization; admins manage members and settings; members act
-              within the permissions you grant them below, including which projects they can see.
-            </InfoTip>
-          </div>
+          follows; deletion lives alone at the bottom, past extra whitespace. */}
+      <section>
+        <div className="section-title" style={{ marginTop: 4 }}>
+          Members
+          <InfoTip wide>
+            Owners hold the organization; admins manage members and settings; members act
+            within the permissions you grant them, including which projects they can see.
+          </InfoTip>
           {canManage && (
-            <button className="btn sm primary" onClick={() => setInviting(true)}>
+            <button className="btn sm primary" style={{ marginLeft: 'auto' }} onClick={() => setInviting(true)}>
               <UserPlus size={12} aria-hidden /> Invite
             </button>
           )}
+        </div>
+        <div className="dim" style={{ marginBottom: 4 }}>
+          Everyone with access to this organization and the role each one holds.
         </div>
 
         <div className="list">
           {org.members.map((m) => {
             const rowBusy = busyMember?.id === m.userId;
+            const label = userLabel(m.userId);
+            const email = userEmail(m.userId);
+            const actions: RowMenuItem[] = [];
+            if (canManage && m.role === 'member') {
+              actions.push({
+                label: 'Edit permissions', icon: <Shield size={13} aria-hidden />,
+                disabled: rowBusy, onSelect: () => setEditing(m),
+              });
+            }
+            if (canManage && me?.id !== m.userId) {
+              actions.push({
+                label: 'Remove from organization', icon: <Trash2 size={13} aria-hidden />,
+                danger: true, disabled: rowBusy, onSelect: () => removeMember(m),
+              });
+            }
             return (
-              <div key={m.userId} className="list-row row spread wrap">
-                <div className="row" style={{ minWidth: 0 }}>
-                  <strong>{userLabel(m.userId)}</strong>
-                  {me?.id === m.userId && <span className="tag">you</span>}
-                  {userEmail(m.userId) && <span className="faint">{userEmail(m.userId)}</span>}
+              <div key={m.userId} className="list-row">
+                <Initial name={label} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="row" style={{ gap: 8, minWidth: 0 }}>
+                    <strong style={clip}>{label}</strong>
+                    {me?.id === m.userId && <span className="tag">you</span>}
+                  </div>
+                  {email && email !== label && <div className="dim" style={clip}>{email}</div>}
                 </div>
-                <div className="row">
-                  {canManage && me?.id !== m.userId ? (
-                    <>
-                      {rowBusy && busyMember?.op === 'role' && <Spinner size={12} />}
-                      <select className="input" style={{ width: 110, padding: '5px 8px' }} value={m.role}
-                        disabled={rowBusy}
-                        aria-label={`Role for ${userLabel(m.userId)}`}
-                        onChange={(e) => {
-                          // A controlled select doesn't repaint when the app
-                          // skips the re-render (confirm cancelled, request
-                          // failed) — snap the DOM value back ourselves.
-                          const el = e.currentTarget;
-                          setRoleFor(m, e.target.value).then((applied) => {
-                            if (!applied) el.value = m.role;
-                          });
-                        }}>
-                        <option value="owner">owner</option>
-                        <option value="admin">admin</option>
-                        <option value="member">member</option>
-                      </select>
-                    </>
-                  ) : (
-                    <span className="badge neutral">{m.role}</span>
-                  )}
-                  {canManage && m.role === 'member' && (
-                    <button className="btn sm" disabled={rowBusy}
-                      aria-label={`Edit permissions for ${userLabel(m.userId)}`} onClick={() => setEditing(m)}>
-                      <Shield size={12} aria-hidden /> Permissions
-                    </button>
-                  )}
-                  {canManage && me?.id !== m.userId && (
-                    <button className="btn sm danger" disabled={rowBusy}
-                      aria-label={`Remove ${userLabel(m.userId)}`} title="Remove member"
-                      onClick={() => removeMember(m)}>
-                      {rowBusy && busyMember?.op === 'remove' ? <Spinner size={12} /> : <Trash2 size={12} />}
-                    </button>
-                  )}
-                </div>
+                {canManage && me?.id !== m.userId ? (
+                  <>
+                    {rowBusy && busyMember?.op === 'role' && <Spinner size={12} />}
+                    <select className="input" style={{ width: 110, padding: '5px 8px' }} value={m.role}
+                      disabled={rowBusy}
+                      aria-label={`Role for ${label}`}
+                      onChange={(e) => {
+                        // A controlled select doesn't repaint when the app
+                        // skips the re-render (confirm cancelled, request
+                        // failed) — snap the DOM value back ourselves.
+                        const el = e.currentTarget;
+                        setRoleFor(m, e.target.value).then((applied) => {
+                          if (!applied) el.value = m.role;
+                        });
+                      }}>
+                      <option value="owner">owner</option>
+                      <option value="admin">admin</option>
+                      <option value="member">member</option>
+                    </select>
+                  </>
+                ) : (
+                  <Pill status={m.role} />
+                )}
+                {actions.length > 0 && (
+                  rowBusy && busyMember?.op === 'remove'
+                    ? <Spinner size={14} />
+                    : <RowMenu label={`Actions for ${label}`} items={actions} />
+                )}
               </div>
             );
           })}
         </div>
-      </div>
+      </section>
 
       {/* Pending invitations */}
       {canManage && invites.length > 0 && (
-        <div className="card">
-          <div className="eyebrow" style={{ marginBottom: 4 }}><Link2 size={12} aria-hidden /> Pending invitations</div>
+        <section>
+          <div className="section-title">Pending invitations</div>
+          <div className="dim" style={{ marginBottom: 4 }}>
+            Links are shown once at creation. Revoke and re-invite if one was lost.
+          </div>
           <div className="list">
             {invites.map((inv) => (
-              <div key={inv.id} className="list-row row spread wrap">
-                <div className="row" style={{ minWidth: 0 }}>
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{inv.email}</span>
-                  <span className="tag">{inv.role}</span>
-                  <span className="faint" title={new Date(inv.expiresAt).toLocaleString()}>
-                    {expiresIn(inv.expiresAt)}
-                  </span>
+              <div key={inv.id} className="list-row">
+                <Initial name={inv.email} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={clip}><strong>{inv.email}</strong></div>
+                  <div className="dim" style={clip}>
+                    {inv.role} · <span title={new Date(inv.expiresAt).toLocaleString()}>{expiresIn(inv.expiresAt)}</span>
+                  </div>
                 </div>
-                <button className="btn sm danger" disabled={revoking === inv.id}
+                <button className="icon-sq" disabled={revoking === inv.id}
                   aria-label={`Revoke invitation for ${inv.email}`} title="Revoke invitation"
                   onClick={() => dropInvite(inv)}>
-                  {revoking === inv.id ? <Spinner size={12} /> : <Trash2 size={12} />}
+                  {revoking === inv.id ? <Spinner size={13} /> : <Trash2 size={14} />}
                 </button>
               </div>
             ))}
           </div>
-          <div className="faint" style={{ marginTop: 8 }}>
-            Links are shown once at creation. Revoke and re-invite if one was lost.
-          </div>
-        </div>
+        </section>
       )}
 
-      {/* Identity */}
-      <div className="card">
-        <div className="eyebrow" style={{ marginBottom: 12 }}><Building2 size={12} aria-hidden /> Organization</div>
-        {renaming ? (
-          <div className="row" style={{ flex: 1 }}>
-            <label className="sr-only" htmlFor={renameId}>Organization name</label>
-            <input className="input" id={renameId} style={{ maxWidth: 280 }} value={name} autoFocus
-              disabled={renameBusy}
-              onChange={(e) => setName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') rename();
-                if (e.key === 'Escape') { setRenaming(false); setName(org.name); }
-              }} />
-            <button className="btn sm primary" onClick={rename} disabled={renameBusy}
-              aria-label="Save name" title="Save name">
-              {renameBusy ? <Spinner size={12} /> : <Check size={12} />}
-            </button>
-            <button className="btn sm ghost" aria-label="Cancel rename" title="Cancel rename" disabled={renameBusy}
-              onClick={() => { setRenaming(false); setName(org.name); }}><X size={12} /></button>
-          </div>
-        ) : (
-          <div className="row" style={{ minWidth: 0 }}>
-            <strong style={{ fontSize: 15, fontWeight: 650, letterSpacing: '-0.01em' }}>{org.name}</strong>
-            <span className="faint">created {timeAgo(org.createdAt)}</span>
-            {canManage && (
-              <button className="btn sm ghost" aria-label="Rename organization" title="Rename organization"
-                onClick={() => setRenaming(true)}>
-                <Pencil size={12} />
-              </button>
+      {/* Identity: org facts as kv stripes, with the rename living inline
+          on the Name row behind the pencil. */}
+      <section>
+        <div className="section-title">Organization</div>
+        <div className="kv-rows">
+          <div className="kv-row">
+            <span className="kv-label"><Building2 size={13} aria-hidden /> Name</span>
+            {renaming ? (
+              <>
+                <label className="sr-only" htmlFor={renameId}>Organization name</label>
+                <input className="input" id={renameId} style={{ maxWidth: 280, marginLeft: 'auto' }}
+                  value={name} autoFocus disabled={renameBusy}
+                  onChange={(e) => setName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') rename();
+                    if (e.key === 'Escape') { setRenaming(false); setName(org.name); }
+                  }} />
+                <button className="btn sm primary" onClick={rename} disabled={renameBusy}>
+                  {renameBusy ? <Spinner size={12} /> : <Check size={12} aria-hidden />} Save
+                </button>
+                <button className="btn sm ghost" disabled={renameBusy}
+                  onClick={() => { setRenaming(false); setName(org.name); }}>
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <>
+                <span className="kv-val">{org.name}</span>
+                {canManage && (
+                  <button className="icon-sq sm quiet" aria-label="Rename organization" title="Rename organization"
+                    onClick={() => setRenaming(true)}>
+                    <Pencil size={12} />
+                  </button>
+                )}
+              </>
             )}
           </div>
-        )}
-      </div>
-
-      {/* Danger zone: the one irreversible action on this tab, kept away from
-          the routine controls above. */}
-      {canManage && (
-        <div className="card crit">
-          <div className="eyebrow" style={{ marginBottom: 8, color: 'var(--crit)' }}>
-            <AlertTriangle size={12} aria-hidden /> Danger zone
+          <div className="kv-row">
+            <span className="kv-label"><UsersRound size={13} aria-hidden /> Members</span>
+            <span className="kv-val">{org.members.length}</span>
           </div>
+          <div className="kv-row">
+            <span className="kv-label"><CalendarDays size={13} aria-hidden /> Created</span>
+            <span className="kv-val" title={new Date(org.createdAt).toLocaleString()}>
+              {timeAgo(org.createdAt)}
+            </span>
+          </div>
+        </div>
+      </section>
+
+      {/* The one irreversible action on this tab, kept last and apart from
+          the routine controls by whitespace alone. */}
+      {canManage && (
+        <section>
+          <div className="section-title" style={{ marginTop: 44 }}>Danger zone</div>
           <div className="row spread wrap">
             <span className="dim" style={{ flex: 1, minWidth: 220 }}>
               Deleting is only possible while the organization has no projects, machines, or
@@ -338,7 +380,7 @@ export function OrgPanel() {
               {deleting ? <Spinner size={13} /> : <Trash2 size={13} aria-hidden />} Delete organization
             </button>
           </div>
-        </div>
+        </section>
       )}
 
       {editing && (
@@ -350,7 +392,7 @@ export function OrgPanel() {
       {inviting && (
         <InviteModal org={org} onClose={() => setInviting(false)} onDone={() => { setInviting(false); load(); }} />
       )}
-    </div>
+    </>
   );
 }
 
@@ -413,7 +455,7 @@ function PermissionsModal({ org, member, projects, label, onClose, onSaved }: {
         ))}
       </div>
 
-      <div className="eyebrow" style={{ marginBottom: 8 }}>
+      <div className="section-title" style={{ margin: '0 0 8px' }}>
         Project access
         <InfoTip wide>
           All projects covers projects created later, too. Only selected projects limits this
@@ -523,14 +565,15 @@ function InviteModal({ org, onClose, onDone }: { org: Organization; onClose: () 
         </>
       ) : (
         <>
-          <div className="badge warn" style={{ width: '100%', marginBottom: 12 }}>
-            Copy this link now. It&rsquo;s shown only once.
+          <div className="notice warn" style={{ marginBottom: 12 }}>
+            <AlertTriangle size={14} aria-hidden />
+            <span>Copy this link now. It&rsquo;s shown only once.</span>
           </div>
           <div className="row" style={{ gap: 8, marginBottom: 14 }}>
             <code className="code-block" style={{ flex: 1, wordBreak: 'break-all' }}>{link}</code>
-            <button className="btn sm" onClick={copy}
+            <button className="icon-sq" onClick={copy}
               aria-label="Copy invitation link" title="Copy invitation link">
-              {copied ? <Check size={12} style={{ color: 'var(--ok)' }} /> : <Copy size={12} />}
+              {copied ? <Check size={14} style={{ color: 'var(--ok)' }} /> : <Copy size={14} />}
             </button>
           </div>
           <button className="btn primary" style={{ width: '100%' }} onClick={onDone}>Done</button>
