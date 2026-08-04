@@ -33,6 +33,10 @@ type Store struct {
 	Invitations map[string]*types.Invitation    `json:"invitations"`
 	Tickets     map[string]*types.SupportTicket `json:"tickets"`
 	Ingress     types.IngressConfig             `json:"ingress"`
+	// EarlyAccess holds enterprise early-access requests submitted from the
+	// public marketing site, keyed by lowercased email so a re-submission is
+	// a conflict rather than a duplicate entry.
+	EarlyAccess map[string]*types.EarlyAccessLead `json:"earlyAccess,omitempty"`
 	// Settings is the pre-org legacy blob; EnsureDefaultOrg moves it into
 	// OrgSettings under the default org. Kept only so old state files load.
 	Settings Settings `json:"settings"`
@@ -110,6 +114,7 @@ func NewStore(dataDir string) (*Store, error) {
 		Orgs:        map[string]*types.Organization{},
 		Invitations: map[string]*types.Invitation{},
 		Tickets:     map[string]*types.SupportTicket{},
+		EarlyAccess: map[string]*types.EarlyAccessLead{},
 		TaskQueue:   map[string][]types.AgentTask{},
 		dataDir:     dataDir,
 	}
@@ -124,6 +129,11 @@ func NewStore(dataDir string) (*Store, error) {
 	}
 	if s.TaskQueue == nil {
 		s.TaskQueue = map[string][]types.AgentTask{}
+	}
+	// State files written before early-access capture existed unmarshal this
+	// as nil; writing to a nil map panics.
+	if s.EarlyAccess == nil {
+		s.EarlyAccess = map[string]*types.EarlyAccessLead{}
 	}
 	// Generate the session-signing secret once, then persist + replicate it.
 	if len(s.JWTSecret) < 32 {

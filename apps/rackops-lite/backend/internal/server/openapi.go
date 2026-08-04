@@ -78,6 +78,10 @@ func (a *API) apiRoutes() []route {
 		{"POST", "/api/services/{id}/quick-tunnel", "network", "Start a Cloudflare quick tunnel (testing)", a.handleStartQuickTunnel, false},
 		{"DELETE", "/api/services/{id}/quick-tunnel", "network", "Stop the quick tunnel", a.handleStopQuickTunnel, false},
 
+		// Public website
+		{"POST", "/api/v1/early-access", "website", "Record an enterprise early-access request from rackops.in (public, CORS-scoped)", a.handleEarlyAccess, true},
+		{"OPTIONS", "/api/v1/early-access", "website", "CORS preflight for the early-access form", a.handleEarlyAccessPreflight, true},
+
 		// Auth & account
 		{"GET", "/api/auth/status", "auth", "Setup state: does an owner account exist yet?", a.handleAuthStatus, true},
 		{"POST", "/api/auth/signup", "auth", "Create an account (first becomes owner; later ones need admin auth)", a.handleSignup, true},

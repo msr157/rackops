@@ -326,6 +326,9 @@ func (a *API) authMiddleware(next http.Handler) http.Handler {
 			p == "/api/edge-probe" ||
 			p == "/api/cluster" ||
 			p == "/api/cluster/join" ||
+			// The marketing site's early-access form is public by definition;
+			// its origin allow-list lives in earlyaccess.go.
+			p == "/api/v1/early-access" ||
 			// The API *description* is public docs; every operation in it
 			// still authenticates individually. Swagger's first fetch happens
 			// before the user clicks Authorize.

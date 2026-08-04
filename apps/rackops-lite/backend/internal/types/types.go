@@ -696,3 +696,17 @@ type AgentResponse struct {
 	Mesh       *MeshInfo   `json:"mesh,omitempty"`
 	LeaderAddr string      `json:"leaderAddr,omitempty"` // set when this server is not the Raft leader
 }
+
+// EarlyAccessLead is an enterprise early-access request submitted from the
+// marketing site's form. The public website POSTs these cross-origin to
+// /api/v1/early-access; the field names are the wire contract with
+// apps/website/src/website/components/sections/CTA.tsx and must not change
+// without updating that form.
+type EarlyAccessLead struct {
+	ID        string    `json:"id"`
+	Email     string    `json:"email"`
+	Name      string    `json:"name"`
+	Industry  string    `json:"industry"`
+	Notes     string    `json:"notes,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
+}
