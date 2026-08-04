@@ -1,0 +1,24 @@
+# Normalize line endings.
+#
+# install.sh ships as a GitHub release asset and is piped straight into sh:
+#   curl -fsSL .../install.sh | sudo bash
+# A CRLF copy fails immediately with `$'\r': command not found`. Contributors
+# on Windows have core.autocrlf=true, so without this the checked-out file is
+# CRLF and anything built from the working tree inherits it.
+#
+# The same applies to files consumed inside Linux containers.
+
+* text=auto
+
+*.sh            text eol=lf
+Dockerfile*     text eol=lf
+*.dockerignore  text eol=lf
+*.conf          text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+
+# Release artifacts are binary — never touch them.
+*.png binary
+*.jpg binary
+*.ico binary
+*.woff2 binary
