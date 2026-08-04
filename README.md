@@ -1,86 +1,64 @@
-# RackOps
+# RackOps Monorepo
 
-> **The Infrastructure Operating System** — One Dashboard. One Control Plane. One Platform.
+**The Infrastructure Operating System** — one control plane for every machine in your fleet.
 
-RackOps unifies servers, clusters, networking, GPUs, and workloads into a single intelligent
-control plane. A node agent reads the hardware on every machine; the control plane shows the
-fleet and decides where work should run. See [`docs/product/`](docs/product/) for the full
-product vision and roadmap.
-
-Two products, one codebase:
-
-| Product | For | Highlights |
-|---|---|---|
-| **RackOps Lite** | Homelabs, developers, small teams (works behind CGNAT) | One-click deploys, hardware monitoring, storage viz, alerts, AI assist |
-| **RackOps Enterprise** | Organizations running production infrastructure | Multi-server management, clusters, RBAC & SSO, GPU scheduling, audit logs |
-
-## Monorepo layout
+## Repository layout
 
 ```
-cmd/                     Go binaries: agent, rackops-lite, rackops-enterprise
-internal/                Shared Go: api (wire types), hwinfo, agent, server, enterprise
 apps/
-  website/               Marketing site (React + Vite + Three.js) — deployed via Dokploy
-  dashboard-lite/        RackOps Lite dashboard
-  dashboard-enterprise/  RackOps Enterprise dashboard
+  rackops-lite/         RackOps Lite — the shipping product
+    backend/            Go module — single `rackops` binary (server / agent / probe / mcp)
+    dashboard/          React + TypeScript + Vite (embedded into the binary at build time)
+    scripts/            install.sh — Linux / WSL2 one-line installer
+  rackops-enterprise/   RackOps Enterprise — future product (placeholder)
+  website/              rackops.dev marketing site (React + Vite, deployed via Docker/nginx)
+internal-apps/
+  crm/                  Vendor CRM — support tickets, reset-email relay, usage analytics
+                        (Go + SQLite backend, embedded React dashboard, Docker deploy)
 packages/
-  ui/                    Design tokens + shared React components
-  api/                   TS wire types + API client + hooks
-  tsconfig/              Shared TypeScript configs
-docs/
-  product/               Product vision, overview, pitch deck
-  ops/                   Deployment cluster notes (Swarm, Dokploy, networking)
+  api/                  @rackops/api — shared TS API types + client hooks
+  tsconfig/             @rackops/tsconfig — shared TypeScript configs
 ```
 
-## Quickstart (MVP)
+- **JavaScript/TypeScript** is managed as a [pnpm workspace](https://pnpm.io/workspaces) with [Turborepo](https://turbo.build) for task running.
+- **Go** is managed via `go.work` at the root, pointing at each app's Go module.
 
-Requirements: Go ≥ 1.22, Node ≥ 22, pnpm.
+## Prerequisites
 
-```bash
-pnpm install
+- Node 22+ and pnpm 9 (`corepack enable`)
+- Go 1.26+
 
-# Terminal 1 — control plane (REST API on :8080)
-pnpm dev:lite
+## Common tasks
 
-# Terminal 2 — node agent (reports this machine's CPU/RAM/disk/network)
-pnpm dev:agent
+```sh
+pnpm install        # install every JS workspace
+pnpm build          # build all JS apps (dashboard build lands in the Go embed dir)
+pnpm lint           # lint/typecheck all JS workspaces
 
-# Terminal 3 — dashboard (http://localhost:5173)
-pnpm --filter @rackops/dashboard-lite dev
+pnpm go:build       # go build ./... (all Go modules via go.work)
+pnpm go:test        # go test ./...
 ```
 
-You'll see this machine appear as a live node card with real hardware stats.
+### RackOps Lite
 
-Enterprise variant: `pnpm dev:enterprise` (:8081) + `pnpm --filter @rackops/dashboard-enterprise dev` (:5174).
+```sh
+# Dev loop
+pnpm --filter @rackops/dashboard-lite dev   # Vite on :5173, /api proxied to :8090
+cd apps/rackops-lite/backend && go run ./cmd/rackops server --listen :8090
 
-## Development
-
-```bash
-pnpm lint        # typecheck every JS workspace (tsc --noEmit)
-pnpm build       # build website + dashboards
-pnpm go:test     # Go tests
-pnpm go:build    # compile all Go binaries
+# Production build — dashboard first (it emits into the Go embed dir), then the binary
+pnpm --filter @rackops/dashboard-lite build
+cd apps/rackops-lite/backend && go build -o rackops ./cmd/rackops
 ```
 
-Website production image (built from repo root):
+See [apps/rackops-lite/README.md](apps/rackops-lite/README.md) for the full product docs (install one-liner, HA, roadmap).
 
-```bash
+### Website
+
+```sh
+pnpm --filter @rackops/website dev      # local dev
+pnpm --filter @rackops/website build    # production build
+
+# Production image (build from the repo root — the pnpm workspace needs it)
 docker build -f apps/website/Dockerfile -t rackops-website .
 ```
-
-## Status
-
-Early MVP (roadmap Phase 1 — Agent & Discovery). Working today: agent → control plane →
-dashboard live hardware telemetry. Not yet implemented (stubbed, not faked): auth,
-persistence, mesh networking, clusters, RBAC, GPU scheduling.
-
-## CI/CD
-
-GitHub Actions on `main` / `qa` / `development`: typecheck+build all workspaces, Go
-vet/build/test, and a production Docker build of the website. Pushes to `main` are deployed
-automatically by Dokploy via its GitHub webhook onto a 3-node Docker Swarm
-(see [`docs/ops/`](docs/ops/)).
-
-## License
-
-[MIT](LICENSE) © 2026 RackOps Contributors

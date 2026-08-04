@@ -1,0 +1,9 @@
+# Build output — the dashboard emits into the Go embed dir.
+backend/internal/server/dist/*
+!backend/internal/server/dist/.gitkeep
+backend/crm
+
+# Local state
+*.db
+*.db-wal
+*.db-shm

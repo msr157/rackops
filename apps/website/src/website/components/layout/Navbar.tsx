@@ -5,8 +5,8 @@ const LINKS = [
   { href: '#problem', label: 'Problem' },
   { href: '#platform', label: 'Platform' },
   { href: '#ai', label: 'Intelligence' },
-  { href: '#editions', label: 'Editions' },
-  { href: '#access', label: 'Early Access', cta: true },
+  { href: '#access', label: 'Enterprise' },
+  { href: '#install-lite', label: 'Install Lite', cta: true },
 ];
 
 export default function Navbar() {

@@ -1,4 +1,0 @@
-{
-  "extends": "@rackops/tsconfig/react.json",
-  "include": ["src"]
-}
