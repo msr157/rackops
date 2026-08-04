@@ -62,9 +62,41 @@
   --s-5: 20px;
   --s-6: 24px;
   --s-7: 32px;
-  /* depth — floating layers only; everything in flow is flat */
+  /* depth — floating layers only; everything in flow is flat.
+     Bigger surfaces read as thicker: deeper shadow + stronger blur. */
   --shadow-float: 0 8px 24px rgba(0, 0, 0, 0.45);
   --shadow-deep: 0 20px 56px rgba(0, 0, 0, 0.55);
+  --shadow-press: 0 1px 2px rgba(0, 0, 0, 0.3);
+
+  /* motion — easing.
+     The built-in CSS easings are too weak to read as intentional. These are
+     the strong variants: ease-out for anything entering or responding to
+     input (movement starts immediately, which is the frame the user watches),
+     ease-in-out for on-screen movement, and the iOS drawer curve for sheets.
+     ease-in is never used — it delays the first frame and reads as sluggish. */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+
+  /* motion — duration, scaled to how much screen the thing moves.
+     Everything interactive stays under 300ms; press feedback is near-instant
+     because it has to land inside the same perceptual moment as the click. */
+  --t-press: 110ms;
+  --t-hover: 140ms;
+  --t-menu: 180ms;
+  --t-modal: 240ms;
+  --t-drawer: 300ms;
+
+  /* materials — translucent layers over content, not opaque strips.
+     Weight encodes hierarchy: chrome is heavier (structural), floating menus
+     are lighter (interactive). Never stack two light materials. */
+  --mat-chrome: rgba(10, 10, 11, 0.72);
+  --mat-raised: rgba(29, 29, 34, 0.82);
+  --mat-blur-chrome: blur(20px) saturate(180%);
+  --mat-blur-raised: blur(28px) saturate(180%);
+  /* the bright top edge is light catching the leading edge of the material */
+  --mat-edge: rgba(255, 255, 255, 0.09);
+
   /* chrome metrics */
   --topnav-h: 56px;
 }
@@ -80,6 +112,19 @@ body {
   font-size: 13.5px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  /* Tabular figures console-wide. Telemetry re-renders every 2s, and with
+     proportional digits a value stepping 9%→10%→8% visibly reflows the row —
+     the number jitters and the eye is dragged to it for no reason. Fixed
+     advance widths make a changing value read as the same number changing,
+     not as a new element. */
+  font-variant-numeric: tabular-nums;
+  /* Let the variable font pick its optical size for the rendered pt size. */
+  font-optical-sizing: auto;
+}
+
+/* Prose is the exception — running text wants proportional figures. */
+.prose, .changelog-body, p.copy {
+  font-variant-numeric: normal;
 }
 
 #root { display: flex; flex-direction: column; min-height: 100vh; }
@@ -98,8 +143,32 @@ body {
   overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
 }
 
+/* Reduced motion removes *travel*, not feedback. Blanket-killing every
+   duration also kills the press response and colour changes, which aren't
+   what triggers vestibular discomfort — sliding and scaling are. So:
+   collapse the animations that move things, keep the ones that only fade or
+   tint, and hold press feedback (it's 110ms and carries no displacement). */
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+  /* No element should travel or change size. */
+  .btn:active:not(:disabled),
+  .icon-sq:active:not(:disabled),
+  .avatar-btn:active,
+  .card.clickable:active,
+  .bell-btn:active,
+  .chat-rail-del:active,
+  .pw-eye:active,
+  .strip-close:active,
+  .toast-close:active,
+  .url-chip:active,
+  .disclosure:active,
+  .topnav-brand:active { transform: none; }
+  .modal, .drawer, .toast, .org-menu { animation: fade-in 0.01ms both; }
+  .bar-fill { transition: none; }
 }
 
 /* ============ Chrome: strips, header, sidebar, main ============ */
@@ -130,12 +199,25 @@ body {
   color: var(--fg); padding: 9px 20px; font-size: 13px;
 }
 
+/* Chrome is a translucent layer content scrolls *under*, not an opaque strip
+   that consumes the top of the viewport. The heavier material marks it as
+   structural; the bright top edge is light catching the leading edge.
+   @supports guards the fallback — without backdrop-filter this must stay
+   fully opaque or the content behind it shows through as mud. */
 .topnav {
   display: flex; align-items: center; gap: 12px;
   height: var(--topnav-h); padding: 0 20px;
   border-bottom: 1px solid var(--border);
   background: var(--bg);
   position: sticky; top: 0; z-index: 20;
+}
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  .topnav {
+    background: var(--mat-chrome);
+    -webkit-backdrop-filter: var(--mat-blur-chrome);
+    backdrop-filter: var(--mat-blur-chrome);
+    box-shadow: inset 0 1px 0 var(--mat-edge);
+  }
 }
 .topnav-brand {
   display: flex; align-items: center; gap: 9px;
@@ -162,9 +244,10 @@ body {
   background: var(--bg-3); border: 1px solid var(--border-hi);
   display: grid; place-items: center; cursor: pointer;
   font-size: 12px; font-weight: 600; color: var(--text); font-family: inherit;
-  transition: border-color 0.13s;
+  transition: border-color var(--t-hover) var(--ease-out), transform var(--t-press) var(--ease-out);
 }
 .avatar-btn:hover { border-color: rgba(255, 255, 255, 0.28); }
+.avatar-btn:active { transform: scale(0.92); }
 .account { position: relative; }
 
 .app-body { flex: 1; display: flex; min-height: 0; }
@@ -190,7 +273,11 @@ body {
 }
 .main > * { flex-shrink: 0; }
 
-.page { animation: page-in 0.15s ease-out both; }
+/* Route changes happen dozens of times a session, so this stays a bare
+   opacity fade and stays short — long enough to avoid a hard cut, too short
+   to feel like waiting. Deliberately no transform: sliding the page on every
+   nav adds perceived latency to the most repeated action in the app. */
+.page { animation: page-in 120ms var(--ease-out) both; }
 @keyframes page-in { from { opacity: 0; } to { opacity: 1; } }
 
 /* org switcher: the tenant selector at the top of the rail */
@@ -201,20 +288,34 @@ body {
   background: none; border: 1px solid var(--border);
   color: var(--text); font-size: 12.5px; font-weight: 550; cursor: pointer;
   font-family: inherit; text-align: left;
-  transition: border-color 0.13s, background 0.13s;
+  transition: border-color var(--t-hover) var(--ease-out), background var(--t-hover) var(--ease-out);
 }
 .org-trigger:hover { border-color: var(--border-hi); background: var(--bg-1); }
+.org-trigger:active { background: var(--bg-3); transition-duration: var(--t-press); }
 .org-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .org-menu {
   position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 70;
   background: var(--bg-3); border: 1px solid var(--border-hi);
   border-radius: var(--r-md); padding: 5px;
   box-shadow: var(--shadow-float);
-  animation: menu-in-down 0.13s ease-out;
+  /* Anchored to the edge it hangs from, so it grows out of its trigger
+     rather than out of its own centre — that spatial link is what makes the
+     button and the menu read as one object. */
+  transform-origin: top center;
+  animation: menu-in-down var(--t-menu) var(--ease-out);
 }
-/* Floating menus arrive from their trigger; exits are instant unmounts. */
-@keyframes menu-in-down { from { opacity: 0; transform: translateY(-4px); } }
-@keyframes menu-in-up { from { opacity: 0; transform: translateY(4px); } }
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  .org-menu {
+    background: var(--mat-raised);
+    -webkit-backdrop-filter: var(--mat-blur-raised);
+    backdrop-filter: var(--mat-blur-raised);
+  }
+}
+/* Floating menus arrive from their trigger; exits are instant unmounts.
+   Scale starts at 0.97, never 0 — nothing in the physical world appears out
+   of nothing, and a menu springing from a point reads as a cartoon. */
+@keyframes menu-in-down { from { opacity: 0; transform: translateY(-6px) scale(0.97); } }
+@keyframes menu-in-up { from { opacity: 0; transform: translateY(6px) scale(0.97); } }
 .org-menu-label {
   font-size: 11px; font-weight: 500; color: var(--faint); padding: 5px 8px 4px;
 }
@@ -224,9 +325,11 @@ body {
   background: none; color: var(--text); font-size: 12.5px; cursor: pointer;
   text-align: left; text-decoration: none; font-family: inherit;
 }
+.org-item { transition: background var(--t-hover) var(--ease-out); }
 .org-item:hover { background: var(--bg-2); }
+.org-item:active { background: var(--bg-3); transition-duration: var(--t-press); }
 .org-menu-sep { height: 1px; background: var(--border); margin: 5px 3px; }
-.org-menu.up { top: auto; bottom: calc(100% + 6px); animation-name: menu-in-up; }
+.org-menu.up { top: auto; bottom: calc(100% + 6px); animation-name: menu-in-up; transform-origin: bottom center; }
 /* Menus anchored to the header's right edge (account). */
 .org-menu.right { left: auto; right: 0; width: 220px; }
 
@@ -240,9 +343,12 @@ body {
   border: none; background: none; width: 100%; text-align: left;
   font-size: 13.5px; font-family: inherit;
   text-decoration: none;
-  transition: background 0.13s, color 0.13s;
+  transition: background var(--t-hover) var(--ease-out), color var(--t-hover) var(--ease-out);
 }
 .nav-item:hover { color: var(--text); background: var(--bg-1); text-decoration: none; }
+/* Full-width rows don't scale — they'd shear against their neighbours. The
+   press reads as the surface taking weight instead. */
+.nav-item:active { background: var(--bg-3); transition-duration: var(--t-press); }
 /* Active = raised neutral pill. The accent never colors navigation. */
 .nav-item.active { color: var(--text); background: var(--bg-2); font-weight: 550; }
 .nav-item .count {
@@ -345,7 +451,7 @@ a:hover { color: var(--accent-hi); text-decoration: underline; text-underline-of
   width: 100%; padding: 8px 56px 8px 32px;
   background: var(--bg-1); border: 1px solid var(--border-hi); border-radius: var(--r-md);
   color: var(--text); font-size: 13px; font-family: inherit;
-  transition: border-color 0.13s;
+  transition: border-color var(--t-hover) var(--ease-out);
 }
 .gsearch input::placeholder { color: var(--faint); }
 .gsearch input:hover { border-color: rgba(255, 255, 255, 0.22); }
@@ -375,7 +481,16 @@ kbd {
   border-radius: var(--r-md); padding: 16px;
 }
 .card.inset { background: var(--bg-2); }
-.card.clickable { cursor: pointer; transition: border-color 0.13s, background 0.13s; }
+.card.clickable {
+  cursor: pointer;
+  transition:
+    border-color var(--t-hover) var(--ease-out),
+    background var(--t-hover) var(--ease-out),
+    transform var(--t-press) var(--ease-out);
+}
+/* Large surfaces take a much smaller scale than buttons — the same ratio on a
+   card reads as the whole page lurching. */
+.card.clickable:active { transform: scale(0.995); }
 .card.clickable:hover { border-color: var(--border-hi); background: var(--bg-2); }
 .card.crit { border-color: rgba(243, 101, 95, 0.4); }
 .card.warn { border-color: rgba(229, 168, 59, 0.4); }
@@ -428,13 +543,17 @@ kbd {
   position: relative; width: 36px; height: 20px; flex: none;
   border-radius: 999px; border: none; cursor: pointer;
   background: var(--bg-3); border: 1px solid var(--border-hi);
-  transition: background 0.15s, border-color 0.15s;
+  transition: background var(--t-hover) var(--ease-out), border-color var(--t-hover) var(--ease-out);
   padding: 0;
 }
 .switch::after {
   content: ''; position: absolute; top: 2px; left: 2px;
   width: 14px; height: 14px; border-radius: 50%;
-  background: #fff; transition: transform 0.15s ease-out;
+  background: #fff;
+  /* The one place overshoot is earned: a switch is a physical throw that
+     commits, so the knob settles like a real detent. Kept subtle — anything
+     bouncier reads as a toy. */
+  transition: transform 190ms cubic-bezier(0.34, 1.4, 0.64, 1);
 }
 .switch[aria-checked='true'] { background: var(--accent); border-color: var(--accent); }
 .switch[aria-checked='true']::after { transform: translateX(16px); background: var(--accent-ink); }
@@ -476,7 +595,7 @@ kbd {
 /* Scaled, not width-animated: telemetry ticks every 2s. */
 .bar-fill {
   height: 100%; width: 100%; border-radius: 2px; background: var(--accent);
-  transform-origin: left center; transition: transform 0.6s ease;
+  transform-origin: left center; transition: transform 600ms var(--ease-out);
 }
 .bar-fill.ok { background: var(--ok); }
 .bar-fill.warn { background: var(--warn); }
@@ -532,7 +651,7 @@ kbd {
   background: var(--bg-2); border: 1px solid var(--border);
   color: var(--accent); padding: 3px 10px; border-radius: 14px;
   max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  transition: border-color 0.13s;
+  transition: border-color var(--t-hover) var(--ease-out);
 }
 .url-chip:hover { border-color: var(--accent); color: var(--accent-hi); text-decoration: none; }
 .url-chip svg { flex: none; }
@@ -558,10 +677,17 @@ kbd {
   background: var(--bg-2); color: var(--text); border: 1px solid var(--border-hi);
   padding: 7px 14px; border-radius: var(--r-md); font-size: 13px; font-weight: 500;
   cursor: pointer; font-family: inherit;
-  transition: border-color 0.13s, color 0.13s, background 0.13s;
+  transition:
+    border-color var(--t-hover) var(--ease-out),
+    color var(--t-hover) var(--ease-out),
+    background var(--t-hover) var(--ease-out),
+    transform var(--t-press) var(--ease-out);
   text-decoration: none;
 }
 .btn:hover { background: var(--bg-3); border-color: rgba(255, 255, 255, 0.24); color: var(--text); text-decoration: none; }
+/* Press lands on pointer-down, not on release — waiting for the click to
+   acknowledge the press is the single thing that makes a UI feel dead. */
+.btn:active:not(:disabled) { transform: scale(0.97); transition-duration: var(--t-press); }
 /* Primary: solid signal green, near-black ink (12:1). One per surface. */
 .btn.primary {
   background: var(--accent); color: var(--accent-ink); border-color: transparent;
@@ -585,9 +711,14 @@ kbd {
   display: inline-grid; place-items: center;
   background: none; border: 1px solid var(--border-hi); border-radius: var(--r-md);
   color: var(--dim); cursor: pointer;
-  transition: background 0.13s, color 0.13s, border-color 0.13s;
+  transition:
+    background var(--t-hover) var(--ease-out),
+    color var(--t-hover) var(--ease-out),
+    border-color var(--t-hover) var(--ease-out),
+    transform var(--t-press) var(--ease-out);
 }
 .icon-sq:hover { background: var(--bg-2); color: var(--text); }
+.icon-sq:active:not(:disabled) { transform: scale(0.92); }
 .icon-sq:disabled { opacity: 0.45; cursor: not-allowed; }
 .icon-sq.sm { width: 26px; height: 26px; border-radius: var(--r-sm); }
 /* quiet variant for dense stripes: border appears on hover */
@@ -598,7 +729,7 @@ kbd {
   background: var(--bg-2); border: 1px solid var(--border-hi); color: var(--text);
   border-radius: var(--r-md); padding: 8px 12px; font-size: 13px; font-family: inherit;
   width: 100%; outline: none;
-  transition: border-color 0.13s;
+  transition: border-color var(--t-hover) var(--ease-out);
 }
 .input:focus { border-color: var(--accent); }
 .input::placeholder { color: var(--faint); }
@@ -624,7 +755,7 @@ kbd {
   border: none; background: none; cursor: pointer;
   padding: 5px 12px; border-radius: var(--r-sm);
   font-size: 12.5px; font-weight: 500; font-family: inherit; color: var(--dim);
-  transition: background 0.13s, color 0.13s;
+  transition: background var(--t-hover) var(--ease-out), color var(--t-hover) var(--ease-out);
   white-space: nowrap;
 }
 .seg button:hover { color: var(--text); }
@@ -642,7 +773,7 @@ kbd {
   color: var(--dim); font-size: 13px; font-family: inherit; font-weight: 500;
   border-bottom: 2px solid transparent; margin-bottom: -1px;
   white-space: nowrap; text-decoration: none;
-  transition: color 0.13s;
+  transition: color var(--t-hover) var(--ease-out);
 }
 .tabs .tab:hover { color: var(--text); text-decoration: none; }
 .tabs .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
@@ -678,7 +809,7 @@ table.table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 /* Tall two-line rows: primary + secondary in each cell. */
 .table td { padding: 13px 16px; border-bottom: 1px solid var(--border); vertical-align: middle; }
 .table tbody tr:last-child td { border-bottom: none; }
-.table tbody tr.clickable { cursor: pointer; transition: background 0.13s; }
+.table tbody tr.clickable { cursor: pointer; transition: background var(--t-hover) var(--ease-out); }
 .table tbody tr.clickable:hover { background: var(--bg-1); }
 .table th.num, .table td.num {
   text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums;
@@ -702,19 +833,26 @@ table.table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 
 /* ============ Modal / drawer ============ */
 
+/* A modal is a blocking task, so it dims and pushes the background back.
+   (A non-blocking side panel would use translucency and offset with no scrim,
+   to keep the flow intact — see .drawer.) */
 .modal-overlay {
-  position: fixed; inset: 0; background: rgba(4, 4, 5, 0.65); backdrop-filter: blur(3px);
+  position: fixed; inset: 0; background: rgba(4, 4, 5, 0.65);
+  -webkit-backdrop-filter: blur(6px) saturate(120%);
+  backdrop-filter: blur(6px) saturate(120%);
   display: grid; place-items: center; z-index: 50;
-  animation: fade-in 0.14s ease-out;
+  animation: fade-in var(--t-modal) var(--ease-out);
 }
 @keyframes fade-in { from { opacity: 0; } }
 .modal {
   background: var(--bg-1); border: 1px solid var(--border-hi); border-radius: var(--r-lg);
   padding: 24px; width: 560px; max-width: 94vw; max-height: 88vh; overflow-y: auto;
-  box-shadow: var(--shadow-deep);
-  animation: modal-in 0.16s ease-out;
+  box-shadow: var(--shadow-deep), inset 0 1px 0 var(--mat-edge);
+  animation: modal-in var(--t-modal) var(--ease-out);
 }
-@keyframes modal-in { from { opacity: 0; transform: translateY(6px) scale(0.99); } }
+/* Modals stay centre-anchored — unlike popovers, they aren't spatially tied
+   to a trigger, and scaling one from a corner reads as a glitch. */
+@keyframes modal-in { from { opacity: 0; transform: translateY(8px) scale(0.98); } }
 .modal h2 { font-size: 15.5px; font-weight: 600; margin-bottom: 16px; }
 
 .drawer {
@@ -722,9 +860,12 @@ table.table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   background: var(--bg); border-left: 1px solid var(--border-hi);
   z-index: 41; display: flex; flex-direction: column;
   box-shadow: var(--shadow-deep);
-  animation: drawer-in 0.18s ease-out;
+  /* Enters from the right, so it must leave to the right. A panel that slides
+     in from the side and drops out the bottom breaks the mental model of
+     where the thing went — and makes swipe-to-dismiss feel arbitrary. */
+  animation: drawer-in var(--t-drawer) var(--ease-drawer);
 }
-@keyframes drawer-in { from { transform: translateX(28px); opacity: 0; } }
+@keyframes drawer-in { from { transform: translateX(100%); } }
 .drawer-head {
   display: flex; align-items: center; gap: 10px;
   padding: 12px 16px; border-bottom: 1px solid var(--border);
@@ -810,18 +951,24 @@ table.table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 
 /* ============ Command palette ============ */
 
+/* The palette is ⌘K — a hundreds-of-times-a-day action. Animation here is a
+   tax paid on every invocation, so the panel gets none: it is simply there on
+   the frame you asked for it. The scrim keeps a barely-there fade only so the
+   page behind doesn't hard-cut. (Raycast ships no palette animation at all,
+   and that is the correct call.) */
 .palette-overlay {
-  position: fixed; inset: 0; background: rgba(4, 4, 5, 0.6); backdrop-filter: blur(2px);
+  position: fixed; inset: 0; background: rgba(4, 4, 5, 0.6);
+  -webkit-backdrop-filter: blur(6px) saturate(120%);
+  backdrop-filter: blur(6px) saturate(120%);
   display: flex; justify-content: center; z-index: 60;
   padding-top: 14vh;
-  animation: fade-in 0.12s ease-out;
+  animation: fade-in 70ms linear;
 }
 .palette {
   width: 560px; max-width: 92vw; height: fit-content;
   background: var(--bg-1); border: 1px solid var(--border-hi);
   border-radius: var(--r-lg); overflow: hidden;
-  box-shadow: var(--shadow-deep);
-  animation: modal-in 0.14s ease-out;
+  box-shadow: var(--shadow-deep), inset 0 1px 0 var(--mat-edge);
 }
 .palette input {
   width: 100%; background: none; border: none; outline: none;
@@ -840,6 +987,7 @@ table.table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   text-align: left;
 }
 .palette-item.hl { background: var(--bg-2); color: var(--text); }
+.palette-item:active { background: var(--bg-3); }
 .palette-item .hint { margin-left: auto; font-family: var(--mono); font-size: 10px; color: var(--faint); }
 .palette-empty { padding: 16px; color: var(--faint); font-size: 13px; }
 
@@ -854,10 +1002,12 @@ table.table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   background: var(--bg-2); border: 1px solid var(--border-hi);
   border-radius: var(--r-lg); padding: 11px 14px;
   min-width: 260px; max-width: 400px; font-size: 13px;
-  box-shadow: var(--shadow-float);
-  animation: toast-in 0.18s ease-out;
+  box-shadow: var(--shadow-float), inset 0 1px 0 var(--mat-edge);
+  animation: toast-in var(--t-menu) var(--ease-out);
 }
-@keyframes toast-in { from { transform: translateY(12px); opacity: 0; } }
+/* Rises from below because the stack is anchored to the bottom edge — it
+   enters along the same axis it would leave on. */
+@keyframes toast-in { from { transform: translateY(12px) scale(0.98); opacity: 0; } }
 .toast svg { flex: none; margin-top: 1px; }
 .toast.ok svg { color: var(--ok); }
 .toast.err svg { color: var(--crit); }
@@ -954,7 +1104,7 @@ table.table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   position: relative; display: grid; place-items: center;
   width: 32px; height: 32px; border-radius: var(--r-md);
   background: none; border: 1px solid transparent; color: var(--dim); cursor: pointer;
-  transition: background 0.13s, color 0.13s;
+  transition: background var(--t-hover) var(--ease-out), color var(--t-hover) var(--ease-out);
 }
 .bell-btn:hover { background: var(--bg-2); color: var(--text); }
 /* dark ink on the bright crit fill: white fails AA here, bg passes */
@@ -1017,7 +1167,7 @@ table.table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   color: var(--fg); font-size: 12px; font-weight: 400; line-height: 1.55;
   text-transform: none; letter-spacing: 0;
   box-shadow: var(--shadow-float);
-  opacity: 0; visibility: hidden; transition: opacity 0.12s ease;
+  opacity: 0; visibility: hidden; transition: opacity 125ms var(--ease-out);
   pointer-events: none; z-index: 60; white-space: normal;
 }
 .infotip.wide .infotip-bubble { width: 320px; }
@@ -1109,3 +1259,36 @@ table.table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   .gsearch { width: auto; flex: 1; max-width: none; }
   .topnav .brand-name { display: none; }
 }
+
+/* ============ Press response (completes the set) ============
+
+   Every control that can be clicked acknowledges the press on pointer-DOWN.
+   Buttons and small icon targets scale; full-width rows can't (a row that
+   shrinks shears against its neighbours), so they take weight instead by
+   deepening their surface. The base .btn / .icon-sq rules above already cover
+   their variants — these are the controls that don't inherit from them. */
+
+.bell-btn,
+.chat-rail-del,
+.disclosure,
+.pw-eye,
+.strip-close,
+.toast-close,
+.url-chip,
+.topnav-brand {
+  transition: transform var(--t-press) var(--ease-out);
+}
+.bell-btn:active,
+.chat-rail-del:active,
+.pw-eye:active,
+.strip-close:active,
+.toast-close:active { transform: scale(0.9); }
+/* Wider targets take a gentler ratio — the same 0.9 on a chip reads as a jolt. */
+.url-chip:active,
+.disclosure:active { transform: scale(0.985); }
+.topnav-brand:active { transform: scale(0.97); }
+
+/* Rows: no displacement, just the surface taking the press. */
+.bell-item:active,
+.chat-rail-item:active,
+.table tbody tr.clickable:active { background: var(--bg-3); }
