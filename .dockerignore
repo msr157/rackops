@@ -1,0 +1,45 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# .dockerignore — baseline build context exclusions.
+#
+# Per-Dockerfile ignore files take precedence when present and are used by
+# BuildKit automatically for `docker build -f <name> .`:
+#   Dockerfile.website.dockerignore
+#   Dockerfile.backend.dockerignore
+#
+# No globstars (**): Dokploy's tar-based builder does not expand them.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# VCS
+.git
+.gitignore
+.github
+
+# Secrets & local state — never ship these into an image layer
+.env
+.env.*
+!.env.example
+.rackops/
+*.pem
+*.key
+
+# Dependencies
+node_modules
+apps/website/node_modules
+apps/rackops-lite/dashboard/node_modules
+internal-apps/crm/dashboard/node_modules
+packages/api/node_modules
+packages/tsconfig/node_modules
+
+# Build output
+.turbo
+apps/website/dist
+apps/rackops-lite/backend/rackops
+bin/
+*.exe
+
+# Logs & editor cruft
+*.log
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

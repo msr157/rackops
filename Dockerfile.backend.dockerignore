@@ -1,0 +1,73 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Dockerfile.backend.dockerignore
+#
+# Build context for `docker build -f Dockerfile.backend .`.
+#
+# NOTE: this deliberately does NOT exclude apps/ or packages/ the way the
+# pre-monorepo version did. The Go sources now live in
+# apps/rackops-lite/backend/, and the dashboard stage needs
+# apps/rackops-lite/dashboard/ plus every workspace manifest for the
+# frozen-lockfile check. Excluding those directories breaks the build.
+#
+# No globstars (**): Dokploy's tar-based builder does not expand them.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# VCS
+.git
+.gitignore
+.github
+
+# Secrets & local state
+.env
+.env.*
+!.env.example
+.rackops/
+*.pem
+*.key
+
+# Dependencies
+node_modules
+apps/website/node_modules
+apps/rackops-lite/dashboard/node_modules
+internal-apps/crm/dashboard/node_modules
+packages/api/node_modules
+packages/tsconfig/node_modules
+
+# Build output
+.turbo
+apps/website/dist
+apps/rackops-lite/backend/rackops
+
+# Website source is not needed for the control-plane image, but
+# apps/website/package.json is kept — the frozen-lockfile check reads every
+# workspace manifest.
+apps/website/src
+apps/website/public
+apps/website/index.html
+apps/website/nginx.conf
+apps/website/Dockerfile
+apps/website/vite.config.ts
+apps/website/tsconfig.json
+apps/rackops-enterprise
+
+# Internal apps — manifest kept for the same lockfile reason
+internal-apps/crm/backend
+internal-apps/crm/dashboard/src
+internal-apps/crm/Dockerfile
+
+# Other build definitions
+Dockerfile.website
+docker-compose.yml
+
+# Docs
+docs/
+CHANGELOG.md
+AGENTS.md
+CLAUDE.md
+
+# Logs & editor cruft
+*.log
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

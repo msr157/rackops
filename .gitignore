@@ -3,11 +3,40 @@ node_modules/
 
 # Build output
 .turbo/
+bin/
+dist/
+*.exe
 apps/website/dist/
+apps/rackops-lite/backend/rackops
+# Keep the embed target present so `//go:embed all:dist` always matches, even
+# before the dashboard is built. Must stay last — a later `dist/` rule would
+# stop git descending into this directory.
 apps/rackops-lite/backend/internal/server/dist/*
 !apps/rackops-lite/backend/internal/server/dist/.gitkeep
-apps/rackops-lite/backend/rackops
 
 # Logs & local state
 *.log
 .rackops/
+
+# Secrets — this repository is public. Never relax these.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+
+# Coverage & test artifacts
+coverage/
+test-results/
+.nyc_output/
+
+# OS & editor
+.DS_Store
+._*
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+*.swo

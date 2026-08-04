@@ -63,6 +63,18 @@ func (a *API) Router() http.Handler {
 	mux.HandleFunc("GET /swagger", a.handleSwagger)
 	mux.HandleFunc("GET /swagger/{asset}", a.handleSwaggerAsset)
 
+	// ---- Liveness ----
+	// Deliberately unauthenticated: the Docker HEALTHCHECK and Swarm's
+	// rolling-update gate probe this before routing traffic to a new task,
+	// and neither can present credentials.
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, map[string]string{
+			"status":  "ok",
+			"service": "rackops-control-plane",
+			"version": ServerVersion,
+		})
+	})
+
 	// ---- Dashboard ----
 	if a.DashFS != nil {
 		mux.Handle("/", spaHandler(a.DashFS))

@@ -1,0 +1,92 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# RackOps control plane (rackops-lite backend) — build from the repo root:
+#
+#   docker build -f Dockerfile.backend .
+#
+# Dokploy's "Backend" application (api.rackops.in) is configured against this
+# filename and builds it from the repository root.
+#
+# Build order matters: internal/server/embed.go declares `//go:embed all:dist`,
+# so the dashboard must be compiled into
+# apps/rackops-lite/backend/internal/server/dist BEFORE `go build` runs.
+# Skipping stage 1 yields a binary that serves the API with no dashboard.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Stage 1: build the dashboard into the Go embed directory ─────────────────
+FROM node:22-alpine AS dashboard
+
+RUN corepack enable
+WORKDIR /build
+
+# Every workspace manifest, so `--frozen-lockfile` can verify the lockfile
+# against the full workspace. Manifests change rarely, so this layer caches
+# across ordinary source edits.
+COPY pnpm-workspace.yaml pnpm-lock.yaml package.json turbo.json ./
+COPY apps/website/package.json apps/website/
+COPY apps/rackops-lite/dashboard/package.json apps/rackops-lite/dashboard/
+COPY internal-apps/crm/dashboard/package.json internal-apps/crm/dashboard/
+COPY packages/api/package.json packages/api/
+COPY packages/tsconfig/package.json packages/tsconfig/
+
+RUN pnpm install --frozen-lockfile --filter @rackops/dashboard-lite...
+
+COPY packages/ ./packages/
+COPY apps/rackops-lite/dashboard/ ./apps/rackops-lite/dashboard/
+
+# vite.config.ts sets outDir to ../backend/internal/server/dist, so this emits
+# straight into the path the Go embed reads.
+RUN pnpm --filter @rackops/dashboard-lite build
+
+# ── Stage 2: compile the Go binary ───────────────────────────────────────────
+FROM golang:1.26-alpine AS builder
+
+# git: some module fetches still resolve over VCS.
+RUN apk add --no-cache git ca-certificates
+
+WORKDIR /build/apps/rackops-lite/backend
+
+# Module graph first so the download layer caches independently of source.
+COPY apps/rackops-lite/backend/go.mod apps/rackops-lite/backend/go.sum ./
+RUN go mod download
+
+COPY apps/rackops-lite/backend/ ./
+
+# The dashboard built in stage 1, placed where //go:embed all:dist expects it.
+COPY --from=dashboard /build/apps/rackops-lite/backend/internal/server/dist/ ./internal/server/dist/
+
+# Statically linked so it runs on bare Alpine with no libc dependency.
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    go build -trimpath -ldflags="-s -w -extldflags=-static" \
+    -o /rackops ./cmd/rackops
+
+# ── Stage 3: minimal runtime ─────────────────────────────────────────────────
+FROM alpine:3.20
+
+# ca-certificates: outbound TLS (GitHub release checks, CRM relay).
+# wget comes from busybox and backs the healthcheck.
+RUN apk add --no-cache ca-certificates tzdata
+
+LABEL maintainer="rackops"
+LABEL org.opencontainers.image.title="rackops-lite"
+LABEL org.opencontainers.image.description="RackOps Lite — control plane"
+LABEL org.opencontainers.image.licenses="MIT"
+
+COPY --from=builder /rackops /usr/local/bin/rackops
+
+# State: join token, install ID, fleet store, metric history. Mount a volume
+# here in Dokploy — without one, every redeploy mints a new join token and
+# every agent has to re-enrol.
+ENV RACKOPS_DATA_DIR=/var/lib/rackops
+RUN mkdir -p /var/lib/rackops
+VOLUME ["/var/lib/rackops"]
+
+# Dokploy routes api.rackops.in to this port.
+ENV PORT=8080
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD wget -q --spider "http://127.0.0.1:${PORT}/healthz" || exit 1
+
+# sh -c to expand $PORT, exec so rackops becomes PID 1 and receives SIGTERM
+# directly — Swarm's graceful drain depends on that.
+CMD ["sh", "-c", "exec /usr/local/bin/rackops server --listen \":${PORT}\" --data-dir \"${RACKOPS_DATA_DIR}\""]

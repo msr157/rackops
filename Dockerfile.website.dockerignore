@@ -1,0 +1,68 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Dockerfile.website.dockerignore
+#
+# Build context for `docker build -f Dockerfile.website .` — the website needs
+# only the workspace manifests, packages/, and apps/website/. Go sources and
+# the other apps are excluded to keep the context small.
+#
+# No globstars (**): Dokploy's tar-based builder does not expand them.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# VCS
+.git
+.gitignore
+.github
+
+# Secrets & local state
+.env
+.env.*
+!.env.example
+.rackops/
+*.pem
+*.key
+
+# Dependencies
+node_modules
+apps/website/node_modules
+apps/rackops-lite/dashboard/node_modules
+internal-apps/crm/dashboard/node_modules
+packages/api/node_modules
+packages/tsconfig/node_modules
+
+# Build output
+.turbo
+apps/website/dist
+
+# Not needed for the website image — the Go backend and its dashboard.
+# apps/rackops-lite/dashboard/package.json is kept: the frozen-lockfile check
+# reads every workspace manifest.
+apps/rackops-lite/backend
+apps/rackops-lite/dashboard/src
+apps/rackops-lite/dashboard/public
+apps/rackops-lite/dashboard/index.html
+apps/rackops-lite/scripts
+apps/rackops-enterprise
+go.work
+go.work.sum
+
+# Internal apps — manifest kept for the same lockfile reason
+internal-apps/crm/backend
+internal-apps/crm/dashboard/src
+internal-apps/crm/Dockerfile
+
+# Other build definitions
+Dockerfile.backend
+docker-compose.yml
+
+# Docs
+docs/
+CHANGELOG.md
+AGENTS.md
+CLAUDE.md
+
+# Logs & editor cruft
+*.log
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

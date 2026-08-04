@@ -1,0 +1,136 @@
+name: CI — Web · Go · Docker
+
+# ─────────────────────────────────────────────────────────────────────
+# GitHub Actions CI/CD Pipeline — rackops monorepo
+#
+# Jobs (parallel):
+#   web             → pnpm install + turbo lint/build (website + dashboards)
+#   go              → vet, build and test the control plane
+#   docker-website  → validate the rackops.in image (deploy gate)
+#   docker-backend  → validate the api.rackops.in image (deploy gate)
+#
+# Branch strategy:
+#   main        → CI + Dokploy deploys automatically via its GitHub webhook
+#   qa          → CI only
+#   development → CI only
+#
+# Both docker jobs build the same Dockerfiles Dokploy builds, from the same
+# root context. If a job here fails, the Dokploy deploy would have failed too.
+# ─────────────────────────────────────────────────────────────────────
+
+on:
+  push:
+    branches:
+      - main
+      - qa
+      - development
+  pull_request:
+    branches:
+      - main
+      - qa
+
+jobs:
+  web:
+    name: Web — Lint & Build (pnpm + Turborepo)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: pnpm/action-setup@v4 # version read from the packageManager field
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck & build all workspaces
+        run: pnpm turbo run lint build
+
+  go:
+    name: Go — Vet, Build & Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/rackops-lite/backend
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/rackops-lite/backend/go.mod
+          cache-dependency-path: apps/rackops-lite/backend/go.sum
+
+      # internal/server/embed.go declares `//go:embed all:dist`. The committed
+      # dist/.gitkeep keeps that pattern satisfiable without a dashboard build,
+      # so these steps compile the API-only binary. The real dashboard is
+      # embedded by Dockerfile.backend, which builds it first.
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build
+        run: go build ./...
+
+      - name: Test
+        run: go test ./...
+
+  docker-website:
+    name: Docker — Website Image (deploy gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Build production image
+        run: docker build -f Dockerfile.website -t rackops-website:${{ github.sha }} .
+
+  docker-backend:
+    name: Docker — Backend Image (deploy gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Build production image
+        run: docker build -f Dockerfile.backend -t rackops-backend:${{ github.sha }} .
+
+      - name: Smoke test — container serves /healthz
+        run: |
+          docker run -d --name rackops-smoke -p 8080:8080 rackops-backend:${{ github.sha }}
+          for i in $(seq 1 30); do
+            if curl -fs http://127.0.0.1:8080/healthz; then
+              echo "healthz OK"
+              docker rm -f rackops-smoke
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::container never became healthy"
+          docker logs rackops-smoke
+          docker rm -f rackops-smoke
+          exit 1
+
+  deploy-gate:
+    name: Deploy Gate
+    needs: [web, go, docker-website, docker-backend]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deployment handled by Dokploy
+        if: github.ref == 'refs/heads/main'
+        run: echo "✅ All checks passed — Dokploy deploys via its GitHub webhook."
+
+      - name: Deployment skipped
+        if: github.ref != 'refs/heads/main'
+        run: echo "ℹ️  Not on main — CI passed, deployment skipped."
