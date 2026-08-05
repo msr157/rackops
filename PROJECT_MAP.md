@@ -328,8 +328,8 @@ One-liner: `curl -fsSL https://github.com/msr157/rackops/releases/latest/downloa
 
 Flow: `set -eu`; `RACKOPS_PORT` env override (default 8080); amber-on-black ANSI UI with braille
 spinner (`step()`), gated on tty/`NO_COLOR` → **root required** (uid 0 or die with sudo
-instructions); Linux only (Windows → WSL2 README anchor); arch map x86_64→`rackops-linux-amd64`,
-aarch64→`rackops-linux-arm64` → download from GitHub releases-latest, `install -m 0755` to
+instructions); Linux + macOS (Windows → WSL2 README anchor); asset map `rackops-<os>-<arch>`
+(linux/darwin × amd64/arm64) → download from GitHub releases-latest, `install -m 0755` to
 `/usr/local/bin/rackops` → prereqs via package-manager autodetect (apt/dnf/yum/apk/pacman/zypper):
 **git** (warn-only on failure), **container runtime** (accepts running docker *or podman*;
 starts stopped docker via systemd or `nohup dockerd` on WSL2; installs via get.docker.com if

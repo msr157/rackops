@@ -1,5 +1,5 @@
 #!/bin/sh
-# RackOps installer — Linux and Windows/WSL2.
+# RackOps installer — Linux, macOS, and Windows/WSL2.
 #
 #   curl -fsSL https://github.com/msr157/rackops/releases/latest/download/install.sh | sudo bash
 #
@@ -107,14 +107,19 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 ok "running as root"
 
-[ "$(uname -s)" = "Linux" ] || die "RackOps runs on Linux. On Windows, install WSL2 first, then run this inside it: https://github.com/$REPO#windows"
+case "$(uname -s)" in
+  Linux)  OS="linux" ;;
+  Darwin) OS="darwin" ;;
+  *) die "RackOps runs on Linux and macOS. On Windows, install WSL2 first, then run this inside it: https://github.com/$REPO#windows" ;;
+esac
 
 case "$(uname -m)" in
-  x86_64|amd64)  ARCH="amd64"; ASSET="rackops-linux-amd64" ;;
-  aarch64|arm64) ARCH="arm64"; ASSET="rackops-linux-arm64" ;;
+  x86_64|amd64)  ARCH="amd64" ;;
+  aarch64|arm64) ARCH="arm64" ;;
   *) die "unsupported CPU architecture: $(uname -m)" ;;
 esac
-ok "linux/$ARCH"
+ASSET="rackops-$OS-$ARCH"
+ok "$OS/$ARCH"
 
 if command -v curl >/dev/null 2>&1; then
   FETCH="curl -fsSL"
@@ -197,7 +202,16 @@ install_docker() {
 }
 
 # git — repo deploys
-if command -v git >/dev/null 2>&1; then
+if [ "$OS" = "darwin" ]; then
+  # command -v finds Apple's /usr/bin/git shim even without the developer
+  # tools; xcode-select -p is the real test. Never auto-install here — it
+  # opens a GUI dialog, which a piped root shell can't drive.
+  if xcode-select -p >/dev/null 2>&1 && command -v git >/dev/null 2>&1; then
+    ok "git"
+  else
+    warn "git — install the Xcode command line tools: ${AMBER}xcode-select --install${R} ${DIM}(images & templates still work)${R}"
+  fi
+elif command -v git >/dev/null 2>&1; then
   ok "git"
 elif step "installing git…" pkg_install git && command -v git >/dev/null 2>&1; then
   ok "git ${DIM}— installed${R}"
@@ -210,12 +224,22 @@ if runtime_ready; then
   RT="docker"; command -v docker >/dev/null 2>&1 || RT="podman"
   ok "container runtime ${DIM}($RT)${R}"
 elif command -v docker >/dev/null 2>&1 || command -v podman >/dev/null 2>&1; then
-  step "starting the container runtime…" start_docker || true
-  if runtime_ready; then
-    ok "container runtime ${DIM}— started${R}"
+  if [ "$OS" = "darwin" ]; then
+    warn "runtime installed but not running — start Docker Desktop (or ${AMBER}colima start${R}), then it's picked up automatically"
   else
-    warn "runtime installed but not running — on WSL2, enable Docker Desktop's WSL integration"
+    step "starting the container runtime…" start_docker || true
+    if runtime_ready; then
+      ok "container runtime ${DIM}— started${R}"
+    else
+      warn "runtime installed but not running — on WSL2, enable Docker Desktop's WSL integration"
+    fi
   fi
+elif [ "$OS" = "darwin" ]; then
+  # No headless install path on macOS: get.docker.com is Linux-only and
+  # Homebrew refuses to run as root. Point at the two sane options instead.
+  warn "Docker not found — RackOps still starts (telemetry works), but app deploys need it"
+  say  "    Install Docker Desktop: ${AMBER}https://www.docker.com/products/docker-desktop${R}"
+  say  "    or, with Homebrew:      ${AMBER}brew install colima docker && colima start${R}"
 else
   if step "installing Docker Engine… ${DIM}(takes a minute)${R}" install_docker && runtime_ready; then
     ok "docker ${DIM}— installed & running${R}"
@@ -245,7 +269,35 @@ fi
 # ---------------------------------------------------------------------------
 section "Launch"
 
-if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+if [ "$OS" = "darwin" ]; then
+  # launchd is macOS's systemd: RunAtLoad starts it on boot, KeepAlive
+  # restarts it on crash. bootout first so a re-run (upgrade) reloads the
+  # daemon instead of failing on "service already bootstrapped".
+  PLIST="/Library/LaunchDaemons/in.rackops.server.plist"
+  cat > "$PLIST" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>in.rackops.server</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$BIN</string>
+    <string>server</string>
+    <string>--listen</string>
+    <string>:$PORT</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/var/log/rackops.log</string>
+  <key>StandardErrorPath</key><string>/var/log/rackops.log</string>
+</dict>
+</plist>
+PLIST
+  launchctl bootout system/in.rackops.server >/dev/null 2>&1 || true
+  launchctl bootstrap system "$PLIST" || die "launchctl couldn't start the service — check /var/log/rackops.log"
+  ok "launchd service ${DIM}— starts on boot, restarts on crash (logs: /var/log/rackops.log)${R}"
+elif command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
   cat > /etc/systemd/system/rackops.service <<UNIT
 [Unit]
 Description=RackOps control plane
@@ -288,7 +340,12 @@ fi
 # ---------------------------------------------------------------------------
 # Done — the payoff card.
 # ---------------------------------------------------------------------------
-LAN_IP="$(hostname -I 2>/dev/null | awk '{print $1}')" || LAN_IP=""
+if [ "$OS" = "darwin" ]; then
+  # hostname -I is a Linux-ism; ask the primary interfaces directly.
+  LAN_IP="$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null)" || LAN_IP=""
+else
+  LAN_IP="$(hostname -I 2>/dev/null | awk '{print $1}')" || LAN_IP=""
+fi
 
 say ""
 say "  ${DIM}╭──────────────────────────────────────────────╮${R}"

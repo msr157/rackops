@@ -163,10 +163,10 @@ func (a *API) handleApplyUpdate(w http.ResponseWriter, r *http.Request) {
 // SelfUpdate downloads the release binary for this OS/arch and atomically
 // replaces the executable at path. Shared by the API and `rackops update`.
 func SelfUpdate(path, tag string) error {
-	if runtime.GOOS != "linux" {
-		return fmt.Errorf("self-update is supported on linux only")
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		return fmt.Errorf("self-update is supported on linux and macOS only")
 	}
-	url := fmt.Sprintf("https://github.com/%s/releases/download/%s/rackops-linux-%s", releaseRepo, tag, runtime.GOARCH)
+	url := fmt.Sprintf("https://github.com/%s/releases/download/%s/rackops-%s-%s", releaseRepo, tag, runtime.GOOS, runtime.GOARCH)
 	client := &http.Client{Timeout: 5 * time.Minute}
 	resp, err := client.Get(url)
 	if err != nil {

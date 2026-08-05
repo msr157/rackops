@@ -9,7 +9,7 @@ apps/
   rackops-lite/         RackOps Lite — the shipping product
     backend/            Go module — single `rackops` binary (server / agent / probe / mcp)
     dashboard/          React + TypeScript + Vite (embedded into the binary at build time)
-    scripts/            install.sh — Linux / WSL2 one-line installer
+    scripts/            install.sh — Linux / macOS / WSL2 one-line installer
   rackops-enterprise/   RackOps Enterprise — future product (placeholder)
   website/              rackops.dev marketing site (React + Vite, deployed via Docker/nginx)
 internal-apps/

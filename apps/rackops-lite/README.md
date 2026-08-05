@@ -10,7 +10,14 @@ One line — installs RackOps **and everything it needs** (Docker, compose, git)
 curl -fsSL https://github.com/msr157/rackops/releases/latest/download/install.sh | sudo bash
 ```
 
-Works on any **Linux** machine (x86-64 or ARM). Root (`sudo`) is required — the installer sets up Docker, a system service, and a binary in `/usr/local/bin`. Re-running the same command later **updates** RackOps in place. It also discovers containers already running on the machine and adopts them, so your existing services show up in the dashboard ready to manage.
+Works on any **Linux** machine (x86-64 or ARM) and on **macOS** (Apple Silicon or Intel). Root (`sudo`) is required — the installer sets up Docker, a system service, and a binary in `/usr/local/bin`. Re-running the same command later **updates** RackOps in place. It also discovers containers already running on the machine and adopts them, so your existing services show up in the dashboard ready to manage.
+
+### macOS
+
+The same one-liner installs the binary and a launchd service (starts on boot, restarts on crash, logs to `/var/log/rackops.log`). Two macOS differences:
+
+- **Docker isn't auto-installed** — there is no headless install path on macOS. Have [Docker Desktop](https://www.docker.com/products/docker-desktop/) running, or `brew install colima docker && colima start`. RackOps starts either way; deploys need the runtime.
+- **Hardware telemetry is partial** — Linux-only sources (`/proc`, `/sys`, hwmon thermals) aren't available, so those tiles stay empty. Fleet control, deploys, domains, and the mesh all work.
 
 <a name="windows"></a>
 ### Windows (as a server, via WSL2)
@@ -65,7 +72,7 @@ cd apps/rackops-lite/backend && go build -o rackops ./cmd/rackops
 ```
 backend/   Go module — single `rackops` binary (server / agent / probe)
 dashboard/ React + TypeScript + Vite (embedded into the binary at build time)
-scripts/   install.sh — Linux / WSL2 one-line installer
+scripts/   install.sh — Linux / macOS / WSL2 one-line installer
 ```
 
 This app lives in the RackOps monorepo — see the [repo root README](../../README.md) for workspace-wide commands.
