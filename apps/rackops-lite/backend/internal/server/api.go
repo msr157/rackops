@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -734,12 +735,35 @@ func (a *API) handleJoinCommand(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "you don't have permission to add machines to this organization", http.StatusForbidden)
 		return
 	}
+	// The command runs on the machine being joined, so it must never point at
+	// loopback: a dashboard opened on http://localhost:8080 would otherwise
+	// mint a command telling the new machine to join itself. A routable r.Host
+	// (LAN IP, public IP, domain) is the best signal — the operator has already
+	// proven it reachable — and loopback falls back to the server's advertised
+	// address (--advertise, or the primary interface IP).
 	host := r.Host
+	if hostIsLoopback(host) {
+		host = a.advertiseAddr()
+	}
 	// --org routes the new machine into the active org at first ingest.
 	writeJSON(w, map[string]string{
 		"command": fmt.Sprintf("rackops agent --server http://%s --token %s --org %s", host, a.JoinToken, org.ID),
 		"token":   a.JoinToken,
 	})
+}
+
+// hostIsLoopback reports whether a Host header names this machine only:
+// localhost, 127.0.0.0/8, or [::1] — with or without a port.
+func hostIsLoopback(hostport string) bool {
+	host := hostport
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
+		host = h
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(strings.Trim(host, "[]"))
+	return ip != nil && ip.IsLoopback()
 }
 
 // ---- Project / env / service handlers ----

@@ -288,11 +288,23 @@ func (a *API) listenPort() string { return listenPortVal }
 func (a *API) relaySpecsFor(nodeID string) []types.RelaySpec {
 	var specs []types.RelaySpec
 	desired := map[int]string{} // relayPort -> meshIP:port on the hub
+	// Only the edge node's report may reconcile the hub listeners. Every
+	// node's ingest lands here, and a non-edge node's report always carries an
+	// empty desired set — letting it reconcile would tear down every relay,
+	// which the edge node's next report then rebuilds: a 2-second open/close
+	// flap on all cross-node routing in any multi-machine fleet. With ingress
+	// disabled any reporter may prune (desired is empty for all of them alike).
+	reconcile := false
 
 	a.Store.Mutate(func() {
-		if !a.Store.Ingress.Enabled || a.Store.Ingress.NodeID != nodeID {
+		if !a.Store.Ingress.Enabled {
+			reconcile = true
 			return
 		}
+		if a.Store.Ingress.NodeID != nodeID {
+			return
+		}
+		reconcile = true
 		used := map[int]bool{}
 		for _, svc := range a.Store.Services {
 			if svc.RelayPort > 0 {
@@ -331,7 +343,9 @@ func (a *API) relaySpecsFor(nodeID string) []types.RelaySpec {
 	})
 
 	// Reconcile hub-side relay listeners OUTSIDE the store lock.
-	a.reconcileRelays(desired)
+	if reconcile {
+		a.reconcileRelays(desired)
+	}
 	return specs
 }
 
