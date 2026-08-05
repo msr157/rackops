@@ -6,7 +6,7 @@ import type { ChatTurn, Node as FleetNode, Service } from '../api';
 import { useData } from '../data';
 import { useConfirm } from './confirm';
 import { cleanError } from './toast';
-import { Spinner, timeAgo } from './ui';
+import { Spinner, timeAgo, uid } from './ui';
 import { useDialogBehavior } from './useDialog';
 
 export interface Msg {
@@ -64,12 +64,6 @@ export const STARTERS = [
 
 const MAX_CHATS = 50;
 const MAX_MSGS = 200;
-
-// LAN dashboards are often plain HTTP, where crypto.randomUUID is missing.
-const uid = () =>
-  typeof crypto !== 'undefined' && 'randomUUID' in crypto
-    ? crypto.randomUUID()
-    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 
 // History lives in this browser, keyed per org so switching workspaces never
 // mixes conversations. Deliberately NOT server state: chat transcripts don't

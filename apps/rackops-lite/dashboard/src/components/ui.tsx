@@ -401,6 +401,15 @@ export function UrlChip({ url }: { url: string }) {
 
 /* ---- Shared helpers ---- */
 
+// uid returns a unique client-side ID (React keys, chat IDs). Never call
+// crypto.randomUUID directly: it exists only in secure contexts, and LAN
+// dashboards are often plain HTTP, where it would throw.
+export function uid(): string {
+  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 // dnsLabel mirrors the backend sanitizer: DNS-safe app names.
 export function dnsLabel(s: string): string {
   const out = s.toLowerCase().replace(/[ ._]/g, '-').replace(/[^a-z0-9-]/g, '').replace(/^-+|-+$/g, '');

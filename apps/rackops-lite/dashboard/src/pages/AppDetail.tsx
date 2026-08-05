@@ -12,7 +12,7 @@ import { useToast, cleanError } from '../components/toast';
 import { useConfirm } from '../components/confirm';
 import {
   Crumbs, EmptyState, Field, InfoTip, Led, Modal, Pill, RowMenu, Skeleton, SkeletonRows,
-  Spinner, Switch, UrlChip, UsageBar, dnsLabel, publicUrls, timeAgo, useUnsavedChanges,
+  Spinner, Switch, UrlChip, UsageBar, dnsLabel, publicUrls, timeAgo, uid, useUnsavedChanges,
 } from '../components/ui';
 
 type Tab = 'overview' | 'networking' | 'logs' | 'deployments' | 'settings';
@@ -41,8 +41,8 @@ function toDraft(s: Service): Draft {
     image: s.image ?? '', command: s.command ?? '',
     port: s.port ? String(s.port) : '', containerPort: s.containerPort ? String(s.containerPort) : '',
     ports: (s.ports ?? []).join(', '),
-    env: (s.env ?? []).map((e) => ({ ...e, rid: crypto.randomUUID() })),
-    mounts: (s.mounts ?? []).map((m) => ({ ...m, rid: crypto.randomUUID() })),
+    env: (s.env ?? []).map((e) => ({ ...e, rid: uid() })),
+    mounts: (s.mounts ?? []).map((m) => ({ ...m, rid: uid() })),
     memLimitMb: s.memLimitMb ? String(s.memLimitMb) : '',
     cpuLimit: s.cpuLimit ? String(s.cpuLimit) : '',
     restartPolicy: s.restartPolicy || 'unless-stopped',
@@ -1032,7 +1032,7 @@ function SettingsTab({ svc, draft, setDraft, nodes, busy, deleting, errors, onDe
         </div>
       ))}
       <button className="btn sm" disabled={readOnly}
-        onClick={() => setDraft({ ...draft, env: [...draft.env, { rid: crypto.randomUUID(), key: '', value: '', secret: false }] })}>
+        onClick={() => setDraft({ ...draft, env: [...draft.env, { rid: uid(), key: '', value: '', secret: false }] })}>
         <Plus size={12} /> Add variable
       </button>
 
@@ -1098,7 +1098,7 @@ function SettingsTab({ svc, draft, setDraft, nodes, busy, deleting, errors, onDe
         </div>
       )}
       <button className="btn sm" disabled={readOnly}
-        onClick={() => setDraft({ ...draft, mounts: [...draft.mounts, { rid: crypto.randomUUID(), type: 'bind', source: '', target: '', readOnly: false }] })}>
+        onClick={() => setDraft({ ...draft, mounts: [...draft.mounts, { rid: uid(), type: 'bind', source: '', target: '', readOnly: false }] })}>
         <Plus size={12} /> Add mount
       </button>
       {(svc.volumes ?? []).length > 0 && (
