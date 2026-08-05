@@ -17,6 +17,17 @@ interface Release { version: string; date: string; title: string; changes: Relea
 
 const releases: Release[] = [
   {
+    version: 'v0.5.0', date: 'August 6, 2026', title: 'macOS, live logs, and hardened sessions',
+    changes: [
+      { lead: 'macOS support', text: ' — the same install one-liner now works on Apple Silicon and Intel Macs: launchd service, in-place self-update, Docker via Docker Desktop or colima.' },
+      { lead: 'Live logs', text: ' — the Logs tab tails your app in real time, and build/deploy output streams line-by-line as it runs.' },
+      { lead: 'Hardened sessions', text: ' — login tokens are signed with a dedicated per-cluster secret. Everyone is signed out once on upgrade; just log in again.' },
+      { lead: 'Restart-proof operations', text: ' — queued deploys and mesh IPs survive control-plane restarts, and agents release their mesh interface and relay ports cleanly.' },
+      { lead: 'Plain-HTTP dashboards', text: ' fixed: app pages no longer crash on LAN dashboards served over http://, and DNS copy buttons work there too.' },
+      { lead: 'Server restart control', text: ' — owners and admins can restart the server from the dashboard, with automatic reconnection.' },
+    ],
+  },
+  {
     version: 'v0.4.0', date: 'July 17, 2026', title: 'Organizations done right, support, and AI-tool access',
     changes: [
       { lead: 'Organizations', text: ' rebuilt Dokploy-style: a sidebar switcher, invitation links, per-member permissions with project-level access, and true scoping. Every org sees only its own machines, apps, domains, and settings.' },

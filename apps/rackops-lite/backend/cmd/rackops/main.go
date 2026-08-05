@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -25,7 +26,7 @@ import (
 	"github.com/rackops/rackops/internal/telemetry"
 )
 
-const version = "0.4.2"
+const version = "0.5.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -112,7 +113,11 @@ func runUpdate() {
 		os.Exit(1)
 	}
 	fmt.Printf("✓ updated to %s (%s)\n", tag, exe)
-	fmt.Println("restart the server to pick it up: sudo systemctl restart rackops")
+	if runtime.GOOS == "darwin" {
+		fmt.Println("restart the server to pick it up: sudo launchctl kickstart -k system/in.rackops.server")
+	} else {
+		fmt.Println("restart the server to pick it up: sudo systemctl restart rackops")
+	}
 }
 
 // runServer starts the control plane and, by default, an embedded local
