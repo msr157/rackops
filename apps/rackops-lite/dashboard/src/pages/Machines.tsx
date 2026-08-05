@@ -1,17 +1,17 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
-  Activity, Boxes, CalendarDays, Check, Clock, Copy, Cpu, Globe, HardDrive, MemoryStick,
+  Activity, Boxes, CalendarDays, Clock, Cpu, Globe, HardDrive, MemoryStick,
   Network as NetworkIcon, Package, Plus, Rocket, RotateCw, Search, Server, Terminal,
-  Thermometer, TriangleAlert, X, Zap,
+  Thermometer, TriangleAlert, Zap,
 } from 'lucide-react';
 import type { Drive, GPU, Node } from '../api';
 import { useData } from '../data';
 import { DataTable } from '../components/Table';
 import type { Column } from '../components/Table';
 import {
-  Crumbs, EmptyState, InfoTip, Led, RowMenu, Seg, Skeleton, SkeletonRows, UsageBar,
-  formatUptime, ledClass, shortGpu, timeAgo,
+  CopyIconBtn, Crumbs, EmptyState, InfoTip, Led, RowMenu, Seg, Skeleton, SkeletonRows,
+  UsageBar, formatUptime, ledClass, shortGpu, timeAgo,
 } from '../components/ui';
 
 // Severity order: ascending floats trouble to the top — offline before online.
@@ -213,30 +213,6 @@ export function MachinesPage({ onAddMachine }: { onAddMachine: () => void }) {
 // Drive health is a real status; anything unrecognized stays neutral.
 const healthBadge: Record<string, string> = { ok: 'ok', warning: 'warn', critical: 'crit' };
 
-// Icon-square copy for kv stripes. Mirrors CopyBtn's clipboard honesty: on
-// insecure origins the write fails, and the button says so instead of
-// flashing a success check over nothing.
-function CopyIconBtn({ text, label }: { text: string; label: string }) {
-  const [state, setState] = useState<'idle' | 'ok' | 'fail'>('idle');
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setState('ok');
-    } catch {
-      setState('fail');
-    }
-    setTimeout(() => setState('idle'), 1800);
-  };
-  return (
-    <button type="button" className="icon-sq sm quiet" onClick={copy} aria-label={label}
-      title={state === 'fail' ? 'Copy failed. Select and copy it manually.' : label}>
-      {state === 'idle' && <Copy size={12} />}
-      {state === 'ok' && <Check size={12} style={{ color: 'var(--ok)' }} />}
-      {state === 'fail' && <X size={12} style={{ color: 'var(--crit)' }} />}
-    </button>
-  );
-}
-
 // One stripe of the host-facts stack: icon + label left, value right (mono
 // when it's data), an optional copy square for things worth pasting.
 function KvRow({ icon, label, value, mono, copy }: {
@@ -246,7 +222,7 @@ function KvRow({ icon, label, value, mono, copy }: {
     <div className="kv-row">
       <span className="kv-label">{icon}{label}</span>
       <span className={`kv-val ${mono ? 'mono' : ''}`}>{value}</span>
-      {copy && <CopyIconBtn text={copy} label={`Copy ${label.toLowerCase()}`} />}
+      {copy && <CopyIconBtn size={12} text={copy} label={`Copy ${label.toLowerCase()}`} />}
     </div>
   );
 }

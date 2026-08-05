@@ -6,7 +6,7 @@ import { api } from '../api';
 import type { APIToken, User } from '../api';
 import { useToast, cleanError } from '../components/toast';
 import { useConfirm } from '../components/confirm';
-import { Crumbs, Field, InfoTip, PasswordInput, SkeletonRows, Spinner, timeAgo } from '../components/ui';
+import { Crumbs, Field, InfoTip, PasswordInput, SkeletonRows, Spinner, copyText, timeAgo } from '../components/ui';
 
 // A key is shown in full exactly once, at creation. Everything about that
 // moment — the accent notice, the MCP snippet below picking it up, revoking
@@ -44,19 +44,18 @@ function isExpired(t: APIToken): boolean {
   return realDate(t.expiresAt) && new Date(t.expiresAt) < new Date();
 }
 
-// The kit CopyBtn assumes the clipboard write succeeds; on a plain-HTTP LAN
-// install the Clipboard API is unavailable and it fails silently. The two
-// copies on this page must never fail silently — an API key shown once, and
-// the config built from it — so they use this guarded button instead.
+// The two copies on this page must never fail silently — an API key shown
+// once, and the config built from it — so failure lands as a toast, not just
+// a flipped icon. copyText already falls back to execCommand on plain-HTTP
+// LAN installs where the Clipboard API is unavailable.
 function CopyGuard({ text }: { text: string }) {
   const toast = useToast();
   const [done, setDone] = useState(false);
   const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(text);
+    if (await copyText(text)) {
       setDone(true);
       window.setTimeout(() => setDone(false), 1400);
-    } catch {
+    } else {
       toast.err('Copy failed. Copy it manually.');
     }
   };

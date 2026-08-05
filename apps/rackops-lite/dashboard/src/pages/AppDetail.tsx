@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import {
-  Activity, ArrowLeft, Box, Boxes, Check, Clock, Cloud, Copy, Folder, FolderOpen, Globe, Hash,
+  Activity, ArrowLeft, Box, Boxes, Clock, Cloud, Folder, FolderOpen, Globe, Hash,
   History, KeyRound, Network, Play, Plus, RotateCw, ScrollText, Server, Square, Trash2,
-  TriangleAlert, Rocket, X, Zap, Settings as SettingsIcon, ExternalLink,
+  TriangleAlert, Rocket, Zap, Settings as SettingsIcon, ExternalLink,
 } from 'lucide-react';
 import { api, subscribeLogChunks } from '../api';
 import type { Service, ServiceUpdate, Mount, EnvVar, Deployment, Domain, DirEntry, PlacementScore, LogChunk } from '../api';
@@ -11,8 +11,9 @@ import { useData } from '../data';
 import { useToast, cleanError } from '../components/toast';
 import { useConfirm } from '../components/confirm';
 import {
-  Crumbs, EmptyState, Field, InfoTip, Led, Modal, Pill, RowMenu, Skeleton, SkeletonRows,
-  Spinner, Switch, UrlChip, UsageBar, dnsLabel, publicUrls, timeAgo, uid, useUnsavedChanges,
+  CopyIconBtn, Crumbs, EmptyState, Field, InfoTip, Led, Modal, Pill, RowMenu, Skeleton,
+  SkeletonRows, Spinner, Switch, UrlChip, UsageBar, dnsLabel, publicUrls, timeAgo, uid,
+  useUnsavedChanges,
 } from '../components/ui';
 
 type Tab = 'overview' | 'networking' | 'logs' | 'deployments' | 'settings';
@@ -357,30 +358,6 @@ export function AppDetail() {
 // honest one.
 const fmtMem = (v: number) => (v >= 1024 ? `${(v / 1024).toFixed(1)} GB` : `${v.toFixed(0)} MB`);
 
-// The per-row copy affordance for kv stripes. Same honesty contract as
-// CopyBtn: clipboard is undefined on insecure origins (a LAN dashboard over
-// http), and flashing a success check on a failed copy would be a lie.
-function KvCopy({ text, label }: { text: string; label: string }) {
-  const [state, setState] = useState<'idle' | 'ok' | 'fail'>('idle');
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setState('ok');
-    } catch {
-      setState('fail');
-    }
-    setTimeout(() => setState('idle'), 1800);
-  };
-  return (
-    <button className="icon-sq sm quiet" onClick={copy} aria-label={label}
-      title={state === 'fail' ? 'Copy failed. Select and copy it manually.' : label}>
-      {state === 'ok' && <Check size={13} style={{ color: 'var(--ok)' }} />}
-      {state === 'fail' && <X size={13} style={{ color: 'var(--crit)' }} />}
-      {state === 'idle' && <Copy size={13} />}
-    </button>
-  );
-}
-
 function KvRow({ icon, label, mono, copyText, copyLabel, children }: {
   icon: React.ReactNode; label: string; mono?: boolean;
   copyText?: string; copyLabel?: string; children: React.ReactNode;
@@ -389,7 +366,7 @@ function KvRow({ icon, label, mono, copyText, copyLabel, children }: {
     <div className="kv-row">
       <span className="kv-label">{icon}{label}</span>
       <span className={`kv-val ${mono ? 'mono' : ''}`}>{children}</span>
-      {copyText && <KvCopy text={copyText} label={copyLabel ?? `Copy ${label.toLowerCase()}`} />}
+      {copyText && <CopyIconBtn text={copyText} label={copyLabel ?? `Copy ${label.toLowerCase()}`} />}
     </div>
   );
 }

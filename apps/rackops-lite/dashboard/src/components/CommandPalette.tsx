@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  LayoutGrid, Boxes, HardDrive, Network, Settings, Rocket, Plus, Bot, Search,
+  Activity, LayoutGrid, Boxes, HardDrive, Network, Settings, Rocket, Plus, Bot, Search,
   Play, Square, RotateCw, ScrollText,
 } from 'lucide-react';
 import { api } from '../api';
@@ -85,6 +85,7 @@ function Palette({ onClose, onAddMachine, onCopilot }: {
       { key: 'apps', group: 'Pages', label: 'Apps', icon: <Boxes size={14} />, run: go('/apps') },
       { key: 'machines', group: 'Pages', label: 'Machines', icon: <HardDrive size={14} />, run: go('/machines') },
       { key: 'network', group: 'Pages', label: 'Network', icon: <Network size={14} />, run: go('/network') },
+      { key: 'activity', group: 'Pages', label: 'Activity', icon: <Activity size={14} />, run: go('/activity') },
       { key: 'copilot-page', group: 'Pages', label: 'Copilot', icon: <Bot size={14} />, run: go('/copilot') },
       { key: 'settings', group: 'Pages', label: 'Settings', icon: <Settings size={14} />, run: go('/settings') },
     ];

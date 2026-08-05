@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
-  Activity, AlertCircle, AlertTriangle, Check, Globe, HardDrive, Plus, Radio, Rocket,
+  AlertCircle, AlertTriangle, Check, Globe, HardDrive, Plus, Rocket,
 } from 'lucide-react';
 import type { Node } from '../api';
 import { useData } from '../data';
@@ -13,10 +13,10 @@ import {
 
 // Home answers one question in one line: is everything okay? Anything that
 // needs attention follows as plain hairline rows, then quiet summaries of
-// machines, apps, and recent activity. No charts, no KPI grid — the sub line
-// carries the numbers and the lists carry the detail.
+// machines and apps. No charts, no KPI grid — the sub line carries the
+// numbers and the lists carry the detail. History lives on /activity.
 export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
-  const { overview, nodes, services, events, alerts, nodeName, loaded } = useData();
+  const { overview, nodes, services, alerts, nodeName, loaded } = useData();
   const navigate = useNavigate();
   const [showAllAttn, setShowAllAttn] = useState(false);
 
@@ -250,41 +250,10 @@ export function HomePage({ onAddMachine }: { onAddMachine: () => void }) {
             </div>
           )}
 
-          <div className="section-title">Activity</div>
-          {!loaded ? (
-            <SkeletonRows count={3} height={36} />
-          ) : (
-            <div className="feed">
-              {events.slice(0, 12).map((e) => (
-                <div key={e.id} className="feed-item">
-                  <span style={{ color: 'var(--faint)', flex: 'none', paddingTop: 1 }} aria-hidden>
-                    {feedIcon(e.kind)}
-                  </span>
-                  <span style={{ flex: 1 }}>{e.message}</span>
-                  <span className="feed-time">{timeAgo(e.createdAt)}</span>
-                </div>
-              ))}
-              {events.length === 0 && (
-                <div className="feed-item">
-                  <span className="faint">quiet so far: activity from deploys, heals, and machines appears here</span>
-                </div>
-              )}
-            </div>
-          )}
         </>
       )}
     </div>
   );
-}
-
-// Feed icons are neutral wayfinding, not status: color never decorates, and
-// anything that truly needs attention already sits in the attention list.
-function feedIcon(kind: string) {
-  if (kind.includes('alert')) return <AlertTriangle size={14} />;
-  if (kind.includes('node') || kind.includes('machine')) return <HardDrive size={14} />;
-  if (kind.includes('deploy') || kind.includes('service')) return <Rocket size={14} />;
-  if (kind.includes('heal')) return <Activity size={14} />;
-  return <Radio size={14} />;
 }
 
 // SetupChecklist guides the first-run journey: machine, then app, then public

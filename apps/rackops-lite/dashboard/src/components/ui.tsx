@@ -4,6 +4,20 @@ import { Link } from 'react-router-dom';
 import type { Service, IngressConfig } from '../api';
 import { useDialogBehavior } from './useDialog';
 
+/* ---- BrandMark: the RackOps "R" ---- */
+
+// The one logo in the product. Drawn as a stroke path in the lucide idiom
+// (24-grid, round caps, currentColor) so it sits flush anywhere an icon does:
+// dark-on-green inside .brand-mark, green-on-dark in the favicon's twin.
+export function BrandMark({ size = 15 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M7 20V4h6a4.5 4.5 0 0 1 0 9H7m5 0l5.5 7" />
+    </svg>
+  );
+}
+
 /* ---- InfoTip: the ⓘ that explains anything non-obvious ---- */
 
 // Hover or keyboard-focus reveals the bubble (CSS); click/tap toggles it so
@@ -310,17 +324,41 @@ export function EmptyState({ icon, title, slim, children }: {
 
 /* ---- Copy affordances ---- */
 
+// The one clipboard write in the product. navigator.clipboard exists only in
+// secure contexts, and LAN dashboards are often plain http — so every copy
+// falls back to the legacy hidden-textarea + execCommand path, which works on
+// any origin. Returns whether the text actually landed on the clipboard;
+// callers surface the rare double failure instead of flashing a false check.
+export async function copyText(text: string): Promise<boolean> {
+  if (typeof navigator !== 'undefined' && navigator.clipboard) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch { /* permission denied or transient — try the legacy path */ }
+  }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    // Off-viewport, not display:none — hidden elements can't be selected.
+    ta.style.position = 'fixed';
+    ta.style.top = '-100px';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    ta.setSelectionRange(0, text.length);
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
 export function CopyBtn({ text, label }: { text: string; label?: string }) {
   const [state, setState] = useState<'idle' | 'ok' | 'fail'>('idle');
   const copy = async () => {
-    // clipboard is undefined on insecure origins (a LAN dashboard over http) —
-    // failing silently while flashing a success check would be a lie.
-    try {
-      await navigator.clipboard.writeText(text);
-      setState('ok');
-    } catch {
-      setState('fail');
-    }
+    setState((await copyText(text)) ? 'ok' : 'fail');
     setTimeout(() => setState('idle'), 1800);
   };
   return (
@@ -330,6 +368,24 @@ export function CopyBtn({ text, label }: { text: string; label?: string }) {
       {state === 'fail' && <X size={12} style={{ color: 'var(--crit)' }} />}
       {state === 'idle' && <Copy size={12} />}
       {state === 'fail' ? 'Copy failed' : label}
+    </button>
+  );
+}
+
+// Icon-square variant for kv stripes and tight rows: same copyText contract,
+// check/cross feedback in place of a label.
+export function CopyIconBtn({ text, label, size = 13 }: { text: string; label: string; size?: number }) {
+  const [state, setState] = useState<'idle' | 'ok' | 'fail'>('idle');
+  const copy = async () => {
+    setState((await copyText(text)) ? 'ok' : 'fail');
+    setTimeout(() => setState('idle'), 1800);
+  };
+  return (
+    <button type="button" className="icon-sq sm quiet" onClick={copy} aria-label={label}
+      title={state === 'fail' ? 'Copy failed. Select and copy it manually.' : label}>
+      {state === 'idle' && <Copy size={size} />}
+      {state === 'ok' && <Check size={size} style={{ color: 'var(--ok)' }} />}
+      {state === 'fail' && <X size={size} style={{ color: 'var(--crit)' }} />}
     </button>
   );
 }

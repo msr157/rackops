@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Routes, Route, NavLink, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutGrid, Boxes, HardDrive, Network as NetworkIcon, Settings, LogOut, Bot,
-  UserRound, LifeBuoy, CloudOff, RotateCw, Server, Bell, Sparkles,
+  UserRound, LifeBuoy, CloudOff, RotateCw, Bell, Sparkles, Activity,
   AlertTriangle, AlertCircle, PanelLeft, CircleHelp, X,
 } from 'lucide-react';
 import { api, getToken, clearToken, getActiveOrg } from './api';
@@ -14,7 +14,7 @@ import { CopilotProvider, useCopilot } from './components/CopilotDrawer';
 import { CommandPalette } from './components/CommandPalette';
 import { AddMachineModal } from './components/AddMachineModal';
 import { OrgSwitcher } from './components/OrgSwitcher';
-import { Led, UsageBar, timeAgo } from './components/ui';
+import { BrandMark, Led, UsageBar, timeAgo } from './components/ui';
 import { AuthScreen } from './pages/Auth';
 import { InvitationPage } from './pages/Invitation';
 import { HomePage } from './pages/Home';
@@ -28,6 +28,7 @@ import { SettingsPage } from './pages/SettingsPage';
 import { ProfilePage } from './pages/Profile';
 import { SupportPage } from './pages/Support';
 import { ChangelogPage } from './pages/Changelog';
+import { ActivityPage } from './pages/Activity';
 
 export default function App() {
   const [authed, setAuthed] = useState<boolean | null>(null);
@@ -79,7 +80,7 @@ export default function App() {
 function BootScreen() {
   return (
     <div className="boot" role="status">
-      <div className="brand-mark" style={{ width: 34, height: 34 }}><Server size={18} /></div>
+      <div className="brand-mark" style={{ width: 34, height: 34 }}><BrandMark size={18} /></div>
       <div className="boot-name">RackOps</div>
       <div className="faint">Starting up…</div>
     </div>
@@ -178,6 +179,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
     { to: '/apps', label: 'Apps', icon: <Boxes size={16} /> },
     { to: '/machines', label: 'Machines', icon: <HardDrive size={16} /> },
     { to: '/network', label: 'Network', icon: <NetworkIcon size={16} /> },
+    { to: '/activity', label: 'Activity', icon: <Activity size={16} /> },
     { to: '/copilot', label: 'Copilot', icon: <Bot size={16} /> },
   ];
   const navWorkspace: NavItem[] = [
@@ -204,7 +206,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
 
       <header className="topnav">
         <NavLink to="/" className="topnav-brand" aria-label="RackOps home">
-          <span className="brand-mark" aria-hidden><Server size={15} /></span>
+          <span className="brand-mark" aria-hidden><BrandMark /></span>
           <span className="brand-name">RackOps</span>
           <span className="lite-tag">LITE</span>
         </NavLink>
@@ -278,6 +280,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
             <Route path="/machines" element={<MachinesPage onAddMachine={() => setAddMachine(true)} />} />
             <Route path="/machines/:id" element={<MachineDetail />} />
             <Route path="/network" element={<NetworkPage />} />
+            <Route path="/activity" element={<ActivityPage />} />
             <Route path="/copilot" element={<CopilotPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/profile" element={<ProfilePage />} />
@@ -368,6 +371,10 @@ function NotificationBell() {
                     </span>
                   </div>
                 ))}
+                <button className="bell-item" onClick={() => { setOpen(false); navigate('/activity'); }}>
+                  <Activity size={14} style={{ flexShrink: 0, marginTop: 2 }} aria-hidden />
+                  <span style={{ flex: 1 }}>View all activity</span>
+                </button>
               </>
             )}
           </div>

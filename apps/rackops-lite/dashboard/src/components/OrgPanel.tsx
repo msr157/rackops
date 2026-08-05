@@ -8,7 +8,7 @@ import type { Invitation, Organization, OrgMember, OrgPermissions, Project, User
 import { useToast, cleanError } from './toast';
 import { useConfirm } from './confirm';
 import type { RowMenuItem } from './ui';
-import { EmptyState, Field, InfoTip, Modal, Pill, RowMenu, SkeletonRows, Spinner, timeAgo } from './ui';
+import { EmptyState, Field, InfoTip, Modal, Pill, RowMenu, SkeletonRows, Spinner, copyText, timeAgo } from './ui';
 
 // The identity mark on member/invitation rows: a neutral initial disc.
 // Inline-styled because the design system has no non-interactive avatar class
@@ -525,10 +525,9 @@ function InviteModal({ org, onClose, onDone }: { org: Organization; onClose: () 
   };
 
   const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(link);
+    if (await copyText(link)) {
       setCopied(true); setTimeout(() => setCopied(false), 1400);
-    } catch {
+    } else {
       toast.err('Couldn’t reach the clipboard. Select the link and copy it manually.');
     }
   };
