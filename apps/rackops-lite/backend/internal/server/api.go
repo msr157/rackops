@@ -31,6 +31,17 @@ type API struct {
 	InstallID string
 	// Cluster is the raft layer (nil = single-server).
 	Cluster *raftstore.Cluster
+	// FrontDoorPOP is the vendor edge installs dial (host:port). Empty
+	// disables the feature: a self-hosted install with no vendor
+	// relationship should not offer a button that cannot work.
+	FrontDoorPOP string
+	// FrontDoorZone is the DNS suffix public hostnames are minted under.
+	FrontDoorZone string
+	// FrontDoorAdmin is the base URL of the edge's admin API, used to
+	// enroll this install and register its hostnames.
+	FrontDoorAdmin string
+	// FrontDoorToken authenticates to that admin API.
+	FrontDoorToken string
 	// applyGuard applies replicated state on followers only.
 	applyGuard func([]byte)
 }
@@ -202,7 +213,16 @@ func (a *API) handleIngest(w http.ResponseWriter, r *http.Request) {
 
 	a.Hub.BroadcastOrg(node.OrgID, "node_metrics", node)
 
-	resp := types.AgentResponse{Tasks: a.Store.DrainTasks(rep.NodeID)}
+	a.applyFrontDoorReport(rep.NodeID, rep.FrontDoor)
+
+	resp := types.AgentResponse{
+		Tasks: a.Store.DrainTasks(rep.NodeID),
+		// The tunnel assignment is desired state, re-asserted on every
+		// report rather than queued as a task: a task would be delivered
+		// once and lost across an agent restart, leaving the tunnel down
+		// until something else happened to change.
+		FrontDoor: a.frontDoorSpecFor(rep.NodeID),
+	}
 	if a.Mesh != nil {
 		if m := a.Mesh.HandleExchange(rep.NodeID, rep.Mesh); m != nil {
 			// Tell the agent which service ports to expose on the mesh.

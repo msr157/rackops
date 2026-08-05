@@ -27,24 +27,28 @@ const (
 
 // Node is a machine in the fleet.
 type Node struct {
-	ID        string     `json:"id"`
-	Name      string     `json:"name"`
-	Role      NodeRole   `json:"role"`
-	Status    NodeStatus `json:"status"`
-	OrgID     string     `json:"orgId,omitempty"` // owning organization
-	IP        string     `json:"ip"`              // LAN/public IP
-	MeshIP    string     `json:"meshIp"`          // WireGuard mesh IP (10.77.x.x)
-	PublicIP  string     `json:"publicIp,omitempty"`
-	OS        string     `json:"os"`
-	Arch      string     `json:"arch"`
-	Kernel    string     `json:"kernel"`
-	Hostname  string     `json:"hostname"`
-	JoinedAt  time.Time  `json:"joinedAt"`
-	LastSeen  time.Time  `json:"lastSeen"`
-	AgentVer  string     `json:"agentVersion"`
-	HasPublic bool       `json:"hasPublicIp"` // eligible as relay/ingress node
-	Hardware  Hardware   `json:"hardware"`
-	Metrics   Metrics    `json:"metrics"`
+	ID       string     `json:"id"`
+	Name     string     `json:"name"`
+	Role     NodeRole   `json:"role"`
+	Status   NodeStatus `json:"status"`
+	OrgID    string     `json:"orgId,omitempty"` // owning organization
+	IP       string     `json:"ip"`              // LAN/public IP
+	MeshIP   string     `json:"meshIp"`          // WireGuard mesh IP (10.77.x.x)
+	PublicIP string     `json:"publicIp,omitempty"`
+	OS       string     `json:"os"`
+	Arch     string     `json:"arch"`
+	Kernel   string     `json:"kernel"`
+	Hostname string     `json:"hostname"`
+	JoinedAt time.Time  `json:"joinedAt"`
+	LastSeen time.Time  `json:"lastSeen"`
+	AgentVer string     `json:"agentVersion"`
+	// FrontDoorKey is this node's Ed25519 public key for RackOps Front Door,
+	// reported by the agent. It is what the control plane enrolls with the
+	// vendor edge, so it is recorded even when the feature is off.
+	FrontDoorKey string   `json:"frontDoorKey,omitempty"`
+	HasPublic    bool     `json:"hasPublicIp"` // eligible as relay/ingress node
+	Hardware     Hardware `json:"hardware"`
+	Metrics      Metrics  `json:"metrics"`
 }
 
 // Hardware is the discovered, mostly-static hardware inventory of a node.
@@ -229,6 +233,10 @@ type Service struct {
 	Mounts        []Mount     `json:"mounts,omitempty"`        // storage attachments
 	Domain        string      `json:"domain"`                  // chosen domain (empty = generated)
 	Ingress       IngressType `json:"ingress"`
+	// FrontDoor marks a service published through RackOps Front Door. Its
+	// Domain is then a vendor-issued hostname rather than one the customer
+	// owns, which is why turning it off also clears Domain.
+	FrontDoor bool `json:"frontDoor,omitempty"`
 	// QuickTunnelURL is a temporary trycloudflare.com URL (testing only —
 	// changes on every tunnel restart; not for production traffic).
 	QuickTunnelURL string   `json:"quickTunnelUrl,omitempty"`
@@ -573,6 +581,115 @@ func (t *SupportTicket) Sanitized() *SupportTicket {
 	return &c
 }
 
+// ---- Front Door ----
+
+// FrontDoorEntryPort is the loopback port Traefik dedicates to Front Door
+// traffic on the tunnel node.
+//
+// Front Door cannot share the normal `web` entrypoint: once ACME is enabled
+// that entrypoint carries a blanket HTTP→HTTPS redirect, and since the
+// tunnel delivers cleartext, every request would be answered with a 301 to
+// its own public URL — which resolves back to the POP, back down the tunnel,
+// and into an infinite loop. A separate entrypoint bound to 127.0.0.1 also
+// keeps the port off the network entirely.
+const FrontDoorEntryPort = 8099
+
+// FrontDoorStatus is the lifecycle of an install's tunnel to the vendor edge.
+type FrontDoorStatus string
+
+const (
+	FrontDoorOff        FrontDoorStatus = "off"
+	FrontDoorConnecting FrontDoorStatus = "connecting"
+	FrontDoorConnected  FrontDoorStatus = "connected"
+	// FrontDoorRejected is terminal until something changes on the vendor
+	// side: a bad key, an unsupported version, or a suspended account. It is
+	// distinct from "connecting" precisely so the console can stop showing a
+	// spinner and show the reason instead.
+	FrontDoorRejected FrontDoorStatus = "rejected"
+)
+
+// FrontDoorSpec is the assignment the control plane sends to the agent that
+// holds the tunnel (the ingress node). It is delivered inside AgentResponse
+// on the existing report loop rather than as a task, because it describes
+// desired state that must be re-asserted continuously — a task would be
+// delivered once and lost on an agent restart.
+type FrontDoorSpec struct {
+	Enabled bool `json:"enabled"`
+	// POPAddr is the point of presence to dial, host:port.
+	POPAddr string `json:"popAddr,omitempty"`
+	// TenantID identifies this install to the POP.
+	TenantID string `json:"tenantId,omitempty"`
+	// Hostnames this install serves. Used to reject any stream for a
+	// hostname the POP should not have sent here.
+	Hostnames []string `json:"hostnames,omitempty"`
+	// LocalTarget is where matching traffic is delivered on this node,
+	// normally the Traefik edge's HTTP port on loopback.
+	LocalTarget string `json:"localTarget,omitempty"`
+}
+
+// Equal reports whether two specs describe the same assignment, so the agent
+// can skip a reconnect when the control plane re-sends an unchanged spec on
+// every report.
+func (s FrontDoorSpec) Equal(o FrontDoorSpec) bool {
+	if s.Enabled != o.Enabled || s.POPAddr != o.POPAddr ||
+		s.TenantID != o.TenantID || s.LocalTarget != o.LocalTarget ||
+		len(s.Hostnames) != len(o.Hostnames) {
+		return false
+	}
+	for i := range s.Hostnames {
+		if s.Hostnames[i] != o.Hostnames[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// FrontDoorState is what the agent reports back about its tunnel.
+type FrontDoorState struct {
+	Status FrontDoorStatus `json:"status"`
+	// Message explains a non-connected status in words the customer can act
+	// on; it is surfaced verbatim in the console.
+	Message string `json:"message,omitempty"`
+	// PublicKey is this install's Front Door identity, reported so the
+	// control plane can enroll it without a separate round trip.
+	PublicKey   string    `json:"publicKey,omitempty"`
+	POPID       string    `json:"popId,omitempty"`
+	Transport   string    `json:"transport,omitempty"` // quic | tcp
+	Hostnames   []string  `json:"hostnames,omitempty"`
+	OpenStreams int       `json:"openStreams,omitempty"`
+	BytesUp     int64     `json:"bytesUp,omitempty"`
+	BytesDown   int64     `json:"bytesDown,omitempty"`
+	QuotaBytes  int64     `json:"quotaBytes,omitempty"`
+	UsedBytes   int64     `json:"usedBytes,omitempty"`
+	ConnectedAt time.Time `json:"connectedAt,omitzero"`
+}
+
+// FrontDoorConfig is the install-wide Front Door setting, held in the store.
+type FrontDoorConfig struct {
+	Enabled bool `json:"enabled"`
+	// TenantID and Workspace are assigned by the vendor at enrollment.
+	TenantID  string `json:"tenantId,omitempty"`
+	Workspace string `json:"workspace,omitempty"`
+	// POPAddr is the edge this install connects to.
+	POPAddr string `json:"popAddr,omitempty"`
+	// Zone is the DNS suffix hostnames are minted under.
+	Zone string `json:"zone,omitempty"`
+	// NodeID is the node holding the tunnel; it follows the ingress node,
+	// since that is where Traefik runs.
+	NodeID string `json:"nodeId,omitempty"`
+
+	// Runtime status mirrored from the agent's report, so the console reads
+	// one place rather than joining node state itself.
+	Status      FrontDoorStatus `json:"status,omitempty"`
+	StatusMsg   string          `json:"statusMsg,omitempty"`
+	POPID       string          `json:"popId,omitempty"`
+	Transport   string          `json:"transport,omitempty"`
+	UsedBytes   int64           `json:"usedBytes,omitempty"`
+	QuotaBytes  int64           `json:"quotaBytes,omitempty"`
+	ConnectedAt time.Time       `json:"connectedAt,omitzero"`
+	LastChange  time.Time       `json:"lastChange,omitzero"`
+}
+
 // ---- Agent protocol ----
 
 // AgentReport is what an agent pushes to the control plane each interval.
@@ -587,6 +704,9 @@ type AgentReport struct {
 	AgentVer    string            `json:"agentVersion"`
 	Mesh        *MeshInfo         `json:"mesh,omitempty"`
 	TaskResults []TaskResult      `json:"taskResults,omitempty"`
+	// FrontDoor reports this node's tunnel state. Sent only by the node
+	// holding the tunnel; nil everywhere else.
+	FrontDoor *FrontDoorState `json:"frontDoor,omitempty"`
 }
 
 // HostInfo is static host identity info.
@@ -695,4 +815,7 @@ type AgentResponse struct {
 	Tasks      []AgentTask `json:"tasks"`
 	Mesh       *MeshInfo   `json:"mesh,omitempty"`
 	LeaderAddr string      `json:"leaderAddr,omitempty"` // set when this server is not the Raft leader
+	// FrontDoor is the tunnel assignment for this node. Sent to the node
+	// holding the tunnel; nil (meaning "do not run one") for every other.
+	FrontDoor *FrontDoorSpec `json:"frontDoor,omitempty"`
 }

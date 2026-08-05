@@ -487,10 +487,11 @@ function OverviewTab({ svc, nodeLabel, urls }: { svc: Service; nodeLabel: string
 
 function NetworkingTab({ svc, reload }: { svc: Service; reload: () => void }) {
   const toast = useToast();
-  const { nodes, ingress, refresh } = useData();
+  const { nodes, ingress, frontDoor, refresh } = useData();
   const [domains, setDomains] = useState<Domain[]>([]);
   const [domainsLoaded, setDomainsLoaded] = useState(false);
   const [tunnelBusy, setTunnelBusy] = useState(false);
+  const [fdBusy, setFdBusy] = useState(false);
   const [exposeBusy, setExposeBusy] = useState(false);
   // Which route call is in flight. Picking in the select is local-only;
   // nothing touches the API until Apply route or Remove route.
@@ -530,6 +531,26 @@ function NetworkingTab({ svc, reload }: { svc: Service; reload: () => void }) {
       reload(); refresh();
     } catch (e) { toast.err(cleanError(e)); }
     setExposeBusy(false);
+  };
+
+  const enableFrontDoor = async () => {
+    setFdBusy(true);
+    try {
+      const r = await api.enableServiceFrontDoor(svc.id);
+      toast.ok(`Public at ${r.domain}`);
+      reload(); refresh();
+    } catch (e) { toast.err(cleanError(e)); }
+    setFdBusy(false);
+  };
+
+  const disableFrontDoor = async () => {
+    setFdBusy(true);
+    try {
+      await api.disableServiceFrontDoor(svc.id);
+      toast.ok('Public address removed.');
+      reload(); refresh();
+    } catch (e) { toast.err(cleanError(e)); }
+    setFdBusy(false);
   };
 
   const startTunnel = async () => {
@@ -578,57 +599,52 @@ function NetworkingTab({ svc, reload }: { svc: Service; reload: () => void }) {
 
       {svc.port > 0 && (
         <>
-          {/* Option 1: instant URL */}
-          <div className="section-title">
-            <Zap size={14} aria-hidden /> Instant URL
-            <span className="badge accent">Recommended</span>
-            <InfoTip wide>
-              Publishes this app at a free {`<app>.<ip>.nip.io`} address through your own
-              edge proxy. No DNS setup and no third party; the address keeps working for
-              as long as the edge runs.
-            </InfoTip>
-          </div>
-          <div className="dim" style={{ marginBottom: 10 }}>Free nip.io address through your own edge.</div>
-          <div className="row wrap">
-            <button className="btn" disabled={exposeBusy || !edgeReady} onClick={expose}>
-              {exposeBusy ? <Spinner size={13} /> : <Zap size={13} aria-hidden />} Get instant URL
-            </button>
-            {!edgeReady && (
-              <span className="faint">
-                Needs the edge proxy running. <Link to="/network">Start it on the Network page</Link>.
-              </span>
-            )}
-          </div>
-
-          {/* Option 2: quick tunnel — the one real on/off here, so it wears
-              the toggle block. */}
-          <div className="setting toggle" style={{ marginTop: 28 }}>
+          {/* Option 1: Front Door — the headline path. A permanent HTTPS URL
+              that needs no public IP, no router change and no DNS, so it goes
+              first and everything else reads as a fallback from it. */}
+          <div className="setting toggle" style={{ marginTop: 22 }}>
             <div style={{ minWidth: 0, flex: 1 }}>
               <div className="setting-title">
-                <Cloud size={14} aria-hidden /> Quick tunnel
+                <Globe size={14} aria-hidden /> Front Door
+                <span className="badge accent">Recommended</span>
                 <InfoTip wide>
-                  A Cloudflare tunnel with a public HTTPS URL. No account, no port forwarding,
-                  works behind any router. The URL changes when the tunnel restarts, so treat
-                  it as disposable (best for demos and testing).
+                  A permanent public HTTPS address on RackOps&rsquo; own network. No ports to
+                  open, no DNS to edit, no third-party account — and it works behind CGNAT,
+                  where port forwarding cannot. The address stays the same across restarts
+                  and IP changes.
                 </InfoTip>
               </div>
-              <div className="setting-desc">Temporary public HTTPS URL, works behind any router.</div>
-              {tunnelBusy && !svc.quickTunnelUrl && (
-                <div className="faint" style={{ marginTop: 6 }}>Starting. The URL appears here in about 15s.</div>
-              )}
-              {svc.quickTunnelUrl && (
+              <div className="setting-desc">
+                Permanent public HTTPS address. Works behind any router, including CGNAT.
+              </div>
+              {svc.frontDoor && svc.domain && (
                 <a className="mono" style={{ fontSize: 12, marginTop: 6, display: 'inline-block' }}
-                  href={svc.quickTunnelUrl} target="_blank" rel="noreferrer">
-                  {svc.quickTunnelUrl} <ExternalLink size={10} />
+                  href={`https://${svc.domain}`} target="_blank" rel="noreferrer">
+                  https://{svc.domain} <ExternalLink size={10} />
                 </a>
               )}
+              {!frontDoor?.enabled && (
+                <div className="faint" style={{ marginTop: 6 }}>
+                  Turn Front Door on for this install first. <Link to="/network">Network page</Link>.
+                </div>
+              )}
+              {/* When the tunnel is down the URL exists but does not answer.
+                  Saying so here beats letting the customer discover it by
+                  clicking a dead link. */}
+              {svc.frontDoor && frontDoor?.enabled && frontDoor.status !== 'connected' && (
+                <div className="faint" style={{ marginTop: 6 }}>
+                  {frontDoor.status === 'rejected'
+                    ? `Not connected: ${frontDoor.statusMsg || 'the RackOps edge refused this machine.'}`
+                    : 'Connecting to the RackOps edge — the address starts answering once it is up.'}
+                </div>
+              )}
             </div>
-            <Switch checked={!!svc.quickTunnelUrl || tunnelBusy} disabled={tunnelBusy}
-              ariaLabel="Quick tunnel"
-              onChange={(v) => (v ? startTunnel() : stopTunnel())} />
+            <Switch checked={!!svc.frontDoor} disabled={fdBusy || !frontDoor?.enabled}
+              ariaLabel="Front Door public address"
+              onChange={(v) => (v ? enableFrontDoor() : disableFrontDoor())} />
           </div>
 
-          {/* Option 3: own domain. Selecting only stages the choice; Apply
+          {/* Option 2: own domain. Selecting only stages the choice; Apply
               route is the single commit point. */}
           <div className="section-title">
             <Globe size={14} aria-hidden /> Your own domain
@@ -678,6 +694,69 @@ function NetworkingTab({ svc, reload }: { svc: Service; reload: () => void }) {
               </span>
             </div>
           )}
+
+          {/* Everything below is a fallback from Front Door. Collapsed by
+              default: two visible buttons that both say "make this public"
+              is a choice nobody wants at the moment they are trying to get an
+              app online. Kept because a nip.io address needs no vendor at
+              all, and a quick tunnel is the escape hatch if Front Door is
+              down. */}
+          <details style={{ marginTop: 30 }}>
+            <summary className="dim" style={{ cursor: 'pointer', fontSize: 13 }}>
+              Other ways to publish this app
+            </summary>
+
+            <div className="section-title" style={{ marginTop: 18 }}>
+              <Zap size={14} aria-hidden /> Instant URL
+              <InfoTip wide>
+                Publishes this app at a free {`<app>.<ip>.nip.io`} address through your own
+                edge proxy. No DNS setup and no third party — but it only works if this
+                machine already has a reachable IP.
+              </InfoTip>
+            </div>
+            <div className="dim" style={{ marginBottom: 10 }}>
+              Free nip.io address through your own edge. Needs a reachable IP.
+            </div>
+            <div className="row wrap">
+              <button className="btn" disabled={exposeBusy || !edgeReady} onClick={expose}>
+                {exposeBusy ? <Spinner size={13} /> : <Zap size={13} aria-hidden />} Get instant URL
+              </button>
+              {!edgeReady && (
+                <span className="faint">
+                  Needs the edge proxy running. <Link to="/network">Start it on the Network page</Link>.
+                </span>
+              )}
+            </div>
+
+            <div className="setting toggle" style={{ marginTop: 24 }}>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div className="setting-title">
+                  <Cloud size={14} aria-hidden /> Quick tunnel
+                  <InfoTip wide>
+                    A Cloudflare tunnel with a public HTTPS URL. No account, no port
+                    forwarding, works behind any router. The URL changes when the tunnel
+                    restarts, so treat it as disposable — Front Door gives you a permanent
+                    one.
+                  </InfoTip>
+                </div>
+                <div className="setting-desc">
+                  Temporary URL via Cloudflare. Changes on every restart.
+                </div>
+                {tunnelBusy && !svc.quickTunnelUrl && (
+                  <div className="faint" style={{ marginTop: 6 }}>Starting. The URL appears here in about 15s.</div>
+                )}
+                {svc.quickTunnelUrl && (
+                  <a className="mono" style={{ fontSize: 12, marginTop: 6, display: 'inline-block' }}
+                    href={svc.quickTunnelUrl} target="_blank" rel="noreferrer">
+                    {svc.quickTunnelUrl} <ExternalLink size={10} />
+                  </a>
+                )}
+              </div>
+              <Switch checked={!!svc.quickTunnelUrl || tunnelBusy} disabled={tunnelBusy}
+                ariaLabel="Quick tunnel"
+                onChange={(v) => (v ? startTunnel() : stopTunnel())} />
+            </div>
+          </details>
         </>
       )}
     </div>

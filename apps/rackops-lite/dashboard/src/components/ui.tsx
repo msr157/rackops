@@ -375,12 +375,18 @@ export function Spinner({ size = 14 }: { size?: number }) {
 
 /* ---- Live URL chips: the payoff of the whole product ---- */
 
-export interface PublicUrl { url: string; kind: 'domain' | 'tunnel' }
+export interface PublicUrl { url: string; kind: 'domain' | 'tunnel' | 'frontdoor' }
 
 // publicUrls lists every address where an app is reachable from outside.
 export function publicUrls(svc: Service, ingress: IngressConfig | null): PublicUrl[] {
   const out: PublicUrl[] = [];
-  if (svc.domain && ingress?.enabled) {
+  // A Front Door address is always HTTPS on the standard port and does not
+  // depend on the local edge's ports or ACME state — the vendor POP holds the
+  // certificate, so applying the edge's scheme/port here would print a URL
+  // that does not exist.
+  if (svc.domain && svc.frontDoor) {
+    out.push({ url: `https://${svc.domain}`, kind: 'frontdoor' });
+  } else if (svc.domain && ingress?.enabled) {
     const tls = !!ingress.acmeEmail;
     const port = tls ? ingress.httpsPort : ingress.httpPort;
     const std = (tls && port === 443) || (!tls && port === 80);
@@ -405,6 +411,16 @@ export function UrlChip({ url }: { url: string }) {
 export function dnsLabel(s: string): string {
   const out = s.toLowerCase().replace(/[ ._]/g, '-').replace(/[^a-z0-9-]/g, '').replace(/^-+|-+$/g, '');
   return out || 'app';
+}
+
+// formatBytes renders a transfer figure for humans. Binary units, one
+// decimal, so 100 GiB of quota reads as "100 GB" rather than "107374182400".
+export function formatBytes(n: number): string {
+  if (!n || n < 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let v = n, i = 0;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return `${i === 0 ? v : v.toFixed(1)} ${units[i]}`;
 }
 
 export function timeAgo(iso: string): string {

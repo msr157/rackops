@@ -234,6 +234,16 @@ func (a *API) deployTraefik(cfg types.IngressConfig) {
 		"--providers.http.pollInterval=5s",
 		fmt.Sprintf("--entrypoints.web.address=:%d", cfg.HTTPPort),
 		fmt.Sprintf("--entrypoints.websecure.address=:%d", cfg.HTTPSPort),
+		// A dedicated loopback entrypoint for RackOps Front Door traffic.
+		//
+		// It exists because the `web` entrypoint gets a blanket HTTP→HTTPS
+		// redirect once ACME is on (below). Front Door delivers cleartext
+		// from the tunnel, so on `web` every request would answer 301 to
+		// its own public URL — which resolves back to the POP, back down
+		// the tunnel, and into an infinite redirect loop. Binding to
+		// 127.0.0.1 also keeps this port off the network: the only thing
+		// that may speak to it is the tunnel client on this machine.
+		fmt.Sprintf("--entrypoints.frontdoor.address=127.0.0.1:%d", types.FrontDoorEntryPort),
 		"--api.dashboard=false",
 		"--log.level=INFO",
 	}
@@ -376,6 +386,10 @@ func (a *API) handleSetServiceDomain(w http.ResponseWriter, r *http.Request) {
 	a.Store.Mutate(func() {
 		svc.Domain = domain
 		svc.Ingress = req.Ingress
+		// Pointing the app at a domain the customer owns takes it off Front
+		// Door. Leaving the flag set would keep the vendor edge advertising
+		// a hostname this service no longer answers on.
+		svc.FrontDoor = false
 		if svc.Domain == "" {
 			svc.Ingress = types.IngressNone
 			svc.RelayPort = 0
@@ -425,6 +439,10 @@ func (a *API) handleExposeService(w http.ResponseWriter, r *http.Request) {
 	domain := autoDomain(svc.Name, edgeIP)
 	a.Store.Mutate(func() {
 		svc.Domain = domain
+		// A nip.io address replaces a Front Door one: both write Domain, so
+		// leaving the flag set would misreport which service the vendor edge
+		// still routes to.
+		svc.FrontDoor = false
 		if svc.NodeID == a.Store.Ingress.NodeID {
 			svc.Ingress = types.IngressStatic
 		} else {
@@ -515,7 +533,16 @@ func (a *API) handleTraefikConfig(w http.ResponseWriter, r *http.Request) {
 				"entryPoints": []string{"web"},
 				"middlewares": []string{"rackops-edge"},
 			}
-			if ingress.ACMEEmail != "" {
+			// Front Door hostnames live on their own loopback entrypoint and
+			// stay plain HTTP. TLS for them is terminated at the vendor POP,
+			// which holds the wildcard certificate. Letting ACME chase them
+			// would mean requesting certificates for names the customer does
+			// not control: every challenge would fail, and the failures would
+			// burn Let's Encrypt rate limits the customer's real domains need.
+			switch {
+			case svc.FrontDoor:
+				router["entryPoints"] = []string{"frontdoor"}
+			case ingress.ACMEEmail != "":
 				router["entryPoints"] = []string{"web", "websecure"}
 				router["tls"] = map[string]any{"certResolver": "le"}
 			}

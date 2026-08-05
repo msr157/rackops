@@ -77,6 +77,10 @@ func (a *API) apiRoutes() []route {
 		{"POST", "/api/services/{id}/expose", "network", "Mint a zero-DNS nip.io URL for a service", a.handleExposeService, false},
 		{"POST", "/api/services/{id}/quick-tunnel", "network", "Start a Cloudflare quick tunnel (testing)", a.handleStartQuickTunnel, false},
 		{"DELETE", "/api/services/{id}/quick-tunnel", "network", "Stop the quick tunnel", a.handleStopQuickTunnel, false},
+		{"GET", "/api/frontdoor", "network", "RackOps Front Door configuration + status", a.handleGetFrontDoor, false},
+		{"POST", "/api/frontdoor", "network", "Turn RackOps Front Door on or off for this install", a.handleSetFrontDoor, false},
+		{"POST", "/api/services/{id}/frontdoor", "network", "Publish an app at a permanent RackOps Front Door URL", a.handleEnableServiceFrontDoor, false},
+		{"DELETE", "/api/services/{id}/frontdoor", "network", "Remove an app's Front Door URL", a.handleDisableServiceFrontDoor, false},
 
 		// Auth & account
 		{"GET", "/api/auth/status", "auth", "Setup state: does an owner account exist yet?", a.handleAuthStatus, true},

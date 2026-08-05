@@ -33,6 +33,10 @@ type Store struct {
 	Invitations map[string]*types.Invitation    `json:"invitations"`
 	Tickets     map[string]*types.SupportTicket `json:"tickets"`
 	Ingress     types.IngressConfig             `json:"ingress"`
+	// FrontDoor is the install-wide RackOps Front Door configuration: the
+	// vendor-run tunnel that gives apps a public HTTPS address without a
+	// public IP.
+	FrontDoor types.FrontDoorConfig `json:"frontDoor"`
 	// Settings is the pre-org legacy blob; EnsureDefaultOrg moves it into
 	// OrgSettings under the default org. Kept only so old state files load.
 	Settings Settings `json:"settings"`
@@ -198,6 +202,7 @@ func (s *Store) ImportJSON(data []byte) error {
 	s.Alerts = in.Alerts
 	s.Domains = in.Domains
 	s.Ingress = in.Ingress
+	s.FrontDoor = in.FrontDoor
 	s.Settings = in.Settings
 	s.Events = in.Events
 	s.ClusterHTTP = in.ClusterHTTP

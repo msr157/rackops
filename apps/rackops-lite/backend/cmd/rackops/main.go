@@ -129,6 +129,11 @@ func runServer(args []string) {
 	raftAdvertise := fs.String("raft-advertise", "", "raft address peers reach us on (default: advertise host + raft port)")
 	join := fs.String("join", "", "join an existing cluster via a leader's HTTP address")
 	nodeID := fs.String("node-id", "", "stable server node ID (default: derived from advertise addr)")
+	fdPOP := fs.String("frontdoor-pop", "", "RackOps Front Door edge to dial, host:port (empty disables Front Door)")
+	fdZone := fs.String("frontdoor-zone", "link.rackops.in", "DNS zone Front Door hostnames are issued under")
+	fdAdmin := fs.String("frontdoor-admin", "", "base URL of the Front Door edge admin API")
+	fdToken := fs.String("frontdoor-token", "", "token for the Front Door edge admin API")
+	fdTokenFile := fs.String("frontdoor-token-file", "", "file holding the Front Door admin token (preferred over --frontdoor-token)")
 	_ = fs.Parse(args)
 
 	server.ServerVersion = version
@@ -164,6 +169,15 @@ func runServer(args []string) {
 		InstallID: server.LoadOrCreateInstallID(*dataDir),
 		DashFS:    server.DashboardFS(),
 		History:   server.NewHistory(*dataDir),
+
+		FrontDoorPOP:   *fdPOP,
+		FrontDoorZone:  *fdZone,
+		FrontDoorAdmin: *fdAdmin,
+		FrontDoorToken: readSecret(*fdTokenFile, *fdToken),
+	}
+	if api.FrontDoorPOP != "" {
+		log.Printf("server: RackOps Front Door available via %s (zone %s)", api.FrontDoorPOP, api.FrontDoorZone)
+		go api.RunFrontDoorReconciler()
 	}
 
 	// Node-down watchdog.
@@ -338,6 +352,20 @@ func runProbe() {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(out)
+}
+
+// readSecret prefers a token read from a file over one passed as a flag.
+// Flag values are visible to every process on the machine via
+// /proc/*/cmdline, so the file form is the documented path and the inline
+// form exists only for container platforms that inject env-derived flags.
+func readSecret(file, inline string) string {
+	if file != "" {
+		if b, err := os.ReadFile(file); err == nil {
+			return strings.TrimSpace(string(b))
+		}
+		log.Printf("server: could not read %s — falling back to the inline token", file)
+	}
+	return inline
 }
 
 func defaultDataDir() string {

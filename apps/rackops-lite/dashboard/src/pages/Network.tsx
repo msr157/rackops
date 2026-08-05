@@ -11,7 +11,7 @@ import { useToast, cleanError } from '../components/toast';
 import { useConfirm } from '../components/confirm';
 import {
   Crumbs, EmptyState, Field, InfoTip, Led, CopyBtn, CopyField, Modal, Pill, RowMenu, Skeleton,
-  SkeletonRows, Spinner, UrlChip, publicUrls,
+  SkeletonRows, Spinner, Switch, UrlChip, UsageBar, formatBytes, publicUrls,
 } from '../components/ui';
 
 // recordHost: what goes in the registrar's "Host/Name" field.
@@ -52,9 +52,13 @@ function LoadError({ onRetry, children }: { onRetry: () => void; children: React
 
 type LoadState = 'loading' | 'ready' | 'error';
 
-// The public-access wizard's three routes to a reachable landing point.
-type WizChoice = 'forward' | 'vps' | 'tunnel';
+// The public-access wizard's routes to a reachable landing point. Front Door
+// leads: it is the only one that needs nothing from the user's network, so a
+// machine behind CGNAT gets a one-click answer here instead of a homework
+// assignment involving a router or a rented VPS.
+type WizChoice = 'frontdoor' | 'forward' | 'vps' | 'tunnel';
 const WIZ_OPTIONS: { id: WizChoice; title: string; sub: string }[] = [
+  { id: 'frontdoor', title: 'RackOps Front Door', sub: 'Permanent HTTPS address, works behind CGNAT, nothing to configure' },
   { id: 'forward', title: 'Port forward your router', sub: 'Needs a real public IP' },
   { id: 'vps', title: 'VPS anchor', sub: 'Works behind CGNAT, about $4 a month' },
   { id: 'tunnel', title: 'Quick tunnel', sub: 'Testing only, URL changes on restart' },
@@ -65,7 +69,7 @@ const WIZ_OPTIONS: { id: WizChoice; title: string; sub: string }[] = [
 // domains show what exists, and the edge/mesh configuration lives at the
 // bottom. Per-app routing lives on each app's Networking tab.
 export function NetworkPage() {
-  const { nodes, services, nodeName, refresh, loaded } = useData();
+  const { nodes, services, nodeName, frontDoor, refresh, loaded } = useData();
   const toast = useToast();
   const confirm = useConfirm();
 
@@ -278,7 +282,13 @@ export function NetworkPage() {
 
   // Wizard preselection: any directly reachable machine means port forwarding
   // will work; otherwise a VPS anchor is the reliable path.
-  const recommended: WizChoice = (diagnosis?.nodes ?? []).some((n) => n.reachability === 'direct') ? 'forward' : 'vps';
+  // A machine with a real public IP is best served by port forwarding: it is
+  // free and keeps traffic off anyone else's network. Everything else — CGNAT,
+  // unknown, mobile — gets Front Door when this install has one available,
+  // falling back to the VPS anchor when it does not.
+  const recommended: WizChoice = (diagnosis?.nodes ?? []).some((n) => n.reachability === 'direct')
+    ? 'forward'
+    : (frontDoor?.popAddr || frontDoor?.enabled ? 'frontdoor' : 'vps');
   const openWizard = () => {
     setWizChoice(recommended);
     setWizStep(1);
@@ -571,6 +581,11 @@ export function NetworkPage() {
         </EmptyState>
       )}
 
+      {/* Front Door sits above the edge form: it is the path most installs
+          should take, and the edge below it is an implementation detail it
+          manages on their behalf. */}
+      <FrontDoorSection />
+
       {/* Configuration, after the state: the edge form, then mesh, then HA. */}
       <div className="section-title" id="network-config">
         <Shield size={15} aria-hidden /> Edge proxy
@@ -792,6 +807,26 @@ export function NetworkPage() {
             </>
           ) : (
             <>
+              {wizChoice === 'frontdoor' && (
+                <>
+                  <div className="section-title" style={{ marginTop: 0 }}>Step 2: turn Front Door on</div>
+                  <div className="dim" style={{ lineHeight: 1.8 }}>
+                    <ol style={{ margin: 0, paddingLeft: 18 }}>
+                      <li>Turn on <b>Front Door</b> in the section below and pick a workspace name.</li>
+                      <li>Open any app&rsquo;s <b>Networking</b> tab and switch Front Door on for it.</li>
+                      <li>
+                        You get a permanent address like{' '}
+                        <span className="mono">yourapp-{frontDoor?.workspace || 'workspace'}.{frontDoor?.zone || 'link.rackops.in'}</span>{' '}
+                        with real HTTPS.
+                      </li>
+                    </ol>
+                    <div className="faint" style={{ marginTop: 8 }}>
+                      Nothing to open on your router and no DNS to edit — this machine dials out.
+                      Free tier includes {formatBytes(frontDoor?.quotaBytes || 100 * 1024 ** 3)} of traffic a month.
+                    </div>
+                  </div>
+                </>
+              )}
               {wizChoice === 'forward' && (
                 <>
                   <div className="section-title" style={{ marginTop: 0 }}>Step 2: port forward your router</div>
@@ -846,6 +881,12 @@ export function NetworkPage() {
               <div className="row" style={{ marginTop: 16 }}>
                 <button className="btn" onClick={() => setWizStep(1)}><ArrowLeft size={13} aria-hidden /> Back</button>
                 <span style={{ marginLeft: 'auto' }}>
+                  {wizChoice === 'frontdoor' && (
+                    <button className="btn primary"
+                      onClick={() => { closeWizard(); document.getElementById('frontdoor-config')?.scrollIntoView({ behavior: 'smooth' }); }}>
+                      Set up Front Door
+                    </button>
+                  )}
                   {wizChoice === 'forward' && (
                     <button className="btn primary"
                       onClick={() => { closeWizard(); document.getElementById('network-config')?.scrollIntoView(); }}>
@@ -869,5 +910,170 @@ export function NetworkPage() {
         </Modal>
       )}
     </div>
+  );
+}
+
+/* ---------- Front Door: RackOps' own tunnel ---------- */
+
+// FrontDoorSection is the install-wide on/off for Front Door, plus the truth
+// about the live tunnel.
+//
+// The honesty here is the point. A tunnel that says "on" while it is actually
+// rejected or reconnecting sends people to check their app, their router and
+// their DNS before they think to doubt the console. So the status pill reads
+// from what the agent reported, the transport is shown when it fell back to
+// TCP (which means something on the network blocks UDP), and usage against the
+// free tier is visible before the cap bites rather than after.
+function FrontDoorSection() {
+  const { frontDoor, nodeName, refresh } = useData();
+  const toast = useToast();
+  const confirm = useConfirm();
+  const [workspace, setWorkspace] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  // Seed the field from the server only while it is still empty. Front Door's
+  // status arrives over SSE and can land mid-edit, so overwriting a non-empty
+  // field would erase what the user is typing. The guard also makes this
+  // self-limiting: once workspace is set, the effect re-runs and does nothing.
+  useEffect(() => {
+    const saved = frontDoor?.workspace;
+    if (saved && workspace === '') setWorkspace(saved);
+  }, [frontDoor?.workspace, workspace]);
+
+  // Not configured on this server: say so plainly instead of showing a switch
+  // that cannot work.
+  if (frontDoor && !frontDoor.enabled && !frontDoor.popAddr) {
+    return (
+      <>
+        <div className="section-title" id="frontdoor-config">
+          <Globe size={15} aria-hidden /> Front Door
+        </div>
+        <div className="dim" style={{ marginBottom: 22 }}>
+          This install isn&rsquo;t set up for RackOps Front Door. Start the server with{' '}
+          <span className="mono">--frontdoor-pop</span> to enable it, or use a domain of your own below.
+        </div>
+      </>
+    );
+  }
+
+  const status = frontDoor?.status ?? 'off';
+  const on = !!frontDoor?.enabled;
+  const used = frontDoor?.usedBytes ?? 0;
+  const quota = frontDoor?.quotaBytes ?? 0;
+  const pct = quota > 0 ? (used / quota) * 100 : 0;
+
+  const pill = !on
+    ? <Pill status="stopped">off</Pill>
+    : status === 'connected' ? <Pill status="ok">connected</Pill>
+    : status === 'rejected' ? <Pill status="error">not connected</Pill>
+    : <Pill status="pending">connecting</Pill>;
+
+  const toggle = async (v: boolean) => {
+    if (!v && !(await confirm({
+      title: 'Turn Front Door off?',
+      body: 'Every app published through it stops being reachable at its RackOps address. Apps on your own domains are unaffected.',
+      confirmLabel: 'Turn it off',
+      danger: true,
+    }))) return;
+    setBusy(true);
+    try {
+      await api.setFrontDoor(v, workspace.trim());
+      toast.ok(v ? 'Front Door is on.' : 'Front Door is off.');
+      refresh();
+    } catch (e) { toast.err(cleanError(e)); }
+    setBusy(false);
+  };
+
+  return (
+    <>
+      <div className="section-title" id="frontdoor-config">
+        <Globe size={15} aria-hidden /> Front Door
+        <InfoTip wide>
+          A permanent public HTTPS address for any app, served from RackOps&rsquo; own network.
+          This machine dials out, so nothing needs opening on your router and it works behind
+          CGNAT. Your apps and data stay on your hardware; only traffic passes through.
+        </InfoTip>
+        <span style={{ marginLeft: 'auto' }}>{pill}</span>
+      </div>
+      <div className="dim" style={{ marginBottom: 14 }}>
+        Public HTTPS for your apps with no ports, no DNS and no third-party account.
+      </div>
+
+      <div className="setting toggle">
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div className="setting-title">Publish through RackOps Front Door</div>
+          <div className="setting-desc">
+            {on
+              ? <>Apps appear at <span className="mono">app-{frontDoor?.workspace}.{frontDoor?.zone}</span>.</>
+              : <>Pick a workspace name — it becomes part of every address.</>}
+          </div>
+        </div>
+        <Switch checked={on} disabled={busy || (!on && workspace.trim() === '')}
+          ariaLabel="RackOps Front Door" onChange={toggle} />
+      </div>
+
+      {!on && (
+        <div className="row wrap" style={{ marginTop: 12, alignItems: 'flex-end' }}>
+          <Field label="Workspace name" hint="Lowercase letters, numbers and dashes.">
+            {(p) => (
+              <input {...p} className="input" style={{ maxWidth: 240 }} value={workspace}
+                placeholder="acme" onChange={(e) => setWorkspace(e.target.value)} />
+            )}
+          </Field>
+          {workspace.trim() !== '' && (
+            <span className="faint" style={{ paddingBottom: 6 }}>
+              Addresses look like{' '}
+              <span className="mono">immich-{workspace.trim().toLowerCase().replace(/[^a-z0-9-]/g, '-')}.{frontDoor?.zone || 'link.rackops.in'}</span>
+            </span>
+          )}
+        </div>
+      )}
+
+      {on && (
+        <div className="list" style={{ marginTop: 14 }}>
+          <div className="list-row spread">
+            <span className="dim">Tunnel machine</span>
+            <span>{frontDoor?.nodeId ? nodeName(frontDoor.nodeId) : '—'}</span>
+          </div>
+          {status === 'connected' && (
+            <div className="list-row spread">
+              <span className="dim">Edge location</span>
+              <span className="row" style={{ gap: 8 }}>
+                <span className="mono">{frontDoor?.popId || '—'}</span>
+                {/* Falling back to TCP is worth surfacing: it means UDP is
+                    blocked here, which is the first thing to know if the
+                    connection feels slow. */}
+                {frontDoor?.transport === 'tcp' && (
+                  <span className="badge neutral" title="This network blocks UDP, so the tunnel is using TCP.">TCP fallback</span>
+                )}
+                {frontDoor?.transport === 'quic' && <span className="badge neutral">QUIC</span>}
+              </span>
+            </div>
+          )}
+          {status !== 'connected' && frontDoor?.statusMsg && (
+            <div className="list-row spread">
+              <span className="dim">Status</span>
+              <span style={{ color: status === 'rejected' ? 'var(--crit)' : undefined }}>{frontDoor.statusMsg}</span>
+            </div>
+          )}
+          {quota > 0 && (
+            <div className="list-row" style={{ display: 'block' }}>
+              <div className="spread" style={{ display: 'flex' }}>
+                <span className="dim">Traffic this month</span>
+                <span>{formatBytes(used)} of {formatBytes(quota)}</span>
+              </div>
+              <div style={{ marginTop: 8 }}><UsageBar pct={pct} /></div>
+              {pct > 80 && (
+                <div className="faint" style={{ marginTop: 6 }}>
+                  Approaching the monthly limit. Apps stop being reachable at their RackOps
+                  addresses until it resets.
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+      <div style={{ height: 22 }} />
+    </>
   );
 }

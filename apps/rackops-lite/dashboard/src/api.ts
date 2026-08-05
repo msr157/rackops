@@ -36,6 +36,8 @@ export interface Service {
   adopted?: boolean; externalName?: string;
   nodeId: string; autoPlace: boolean;
   port: number; containerPort?: number; ports?: number[]; command?: string; domain: string; ingress: string;
+  /** True when `domain` is a RackOps Front Door address rather than one you own. */
+  frontDoor?: boolean;
   quickTunnelUrl?: string;
   env: EnvVar[] | null; mounts?: Mount[]; volumes?: string[];
   cpuPct: number; memUsedMb: number; memLimitMb?: number; cpuLimit?: number;
@@ -83,6 +85,26 @@ export interface NetworkDiagnosis {
 export interface IngressConfig {
   enabled: boolean; nodeId: string; httpPort: number; httpsPort: number; acmeEmail: string;
   status?: string; statusMsg?: string; lastDeploy?: string;
+}
+/** RackOps Front Door: the vendor-run tunnel that gives apps a public HTTPS
+ *  address with no public IP, no port forwarding and no DNS. */
+export interface FrontDoorConfig {
+  enabled: boolean;
+  tenantId?: string;
+  workspace?: string;
+  popAddr?: string;
+  zone?: string;
+  nodeId?: string;
+  /** off | connecting | connected | rejected */
+  status?: string;
+  statusMsg?: string;
+  popId?: string;
+  /** quic | tcp — tcp means the network blocks UDP. */
+  transport?: string;
+  usedBytes?: number;
+  quotaBytes?: number;
+  connectedAt?: string;
+  lastChange?: string;
 }
 export interface MeshStatus {
   enabled: boolean; hubIp?: string; hubKey?: string; udpPort?: number;
@@ -212,6 +234,13 @@ export const api = {
   startQuickTunnel: (id: string) =>
     req<{ status: string }>(`/api/services/${id}/quick-tunnel`, { method: 'POST' }),
   stopQuickTunnel: (id: string) => req<void>(`/api/services/${id}/quick-tunnel`, { method: 'DELETE' }),
+  frontDoor: () => req<FrontDoorConfig>('/api/frontdoor'),
+  setFrontDoor: (enabled: boolean, workspace?: string) =>
+    req<FrontDoorConfig>('/api/frontdoor', { method: 'POST', body: JSON.stringify({ enabled, workspace }) }),
+  enableServiceFrontDoor: (id: string) =>
+    req<{ domain: string; url: string }>(`/api/services/${id}/frontdoor`, { method: 'POST' }),
+  disableServiceFrontDoor: (id: string) =>
+    req<void>(`/api/services/${id}/frontdoor`, { method: 'DELETE' }),
   mesh: () => req<MeshStatus>('/api/mesh'),
   cluster: () => req<ClusterStatus>('/api/cluster'),
   authStatus: () => req<{ needsSetup: boolean }>('/api/auth/status'),
