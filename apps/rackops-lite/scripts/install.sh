@@ -354,7 +354,9 @@ say "  ${DIM}│${R}   ${GREEN}●${R}  ${BOLD}RackOps is live${R}              
 say "  ${DIM}│${R}                                              ${DIM}│${R}"
 printf '  %s│%s      %s%-40s%s%s│%s\n' "$DIM" "$R" "$AMBER" "http://localhost:$PORT" "$R" "$DIM" "$R"
 if [ -n "$LAN_IP" ]; then
-  printf '  %s│%s      %s%-40s%s%s│%s\n' "$DIM" "$R" "$DIM" "http://$LAN_IP:$PORT  (LAN)" "$R" "$DIM" "$R"
+  # Labelled "network", not "LAN": on a VPS this is the public IP and the
+  # only address that works from the operator's own browser.
+  printf '  %s│%s      %s%-40s%s%s│%s\n' "$DIM" "$R" "$DIM" "http://$LAN_IP:$PORT  (network)" "$R" "$DIM" "$R"
 fi
 say "  ${DIM}│${R}                                              ${DIM}│${R}"
 say "  ${DIM}│${R}   Open it in your browser and create your    ${DIM}│${R}"

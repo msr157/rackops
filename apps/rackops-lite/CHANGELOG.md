@@ -2,6 +2,15 @@
 
 Notable user-visible changes to RackOps Lite are recorded here.
 
+## Unreleased
+
+- Show the real RackOps mark everywhere: the browser-tab icon and the in-app logo are now the brand "R" instead of a leftover template icon.
+- Make every Copy button work on dashboards served over plain HTTP. The clipboard write now falls back to the legacy selection path on insecure origins, so join commands, IPs, API keys, and invite links copy instead of reporting "copy failed".
+- Move the activity feed off Home onto a dedicated Activity page (in the sidebar, the ⌘K palette, and the notification bell), with filters for apps, machines, alerts, and workspace events. Home stays a one-glance status answer.
+- Fix the "Add machine" join command pointing at `localhost` when the dashboard is opened on `http://localhost:8080` — it now embeds an address the new machine can actually reach.
+- Stop cross-node domain routing from flapping on multi-machine fleets: relay listeners were torn down and rebuilt every couple of seconds because every machine's report — not just the edge machine's — reconciled them.
+- Label the installer's final printed address "(network)" instead of "(LAN)" — on a VPS it is the public IP and the only address that works from your browser.
+
 ## v0.5.0 - 2026-08-06
 
 - RackOps now runs on macOS. The same install one-liner works on Apple Silicon and Intel Macs: it installs the binary, sets up a launchd service (starts on boot, restarts on crash, logs to `/var/log/rackops.log`), and `rackops update` self-updates in place. Docker Desktop or colima provides the container runtime — the installer detects them and explains what to do if neither is present. Linux-only hardware telemetry (thermals, per-device throughput) stays empty on a Mac; everything else works.
