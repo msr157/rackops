@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { api, subscribe } from './api';
-import type { Node, Overview, EventItem, Alert, Service, Project, Environment, IngressConfig } from './api';
+import type { Node, Overview, EventItem, Alert, Service, Project, Environment, IngressConfig, FrontDoorConfig } from './api';
 
 // DataProvider owns all fleet-wide state: one fetch + one SSE stream for the
 // whole app, so every page renders from the same live picture.
@@ -13,6 +13,7 @@ interface Data {
   projects: Project[];
   envs: Environment[];
   ingress: IngressConfig | null;
+  frontDoor: FrontDoorConfig | null;
   refresh: () => void;
   nodeName: (id: string) => string;
   /** True once the fleet has loaded at least once. Empty states must wait for it. */
@@ -40,6 +41,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [envs, setEnvs] = useState<Environment[]>([]);
   const [ingress, setIngress] = useState<IngressConfig | null>(null);
+  const [frontDoor, setFrontDoor] = useState<FrontDoorConfig | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [reachable, setReachable] = useState(true);
   const [lastSync, setLastSync] = useState<string | null>(null);
@@ -64,6 +66,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     api.events().then((e) => setEvents((e ?? []).slice(0, 80))).catch(() => {});
     api.alerts().then((a) => setAlerts(a ?? [])).catch(() => {});
     api.ingress().then(setIngress).catch(() => {});
+    api.frontDoor().then(setFrontDoor).catch(() => {});
   }, []);
 
   // Held in refs so the subscription and poll below never re-arm on each tick.
@@ -117,6 +120,11 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         const a = data as Alert;
         setAlerts((prev) => prev.map((p) => (p.id === a.id ? { ...p, resolved: true } : p)));
       },
+      // The tunnel's status changes without anyone clicking anything — a
+      // reconnect, a POP failover, a quota trip. It has to arrive live or the
+      // Network page would show a stale "connected" through an outage.
+      frontdoor_update: (data) => setFrontDoor(data as FrontDoorConfig),
+      ingress_update: (data) => setIngress(data as IngressConfig),
     });
 
     // Slow poll as SSE fallback for aggregates. Alerts are included so a
@@ -135,10 +143,10 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   }, [refresh]);
 
   const value = useMemo<Data>(() => ({
-    overview, nodes, services, events, alerts, projects, envs, ingress, refresh,
+    overview, nodes, services, events, alerts, projects, envs, ingress, frontDoor, refresh,
     nodeName: (id: string) => nodes.find((n) => n.id === id)?.name ?? id,
     loaded, reachable, lastSync,
-  }), [overview, nodes, services, events, alerts, projects, envs, ingress, refresh, loaded, reachable, lastSync]);
+  }), [overview, nodes, services, events, alerts, projects, envs, ingress, frontDoor, refresh, loaded, reachable, lastSync]);
 
   return <DataCtx.Provider value={value}>{children}</DataCtx.Provider>;
 }

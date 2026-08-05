@@ -53,6 +53,9 @@ type Agent struct {
 	// (or shutdown) can cancel them. Guarded by followMu.
 	follows  map[string]*follower
 	followMu sync.Mutex
+	// fd holds Front Door state: the install's signing key and the
+	// supervised tunnel to the vendor edge. Guarded by its own mutex.
+	fd frontDoor
 }
 
 // follower is one live `logs -f` tail. Stored by pointer so a goroutine can
@@ -108,6 +111,9 @@ func New(cfg Config) (*Agent, error) {
 	if err := ag.initMeshKeys(); err != nil {
 		log.Printf("agent: mesh keys: %v (mesh disabled)", err)
 	}
+	if err := ag.initFrontDoorKey(); err != nil {
+		log.Printf("agent: front door key: %v (front door disabled)", err)
+	}
 	return ag, nil
 }
 
@@ -118,6 +124,7 @@ func (a *Agent) Run(ctx context.Context) {
 	log.Printf("agent: node %s (%s) reporting to %s every %s", a.cfg.Name, a.nodeID, a.cfg.ServerURL, a.cfg.Interval)
 	defer a.closeMesh()
 	defer a.closeFollows()
+	defer a.closeFrontDoor()
 	hw := a.collector.Hardware()
 	lastHW := time.Now()
 
@@ -161,6 +168,12 @@ func (a *Agent) Run(ctx context.Context) {
 		if a.mesh.keys.Public != "" {
 			report.Mesh = &types.MeshInfo{PublicKey: a.mesh.keys.Public, MeshIP: a.mesh.meshIP}
 		}
+		// Always report Front Door state, even when off: the control plane
+		// needs this node's public key to be able to enroll it, and the
+		// console needs to distinguish "off" from "never reported".
+		if fd := a.frontDoorState(); fd.PublicKey != "" {
+			report.FrontDoor = &fd
+		}
 		if a.runtime != nil {
 			report.Containers = a.runtime.List()
 		}
@@ -185,6 +198,7 @@ func (a *Agent) Run(ctx context.Context) {
 			ports = append(ports, resp.Mesh.ExposePorts...)
 		}
 		a.syncMesh(resp.Mesh, report.Containers, ports)
+		a.syncFrontDoor(ctx, resp.FrontDoor)
 
 		for _, task := range resp.Tasks {
 			res := a.execute(ctx, task)

@@ -78,6 +78,10 @@ func (a *API) apiRoutes() []route {
 		{"POST", "/api/services/{id}/expose", "network", "Mint a zero-DNS nip.io URL for a service", a.handleExposeService, false},
 		{"POST", "/api/services/{id}/quick-tunnel", "network", "Start a Cloudflare quick tunnel (testing)", a.handleStartQuickTunnel, false},
 		{"DELETE", "/api/services/{id}/quick-tunnel", "network", "Stop the quick tunnel", a.handleStopQuickTunnel, false},
+		{"GET", "/api/frontdoor", "network", "RackOps Front Door configuration + status", a.handleGetFrontDoor, false},
+		{"POST", "/api/frontdoor", "network", "Turn RackOps Front Door on or off for this install", a.handleSetFrontDoor, false},
+		{"POST", "/api/services/{id}/frontdoor", "network", "Publish an app at a permanent RackOps Front Door URL", a.handleEnableServiceFrontDoor, false},
+		{"DELETE", "/api/services/{id}/frontdoor", "network", "Remove an app's Front Door URL", a.handleDisableServiceFrontDoor, false},
 
 		// Public website
 		{"POST", "/api/v1/early-access", "website", "Record an enterprise early-access request from rackops.in (public, CORS-scoped)", a.handleEarlyAccess, true},

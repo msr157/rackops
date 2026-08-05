@@ -21,7 +21,8 @@ telemetry, intelligent workload placement, one-command Docker deploys, optional 
 ```
 apps/
   rackops-lite/         The shipping product
-    backend/            Go module — single `rackops` binary (server / agent / probe)
+    backend/            Go module — `rackops` binary (server / agent / probe)
+                        + `rackops-edge` binary (vendor-run Front Door POP)
     dashboard/          React 19 + TS + Vite → emits into backend/internal/server/dist (go:embed)
     scripts/install.sh  Linux / WSL2 one-line installer
   rackops-enterprise/   Future product — placeholder, no code
@@ -187,7 +188,37 @@ memory/GPU-VRAM/storage; `nodeId:"auto"` deploys to the winner. Alert engine: fi
 `cloudflare/cloudflared:latest` (host net, named `rackops-qt-<svcID>`), scrapes the
 `https://*.trycloudflare.com` URL from logs (≤60s). Result correlated via `pendingTunnels`
 sync.Map into `Service.QuickTunnelURL`. Vanished tunnels auto-restart (heal budget; URL changes).
-Positioned as testing-only.
+Positioned as testing-only — kept as a **fallback** behind a disclosure in the app's Networking
+tab now that Front Door is the primary path.
+
+### 2.12b RackOps Front Door (`internal/tunnel`, `internal/edge`, `cmd/rackops-edge`,
+`agent/frontdoor.go`, `server/frontdoor.go`) — full detail in `docs/FRONT_DOOR.md`
+
+First-party tunnel: permanent public HTTPS with no public IP, no DNS, no third party, CGNAT-safe.
+
+- **Vendor POP** (`rackops-edge`, separate binary, same module): terminates a `*.link.rackops.in`
+  wildcard (files on disk + 1-min hot reload; DNS-01 handled out of band by any ACME client),
+  maps SNI/Host → tenant session, `httputil.ReverseProxy` with a `DialContext` that opens a
+  tunnel stream instead of a TCP conn. Meters both directions, enforces a 100 GB/month free tier,
+  instant kill switch. JSON registry, atomic flush, lazy calendar-month roll.
+- **Transport** (`internal/tunnel`): QUIC/443 with a **5s probe** falling back to TLS+yamux/443
+  (ALPN `rackops-fd/1`). One `Session` interface so nothing above branches on transport. TCP
+  listener binds first, UDP pinned to its port (else `:0` splits the two).
+- **Auth**: per-install Ed25519 (`<data-dir>/frontdoor.key`, 0600). POP sends a 32-byte challenge;
+  client signs a domain-separated transcript binding nonce + tenant + **TLS exporter** (RFC 5705
+  channel binding). Registry is authoritative for hostnames; the agent independently refuses
+  streams outside its assignment.
+- **Client** (in-process in the agent, no container — unlike cloudflared): supervised, exponential
+  backoff + jitter, stops on permanent rejection (bad key / suspended / version).
+- **Delivery**: `FrontDoorSpec` rides `AgentResponse` on every report (desired state, not a task —
+  a task would be lost across an agent restart). State returns on `AgentReport.FrontDoor`.
+- **Stacks on Traefik**: enabling sets `svc.Domain` + `svc.FrontDoor`, so the hostname becomes an
+  ordinary router. ⚠ Two load-bearing details: Front Door routers get **no certResolver** (the
+  customer can't validate a vendor name; failures would burn LE rate limits) and use a dedicated
+  **`frontdoor` entrypoint on `127.0.0.1:8099`** (`types.FrontDoorEntryPort`) because `web`'s
+  blanket HTTP→HTTPS redirect would loop the tunnel infinitely. Both are tested.
+- Handlers are `serviceForOrg` + `ManageDomains` scoped — deliberately not repeating the
+  quick-tunnel org hole from the audit. `RunFrontDoorReconciler` (leader-only) retries enrollment.
 
 ### 2.13 HA / Raft (`internal/raftstore`, `server/cluster.go`)
 
