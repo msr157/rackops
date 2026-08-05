@@ -18,7 +18,7 @@ type InstallStep = {
 };
 
 type InstallOption = {
-  id: 'linux' | 'wsl2' | 'source';
+  id: 'linux' | 'macos' | 'wsl2' | 'source';
   label: string;
   summary: string;
   steps: InstallStep[];
@@ -37,6 +37,29 @@ const INSTALL_OPTIONS: InstallOption[] = [
       {
         title: 'Run the one-line installer',
         body: 'Re-running this command later updates RackOps in place.',
+        commands: [{ label: 'Terminal', value: INSTALL_COMMAND }],
+      },
+      {
+        title: 'Open the control plane',
+        body: 'Visit http://localhost:8080 when the installer finishes.',
+      },
+    ],
+  },
+  {
+    id: 'macos',
+    label: 'macOS',
+    summary: 'For Apple Silicon and Intel Macs, macOS 11 or newer.',
+    steps: [
+      {
+        title: 'Have a container runtime ready',
+        body: 'Docker Desktop or colima — the installer detects either. RackOps starts without one, but app deploys need it.',
+        commands: [
+          { label: 'Homebrew (optional)', value: 'brew install colima docker && colima start' },
+        ],
+      },
+      {
+        title: 'Run the one-line installer',
+        body: 'Installs the binary and a launchd service that starts on boot. Re-running this command later updates RackOps in place.',
         commands: [{ label: 'Terminal', value: INSTALL_COMMAND }],
       },
       {
@@ -179,8 +202,8 @@ export default function Editions() {
         <SectionRule index="07" name="Editions" />
         <h2 className="reveal">RackOps Lite is live.</h2>
         <p className="section-body reveal">
-          Install the self-hosted control plane on Linux or Windows through WSL2. Pick a
-          path and follow the guide.
+          Install the self-hosted control plane on Linux, macOS, or Windows through WSL2.
+          Pick a path and follow the guide.
         </p>
 
         <div className="editions-layout">
@@ -250,7 +273,7 @@ export default function Editions() {
             <dl className="install-facts">
               <div>
                 <dt>Hosts</dt>
-                <dd>Linux / WSL2</dd>
+                <dd>Linux / macOS / WSL2</dd>
               </div>
               <div>
                 <dt>Architectures</dt>
