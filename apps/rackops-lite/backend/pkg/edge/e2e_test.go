@@ -18,8 +18,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rackops/rackops/internal/edge"
-	"github.com/rackops/rackops/internal/tunnel"
+	"github.com/rackops/rackops/pkg/edge"
+	"github.com/rackops/rackops/pkg/tunnel"
 )
 
 // harness is a complete Front Door in one process: a real POP with a real

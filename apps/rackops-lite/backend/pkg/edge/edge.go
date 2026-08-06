@@ -14,7 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/rackops/rackops/internal/tunnel"
+	"github.com/rackops/rackops/pkg/tunnel"
 )
 
 // Config configures a point of presence.
@@ -506,6 +506,40 @@ func (e *Edge) Shutdown(ctx context.Context) error {
 		firstErr = err
 	}
 	return firstErr
+}
+
+// Stats is a snapshot of a POP's lifetime counters and certificate health,
+// for the operator console.
+type Stats struct {
+	Requests   int64
+	Bytes      int64
+	Sessions   int
+	CertExpiry time.Time
+	// SelfSigned reports that this POP is serving a development certificate
+	// browsers will reject. It is the most common reason a fresh deployment
+	// appears broken, so it is surfaced rather than left in the logs.
+	SelfSigned bool
+}
+
+// Stats returns the current counters.
+func (e *Edge) Stats() Stats {
+	return Stats{
+		Requests:   e.reqCount.Load(),
+		Bytes:      e.byteCount.Load(),
+		Sessions:   e.sessions.Count(),
+		CertExpiry: e.cfg.Certs.Expiry(),
+		SelfSigned: e.cfg.Certs.SelfSigned(),
+	}
+}
+
+// Sessions lists the installs currently connected, for the console.
+func (e *Edge) Sessions() []Snapshot { return e.sessions.Snapshot() }
+
+// DisconnectTenant drops a tenant's live session without changing its
+// registration. Used after a key rotation, where the old session is still
+// authenticated against a credential that no longer exists.
+func (e *Edge) DisconnectTenant(tenantID string) bool {
+	return e.sessions.CloseTenant(tenantID)
 }
 
 // PublicAddr reports the address this POP actually bound, which differs from

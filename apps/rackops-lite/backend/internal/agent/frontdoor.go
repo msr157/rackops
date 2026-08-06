@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rackops/rackops/internal/tunnel"
 	"github.com/rackops/rackops/internal/types"
+	"github.com/rackops/rackops/pkg/tunnel"
 )
 
 // frontDoor holds the agent's Front Door state: the install's signing

@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Routes, Route, NavLink, Navigate } from 'react-router-dom';
-import { LayoutGrid, Server, Inbox, LogOut } from 'lucide-react';
+import { LayoutGrid, Server, Inbox, Globe, LogOut } from 'lucide-react';
 import { api, getToken, clearToken } from './api';
 import type { Overview } from './api';
 import { AuthScreen } from './pages/Auth';
 import { OverviewPage } from './pages/Overview';
 import { InstallsPage, InstallDetailPage } from './pages/Installs';
 import { TicketsPage, TicketDetailPage } from './pages/Tickets';
+import { FrontDoorPage } from './pages/FrontDoor';
 
 export default function App() {
   const [authed, setAuthed] = useState<boolean>(() => !!getToken());
@@ -37,6 +38,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
     { to: '/', label: 'Overview', icon: <LayoutGrid size={16} />, end: true },
     { to: '/installs', label: 'Installs', icon: <Server size={16} />, count: overview?.installs },
     { to: '/tickets', label: 'Tickets', icon: <Inbox size={16} />, count: overview?.openTickets },
+    { to: '/frontdoor', label: 'Front Door', icon: <Globe size={16} /> },
   ];
 
   return (
@@ -45,8 +47,8 @@ function Shell({ onLogout }: { onLogout: () => void }) {
         <NavLink to="/" className="brand">
           <div className="brand-unit"><Led ok={(overview?.openTickets ?? 0) === 0} /></div>
           <div>
-            <div className="brand-name">RackOps</div>
-            <div className="brand-ver">CRM · vendor console</div>
+            <div className="brand-name">RackOps Admin</div>
+            <div className="brand-ver">support · installs · tunnel</div>
           </div>
         </NavLink>
 
@@ -78,6 +80,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
             <Route path="/installs/:id" element={<InstallDetailPage />} />
             <Route path="/tickets" element={<TicketsPage />} />
             <Route path="/tickets/:installId/:id" element={<TicketDetailPage />} />
+            <Route path="/frontdoor" element={<FrontDoorPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>

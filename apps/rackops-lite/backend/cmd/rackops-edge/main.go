@@ -41,10 +41,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/rackops/rackops/internal/edge"
+	"github.com/rackops/rackops/pkg/edge"
+	versionpkg "github.com/rackops/rackops/pkg/version"
 )
 
-const version = "0.4.0"
+// version is the single product version, shared with the rackops binary.
+const version = versionpkg.Current
 
 func main() {
 	fs := flag.NewFlagSet("rackops-edge", flag.ExitOnError)

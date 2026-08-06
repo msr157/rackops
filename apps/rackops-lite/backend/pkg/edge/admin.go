@@ -33,13 +33,29 @@ func NewAdminAPI(e *Edge, token string) (*AdminAPI, error) {
 func (a *AdminAPI) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", a.handleHealth)
+	a.Register(mux)
+	return mux
+}
+
+// Register adds the token-guarded /admin routes to an existing mux, without
+// the /healthz route.
+//
+// It exists so RackOps Admin can host these alongside its own console API:
+// the two serve different audiences and therefore need different credentials.
+// Operators log in with a password and get a session; customer control
+// planes are machines and present a static token. Collapsing them would mean
+// either handing every install an operator login or teaching a daemon to do
+// an interactive one.
+//
+// It also skips /healthz, which the host app already serves — registering it
+// twice on one mux panics at startup.
+func (a *AdminAPI) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /admin/tenants", a.guard(a.handleListTenants))
 	mux.HandleFunc("PUT /admin/tenants/{id}", a.guard(a.handleUpsertTenant))
 	mux.HandleFunc("DELETE /admin/tenants/{id}", a.guard(a.handleDeleteTenant))
 	mux.HandleFunc("GET /admin/tenants/{id}/usage", a.guard(a.handleUsage))
 	mux.HandleFunc("POST /admin/tenants/{id}/suspend", a.guard(a.handleSuspend))
 	mux.HandleFunc("GET /admin/sessions", a.guard(a.handleSessions))
-	return mux
 }
 
 // guard enforces the bearer token in constant time.

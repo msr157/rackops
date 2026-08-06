@@ -1,0 +1,68 @@
+# RackOps Admin — the whole vendor side on one machine.
+#
+#   Support     tickets forwarded by customer installs, and your replies
+#   CRM         install inventory, versions, usage analytics
+#   Front Door  the tunnel edge customers dial for public HTTPS
+#
+# Quick start:
+#   1. cp .env.example .env   and fill in the two admin credentials
+#   2. docker compose up -d
+#
+# That is the whole setup. Without a certificate it runs with a self-signed
+# one so you can look around; see FRONT_DOOR_SETUP.md for the wildcard.
+
+services:
+  rackops-admin:
+    build:
+      # Built from the repo root: the image needs both Go modules.
+      context: ..
+      dockerfile: internal-apps/crm/Dockerfile
+    image: rackops-admin:latest
+    container_name: rackops-admin
+    restart: unless-stopped
+
+    environment:
+      # Required — the console login.
+      RACKOPS_ADMIN_EMAIL: ${RACKOPS_ADMIN_EMAIL:?set this in .env}
+      RACKOPS_ADMIN_PASSWORD: ${RACKOPS_ADMIN_PASSWORD:?set this in .env}
+      # Optional — password-reset relay for customer installs. Off when unset.
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-RackOps Support <support@rackops.in>}
+
+    command:
+      - serve
+      - --listen=:8091
+      - --data-dir=/data
+      - --frontdoor
+      - --zone=${FRONTDOOR_ZONE:-link.rackops.in}
+      - --pop-id=${POP_ID:-pop1}
+      - --public-addr=:443
+      - --http-addr=:80
+      # Present only when you have mounted a wildcard certificate; with the
+      # paths empty the edge generates a development one and says so loudly.
+      - --cert=${FRONTDOOR_CERT:-}
+      - --key=${FRONTDOOR_KEY:-}
+
+    ports:
+      # Operator console. Keep this off the public internet — put it behind a
+      # VPN, an SSH tunnel, or your own authenticating proxy.
+      - "127.0.0.1:8091:8091"
+      # Visitor HTTPS *and* tunnel sessions share 443. The UDP mapping is not
+      # optional: without it every customer silently falls back to TCP.
+      - "443:443/tcp"
+      - "443:443/udp"
+      - "80:80/tcp"
+
+    volumes:
+      # One directory holds everything: the SQLite database, the session
+      # secret, and the Front Door tenant registry. Back up this one path.
+      - rackops-admin-data:/data
+      # Wildcard certificate, if you have one. Renewals are picked up
+      # automatically within a minute — no restart, no downtime.
+      - ${FRONTDOOR_CERT_DIR:-/etc/rackops/certs}:/etc/rackops/certs:ro
+
+volumes:
+  rackops-admin-data:

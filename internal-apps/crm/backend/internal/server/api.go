@@ -18,6 +18,9 @@ type API struct {
 	Mailer Mailer
 	Admin  *AdminAuth
 	DashFS fs.FS // embedded dashboard; nil when not built
+	// FrontDoor is the tunnel edge running in this process; nil when the
+	// operator did not enable it.
+	FrontDoor *FrontDoor
 
 	// Ingest hardening: per-IP token buckets. Reset-email additionally
 	// limits per target address so one IP can't hammer many mailboxes and
@@ -64,6 +67,10 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/tickets/{id}/reply", a.handleTicketReply)
 	mux.HandleFunc("POST /api/tickets/{id}/note", a.handleTicketNote)
 	mux.HandleFunc("POST /api/tickets/{id}/status", a.handleTicketStatus)
+
+	// Front Door — the tunnel edge, administered from the same console and
+	// behind the same login.
+	a.frontDoorRoutes(mux)
 
 	// Liveness for container orchestration.
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {

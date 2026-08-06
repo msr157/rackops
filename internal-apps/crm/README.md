@@ -1,70 +1,124 @@
-# RackOps CRM
+# RackOps Admin
 
-The vendor-side operations console. Customers run self-hosted RackOps Lite
-instances behind NAT; this app is the piece of RackOps-the-company they talk
-to. It does three things:
+Everything that runs on RackOps' own machines, in **one binary, one console,
+one data directory**. Customers run self-hosted RackOps Lite behind NAT; this
+is the piece of RackOps-the-company they talk to.
 
 1. **Support tickets** — receives tickets forwarded by customer instances,
    lets the support team answer them, and hands replies back when instances
-   poll (all traffic is instance → CRM; nothing dials into customer networks).
+   poll (all traffic is instance → here; nothing dials into customer networks).
 2. **Password-reset relay** — sends reset emails from
    `support@rackops.in` on behalf of instances that have no SMTP of their own.
 3. **Usage analytics** — stores opt-in usage snapshots and turns them into
    version distribution and "hero feature" rankings.
+4. **Front Door** — the tunnel edge customers dial for public HTTPS. Runs in
+   this same process, administered from the same console behind the same
+   login. See [FRONT_DOOR.md](../../docs/FRONT_DOOR.md).
+
+Merging the tunnel in removes the parts most likely to break a small vendor
+deployment: two daemons to supervise, two data directories to back up, two
+sets of credentials, and an admin API that had to be exposed over the network
+so the two could talk.
 
 ```
 internal-apps/crm/
-  backend/     Go module github.com/rackops/crm — single `crm` binary
-  dashboard/   React 19 + Vite operator console (embedded into the binary)
-  Dockerfile   Multi-stage image, built from the repo root
+  backend/            Go module github.com/rackops/crm — `rackops-admin` binary
+  dashboard/          React 19 + Vite console (embedded into the binary)
+  Dockerfile          Multi-stage image, built from the repo root
+  docker-compose.yml  One-command deployment
+  .env.example        Copy to .env and fill in two values
 ```
+
+## Quick start
+
+```sh
+cd internal-apps/crm
+cp .env.example .env          # set RACKOPS_ADMIN_EMAIL and RACKOPS_ADMIN_PASSWORD
+docker compose up -d
+```
+
+Console on <http://127.0.0.1:8091>. The tunnel edge takes 443 (TCP **and**
+UDP) and 80. Without a wildcard certificate it starts with a self-signed one
+and says so on every page — fine to look around, useless for customers.
+
+Running it directly instead:
+
+```sh
+RACKOPS_ADMIN_EMAIL=ops@rackops.in RACKOPS_ADMIN_PASSWORD=… \
+  go run ./cmd/rackops-admin serve --frontdoor \
+    --zone link.rackops.in \
+    --cert /etc/rackops/fullchain.pem --key /etc/rackops/privkey.pem
+```
+
+Omit `--frontdoor` to run support and CRM only.
 
 ## Environment
 
 | Variable             | Required | Default                                   | Purpose                          |
 | -------------------- | -------- | ----------------------------------------- | -------------------------------- |
-| `CRM_ADMIN_EMAIL`    | yes      | —                                         | Admin login email                |
-| `CRM_ADMIN_PASSWORD` | yes      | —                                         | Admin login password (bcrypt-compared at login) |
+| `RACKOPS_ADMIN_EMAIL` | yes     | —                                         | Console login email (`CRM_ADMIN_EMAIL` still accepted) |
+| `RACKOPS_ADMIN_PASSWORD` | yes  | —                                         | Console login password, bcrypt-compared (`CRM_ADMIN_PASSWORD` still accepted) |
 | `SMTP_HOST`          | no       | —                                         | Reset-email relay host; relay returns 503 when unset |
 | `SMTP_PORT`          | no       | `587`                                     | SMTP port (PLAIN auth + STARTTLS) |
 | `SMTP_USERNAME`      | no       | —                                         | SMTP username                    |
 | `SMTP_PASSWORD`      | no       | —                                         | SMTP password                    |
 | `SMTP_FROM`          | no       | `RackOps Support <support@rackops.in>`    | From header; Reply-To is always `support@rackops.in` |
 
-State lives in `--data-dir` (default `~/.rackops-crm`): a WAL-mode SQLite
-database (`crm.db`, pure-Go driver — no cgo) and the JWT session secret
-(`session.secret`, random 32 bytes created on first start).
+State lives in `--data-dir` (default `~/.rackops-admin`): a WAL-mode SQLite
+database (`crm.db`, pure-Go driver — no cgo), the JWT session secret
+(`session.secret`, random 32 bytes created on first start), and the Front
+Door tenant registry (`frontdoor-tenants.json`). One path to back up.
 
 ## Run / develop / build
 
 ```sh
-# Backend (API on :8091)
+# Backend (console on :8091). Add --frontdoor to run the tunnel edge too;
+# without --cert/--key it uses a development certificate.
 cd internal-apps/crm/backend
-CRM_ADMIN_EMAIL=ops@rackops.in CRM_ADMIN_PASSWORD=... go run ./cmd/crm serve
+RACKOPS_ADMIN_EMAIL=ops@rackops.in RACKOPS_ADMIN_PASSWORD=... \
+  go run ./cmd/rackops-admin serve
 
 # Dashboard with HMR (proxies /api and /ingest to localhost:8091)
 pnpm --filter @rackops/crm-dashboard dev
 
 # Production build: dashboard → Go embed dir → single binary
 pnpm --filter @rackops/crm-dashboard build
-cd internal-apps/crm/backend && go build -o crm ./cmd/crm
+cd internal-apps/crm/backend && go build -o rackops-admin ./cmd/rackops-admin
 
-# Tests
+# Tests. GOWORK=off proves the module still builds standalone, which is how
+# the Docker image builds it — go.work otherwise hides missing go.sum entries.
 cd internal-apps/crm/backend && go vet ./... && go test ./...
+GOWORK=off go build ./...
 ```
+
+This module depends on `github.com/rackops/rackops` for the tunnel
+(`pkg/tunnel`, `pkg/edge`) via a relative `replace` directive, so both module
+trees must be present — which is why the Dockerfile copies each of them.
 
 ## Deploy
 
+Prefer `docker compose up -d` (see Quick start). The equivalent by hand:
+
 ```sh
 # From the monorepo root:
-docker build -f internal-apps/crm/Dockerfile -t rackops-crm .
-docker run -d --name rackops-crm \
-  -p 8091:8091 -v crm-data:/data \
-  -e CRM_ADMIN_EMAIL=ops@rackops.in \
-  -e CRM_ADMIN_PASSWORD=... \
+docker build -f internal-apps/crm/Dockerfile -t rackops-admin .
+docker run -d --name rackops-admin \
+  -p 127.0.0.1:8091:8091 -p 443:443/tcp -p 443:443/udp -p 80:80 \
+  -v rackops-admin-data:/data \
+  -v /etc/rackops/certs:/etc/rackops/certs:ro \
+  -e RACKOPS_ADMIN_EMAIL=ops@rackops.in \
+  -e RACKOPS_ADMIN_PASSWORD=... \
   -e SMTP_HOST=smtp.example.com -e SMTP_USERNAME=... -e SMTP_PASSWORD=... \
-  rackops-crm
+  rackops-admin serve --listen :8091 --data-dir /data \
+    --frontdoor --zone link.rackops.in \
+    --cert /etc/rackops/certs/fullchain.pem \
+    --key /etc/rackops/certs/privkey.pem
 ```
+
+Bind **443/udp** as well as 443/tcp: without it every customer silently falls
+back to the slower TCP transport. Keep the console port on loopback or behind
+your own authenticating proxy — anyone who reaches it can suspend any
+customer.
 
 `/healthz` is the liveness endpoint (used by the image's `HEALTHCHECK`).
 When running behind a reverse proxy, the per-IP rate limits honor

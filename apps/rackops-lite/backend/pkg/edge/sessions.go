@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/rackops/rackops/internal/tunnel"
+	"github.com/rackops/rackops/pkg/tunnel"
 )
 
 // liveSession is one authenticated install currently connected to this POP.

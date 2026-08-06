@@ -4,10 +4,14 @@ Two machines are involved:
 
 | | What it is | Who runs it |
 |---|---|---|
-| **POP** | A cheap VPS with a public IP running `rackops-edge`. Holds the wildcard certificate. | You (RackOps, the vendor) — once |
+| **RackOps Admin** | One VPS with a public IP running `rackops-admin`: support inbox, install analytics, **and** the Front Door tunnel edge, in one process. Holds the wildcard certificate. | You (RackOps, the vendor) — once |
 | **Install** | The customer's RackOps server + agents, behind NAT. | Each customer |
 
-You set the POP up once. Every install after that is two clicks.
+You set the admin box up once. Every install after that is two clicks.
+
+> Running a POP in a second region later? `rackops-edge` is the same edge as
+> a standalone binary — see [Extra POPs](#extra-pops). For one machine, you
+> only need `rackops-admin`.
 
 ---
 
@@ -73,51 +77,60 @@ the files and hot-reloads within a minute:
   --path /etc/rackops/lego renew --days 30
 ```
 
-> Skipping this? `rackops-edge` will generate a self-signed certificate and log
-> a loud warning. Fine for a local trial, useless in production — browsers will
-> refuse it.
+> Skipping this? RackOps Admin generates a self-signed certificate, logs a
+> loud warning, and shows a banner on the Front Door page. Fine for a local
+> trial, useless in production — browsers will refuse it.
 
 ---
 
-## Part 3 — Run the POP
+## Part 3 — Run RackOps Admin
 
-On the VPS:
+The easy path is Docker Compose — two values in a file, one command:
 
 ```sh
-# Build (or copy the binary over)
-cd apps/rackops-lite/backend
-go build -o /usr/local/bin/rackops-edge ./cmd/rackops-edge
-
-# An admin token the control plane will use. Keep it in a file, not a flag:
-# flag values are world-readable via /proc/*/cmdline.
-sudo mkdir -p /etc/rackops /var/lib/rackops-edge
-openssl rand -hex 32 | sudo tee /etc/rackops/admin.token >/dev/null
-sudo chmod 600 /etc/rackops/admin.token
+cd internal-apps/crm
+cp .env.example .env      # set RACKOPS_ADMIN_EMAIL + RACKOPS_ADMIN_PASSWORD,
+                          # and FRONTDOOR_CERT_DIR to where Part 2 wrote certs
+docker compose up -d
 ```
 
-`/etc/systemd/system/rackops-edge.service`:
+That is the whole deployment: console on `127.0.0.1:8091`, tunnel edge on
+443 (TCP **and** UDP) and 80, one Docker volume holding the database, the
+session secret and the tunnel's tenant registry.
+
+Prefer systemd? Build and run it directly:
+
+```sh
+cd internal-apps/crm/backend
+go build -o /usr/local/bin/rackops-admin ./cmd/rackops-admin
+sudo mkdir -p /var/lib/rackops-admin
+```
+
+`/etc/systemd/system/rackops-admin.service`:
 
 ```ini
 [Unit]
-Description=RackOps Front Door edge
+Description=RackOps Admin — support, CRM and the Front Door tunnel
 After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=/usr/local/bin/rackops-edge \
+Environment=RACKOPS_ADMIN_EMAIL=ops@rackops.in
+EnvironmentFile=/etc/rackops/admin.env
+ExecStart=/usr/local/bin/rackops-admin serve \
+  --listen 127.0.0.1:8091 \
+  --data-dir /var/lib/rackops-admin \
+  --frontdoor \
   --pop-id pop1 \
   --zone link.rackops.in \
   --public-addr :443 \
   --http-addr :80 \
-  --admin-addr 127.0.0.1:9443 \
   --cert /etc/rackops/lego/certificates/_.link.rackops.in.crt \
   --key  /etc/rackops/lego/certificates/_.link.rackops.in.key \
-  --data-dir /var/lib/rackops-edge \
-  --admin-token-file /etc/rackops/admin.token \
   --support-email support@rackops.in
 Restart=always
 RestartSec=2
-# Binding 443 without running as root.
+# Binding 443/80 without running as root.
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 User=rackops
 Group=rackops
@@ -126,10 +139,16 @@ Group=rackops
 WantedBy=multi-user.target
 ```
 
+`/etc/rackops/admin.env` holds the password, so it never appears in a unit
+file or in `ps`:
+
 ```sh
 sudo useradd --system --no-create-home rackops || true
-sudo chown -R rackops:rackops /var/lib/rackops-edge /etc/rackops
-sudo systemctl daemon-reload && sudo systemctl enable --now rackops-edge
+printf 'RACKOPS_ADMIN_PASSWORD=%s\n' "$(openssl rand -base64 24)" \
+  | sudo tee /etc/rackops/admin.env >/dev/null
+sudo chmod 600 /etc/rackops/admin.env
+sudo chown -R rackops:rackops /var/lib/rackops-admin /etc/rackops
+sudo systemctl daemon-reload && sudo systemctl enable --now rackops-admin
 ```
 
 **Firewall — open exactly these:**
@@ -138,34 +157,34 @@ sudo systemctl daemon-reload && sudo systemctl enable --now rackops-edge
 sudo ufw allow 443/tcp     # visitor HTTPS + tunnel fallback
 sudo ufw allow 443/udp     # tunnel over QUIC  ← easy to forget
 sudo ufw allow 80/tcp      # redirect to HTTPS
-# 9443 stays on 127.0.0.1. Do NOT expose the admin API.
+# 8091 stays on 127.0.0.1. Do NOT expose the console: anyone who reaches it
+# can suspend any customer.
 ```
 
 Check it:
 
 ```sh
-curl -s http://127.0.0.1:9443/healthz | jq
-# {"status":"ok","pop":"pop1","zone":"link.rackops.in","sessions":0,"certDaysLeft":89,...}
+curl -s http://127.0.0.1:8091/healthz          # → ok
 ```
+
+Then open the console at `http://127.0.0.1:8091` (tunnel it over SSH from
+your laptop) and go to **Front Door**. It shows the POP, the certificate's
+remaining days, a warning if it is self-signed, connected tenants, traffic
+against each one's quota, and a **Suspend** button.
 
 443 carries visitor HTTPS *and* tunnel sessions on one socket, sorted by ALPN
 after the TLS handshake — QUIC takes the same port on UDP. Both roles need
 exactly 443 (a URL without a port means 443; 443 is also the one outbound port
 restrictive networks allow), so they share it.
 
-### Reaching the admin API from the control plane
+### Reaching the console
 
-The admin API listens on loopback. If your control plane runs elsewhere, do
-**not** move it to `0.0.0.0` — tunnel it:
+It listens on loopback. Do **not** move it to `0.0.0.0` — tunnel it:
 
 ```sh
-# On the control plane machine
-ssh -N -L 9443:127.0.0.1:9443 rackops@pop1.rackops.in
+ssh -N -L 8091:127.0.0.1:8091 rackops@pop1.rackops.in
+# then browse http://127.0.0.1:8091
 ```
-
-…and point `--frontdoor-admin` at `http://127.0.0.1:9443`. Or put the admin API
-behind your own authenticated proxy. Anyone who reaches it can suspend any
-customer.
 
 ---
 
@@ -175,15 +194,25 @@ On the customer's RackOps server:
 
 ```sh
 # The admin token from Part 3, copied over
-sudo install -m 600 /dev/stdin /etc/rackops/fd.token <<<'<admin token>'
+sudo install -m 600 /dev/stdin /etc/rackops/fd.token <<<'<enrollment token>'
 
 rackops server \
   --listen :8080 \
   --frontdoor-pop   pop1.rackops.in:443 \
   --frontdoor-zone  link.rackops.in \
-  --frontdoor-admin http://127.0.0.1:9443 \
+  --frontdoor-admin https://admin.rackops.in \
   --frontdoor-token-file /etc/rackops/fd.token
 ```
+
+Do not assemble these by hand. The **Front Door** page in RackOps Admin shows
+the exact line, token included, with a copy button — a typo here surfaces
+much later as a rejected key at connect time.
+
+The enrollment token is a *machine* credential, separate from your console
+login: a customer's control plane is a daemon and cannot sign in
+interactively, and no customer should hold an operator password. It is
+created on first start at `<data-dir>/frontdoor-enroll.token`; rotate it by
+deleting that file and restarting.
 
 Existing systemd unit? Add the four flags to `ExecStart` and
 `sudo systemctl restart rackops`.
@@ -220,27 +249,28 @@ monthly free tier.
 ## Try it locally first (no VPS, no DNS, 2 minutes)
 
 ```sh
-cd apps/rackops-lite/backend
-go build -o /tmp/rackops-edge ./cmd/rackops-edge
+cd internal-apps/crm/backend
+go build -o /tmp/rackops-admin ./cmd/rackops-admin
 
-/tmp/rackops-edge \
-  --pop-id dev --zone link.rackops.in \
-  --public-addr 127.0.0.1:8443 --http-addr "" \
-  --admin-addr 127.0.0.1:9443 \
-  --data-dir /tmp/fd-dev \
-  --admin-token dev-token-0123456789
+RACKOPS_ADMIN_EMAIL=ops@rackops.in RACKOPS_ADMIN_PASSWORD=secret123 \
+/tmp/rackops-admin serve \
+  --listen 127.0.0.1:8091 --data-dir /tmp/rackops-admin-dev \
+  --frontdoor --pop-id dev --zone link.rackops.in \
+  --public-addr 127.0.0.1:8443 --http-addr ""
 ```
 
-In another shell:
+Open <http://127.0.0.1:8091>, sign in, and click **Front Door**. Or drive it
+from a second shell:
 
 ```sh
-T=dev-token-0123456789
+A=http://127.0.0.1:8091
+T=$(cat /tmp/rackops-admin-dev/frontdoor-enroll.token)
 
-# Enroll a fake tenant
+# Enroll a fake tenant the way a customer's control plane would
 curl -s -X PUT -H "Authorization: Bearer $T" \
   -d '{"publicKey":"'"$(openssl rand -hex 32)"'","workspace":"dev",
        "hostnames":["app-dev.link.rackops.in"]}' \
-  http://127.0.0.1:9443/admin/tenants/inst-dev | jq
+  $A/admin/tenants/inst-dev | jq
 
 # Enrolled but nobody connected → a clear 502, not a hang
 curl -sk --resolve app-dev.link.rackops.in:8443:127.0.0.1 \
@@ -250,10 +280,14 @@ curl -sk --resolve app-dev.link.rackops.in:8443:127.0.0.1 \
 curl -sk -o /dev/null -w '%{http_code}\n' \
   --resolve evil.example.com:8443:127.0.0.1 https://evil.example.com:8443/
 
+# Visitor HTTPS and tunnels share one port, sorted by ALPN
+openssl s_client -connect 127.0.0.1:8443 -alpn rackops-fd/1 </dev/null 2>/dev/null \
+  | grep -i 'ALPN protocol'
+
 # Kill switch, with the reason shown to visitors
 curl -s -X POST -H "Authorization: Bearer $T" \
   -d '{"suspended":true,"reason":"phishing report #7"}' \
-  http://127.0.0.1:9443/admin/tenants/inst-dev/suspend
+  $A/admin/tenants/inst-dev/suspend
 ```
 
 The full path — real POP, real tunnel client, real backend — is exercised by
@@ -263,23 +297,30 @@ The full path — real POP, real tunnel client, real backend — is exercised by
 
 ## Operating it
 
+Everything below is in the console under **Front Door**: connected tenants
+and their transport, traffic against each quota, and a Suspend button that
+takes effect immediately. Since abuse reports arrive as support tickets in
+the same app, acting on one never means SSHing anywhere.
+
+The same operations over HTTP, using the enrollment token (`$T`):
+
 ```sh
 # Who is connected, over what
-curl -s -H "Authorization: Bearer $T" http://127.0.0.1:9443/admin/sessions | jq
+curl -s -H "Authorization: Bearer $T" https://admin.rackops.in/admin/sessions | jq
 
 # One tenant's usage
 curl -s -H "Authorization: Bearer $T" \
-  http://127.0.0.1:9443/admin/tenants/inst-1/usage | jq
+  https://admin.rackops.in/admin/tenants/inst-1/usage | jq
 
 # Abuse report → offline immediately, session dropped in the same call
 curl -s -X POST -H "Authorization: Bearer $T" \
   -d '{"suspended":true,"reason":"phishing — ticket 412"}' \
-  http://127.0.0.1:9443/admin/tenants/inst-1/suspend
+  https://admin.rackops.in/admin/tenants/inst-1/suspend
 
 # Undo
 curl -s -X POST -H "Authorization: Bearer $T" \
   -d '{"suspended":false}' \
-  http://127.0.0.1:9443/admin/tenants/inst-1/suspend
+  https://admin.rackops.in/admin/tenants/inst-1/suspend
 ```
 
 A quota suspension lifts by itself on the 1st. An abuse suspension does not —
@@ -301,8 +342,8 @@ otherwise every abuser would be un-suspended monthly.
 | Browser cert warning | Self-signed (no `--cert`) | Part 2 |
 | Redirect loop | Only possible if the `frontdoor` entrypoint was removed from Traefik | See the two traps in `FRONT_DOOR.md` |
 
-Logs: `journalctl -u rackops-edge -f` on the POP, `journalctl -u rackops -f`
-(look for `frontdoor:`) on the install.
+Logs: `journalctl -u rackops-admin -f` (or `docker compose logs -f`) on the
+admin box, `journalctl -u rackops -f` (look for `frontdoor:`) on the install.
 
 ---
 
@@ -317,7 +358,27 @@ Not code — process, and genuinely blocking:
       better as "and now we can't" than as a correction.
 - [ ] **Bandwidth alerting on the POP.** The 100 GB free tier is per tenant;
       your VPS bill is not.
-- [ ] **Back up `/var/lib/rackops-edge/tenants.json`.** Losing it disconnects
-      every customer until they re-enroll.
+- [ ] **Back up the admin data directory** (`/var/lib/rackops-admin`, or the
+      `rackops-admin-data` volume). It holds the ticket database, the session
+      secret and the tunnel registry; losing it disconnects every customer
+      until they re-enroll.
 - [ ] **A second POP.** One VPS is a single point of failure for every
-      customer's public URL.
+      customer's public URL — see below.
+
+## Extra POPs
+
+`rackops-admin --frontdoor` runs one edge on the admin box, which is all a
+small deployment needs. For a POP in another region, `rackops-edge` is the
+same edge as a standalone binary:
+
+```sh
+rackops-edge --pop-id fra1 --zone link.rackops.in \
+  --public-addr :443 --http-addr :80 \
+  --cert … --key … \
+  --admin-token-file /etc/rackops/enroll.token   # the same token
+```
+
+Point that POP's `--admin-token-file` at the same enrollment token, and add
+its IP to the `*.link` DNS record. Note the current limits: usage is counted
+per POP rather than aggregated, and an install holds a session to one POP at
+a time, so a POP restart is a brief outage rather than a seamless failover.

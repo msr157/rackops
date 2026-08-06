@@ -24,9 +24,11 @@ import (
 	"github.com/rackops/rackops/internal/raftstore"
 	"github.com/rackops/rackops/internal/server"
 	"github.com/rackops/rackops/internal/telemetry"
+	versionpkg "github.com/rackops/rackops/pkg/version"
 )
 
-const version = "0.6.0"
+// version is the single product version, shared with every other binary.
+const version = versionpkg.Current
 
 func main() {
 	if len(os.Args) < 2 {

@@ -42,6 +42,48 @@ export interface Overview {
   recentTickets: Ticket[] | null;
 }
 
+/** RackOps Front Door: the tunnel edge running inside this admin process. */
+export interface FrontDoorStatus {
+  enabled: boolean;
+  reason?: string;
+  popId?: string;
+  zone?: string;
+  publicAddr?: string;
+  enrollToken?: string;
+  tenants: number;
+  connected: number;
+  requests: number;
+  bytes: number;
+  certExpiry?: string;
+  certDaysLeft: number;
+  selfSigned: boolean;
+}
+
+export interface Tenant {
+  id: string;
+  publicKey: string;
+  workspace: string;
+  hostnames: string[] | null;
+  quotaBytes: number;
+  usedBytes: number;
+  periodStart: string;
+  suspended: boolean;
+  suspendReason?: string;
+  createdAt: string;
+  updatedAt: string;
+  connected: boolean;
+  transport?: string;
+}
+
+export interface TunnelSession {
+  tenantId: string;
+  transport: string;
+  remoteAddr: string;
+  agentVersion?: string;
+  openStreams: number;
+  openedAt: string;
+}
+
 export interface InstallDetail {
   install: Install; snapshots: Snapshot[]; tickets: Ticket[];
 }
@@ -90,6 +132,14 @@ export const api = {
   note: (id: string, installId: string, body: string) =>
     req<Ticket>(`/api/tickets/${encodeURIComponent(id)}/note?installId=${encodeURIComponent(installId)}`,
       { method: 'POST', body: JSON.stringify({ body }) }),
+  frontDoor: () => req<FrontDoorStatus>('/api/frontdoor'),
+  tenants: () => req<Tenant[]>('/api/frontdoor/tenants'),
+  tunnelSessions: () => req<TunnelSession[]>('/api/frontdoor/sessions'),
+  suspendTenant: (id: string, suspended: boolean, reason?: string) =>
+    req<{ suspended: boolean; reason: string }>(`/api/frontdoor/tenants/${encodeURIComponent(id)}/suspend`,
+      { method: 'POST', body: JSON.stringify({ suspended, reason }) }),
+  deleteTenant: (id: string) =>
+    req<void>(`/api/frontdoor/tenants/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   setStatus: (id: string, installId: string, status: TicketStatus) =>
     req<Ticket>(`/api/tickets/${encodeURIComponent(id)}/status?installId=${encodeURIComponent(installId)}`,
       { method: 'POST', body: JSON.stringify({ status }) }),

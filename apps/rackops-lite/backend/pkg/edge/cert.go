@@ -35,6 +35,10 @@ type CertSource struct {
 	// lastMod tracks the file timestamps that produced `current`, so the
 	// watcher reloads only on real changes.
 	lastMod atomic.Pointer[[2]time.Time]
+
+	// selfSigned marks a generated development certificate. Set once at
+	// construction and never mutated, so it needs no synchronisation.
+	selfSigned bool
 }
 
 // NewCertSource loads a certificate and key and starts watching them.
@@ -82,7 +86,7 @@ func NewSelfSignedCertSource(zone string) (*CertSource, error) {
 	if err != nil {
 		return nil, fmt.Errorf("edge: parse certificate: %w", err)
 	}
-	cs := &CertSource{}
+	cs := &CertSource{selfSigned: true}
 	cs.current.Store(&tls.Certificate{
 		Certificate: [][]byte{der},
 		PrivateKey:  key,
@@ -105,6 +109,12 @@ func (c *CertSource) TLSConfig() *tls.Config {
 		NextProtos: []string{"h2", "http/1.1"},
 	}
 }
+
+// SelfSigned reports whether this source is serving the generated
+// development certificate rather than a real one. Browsers reject it, so the
+// console shows it prominently instead of leaving it to a startup log line
+// nobody scrolls back to.
+func (c *CertSource) SelfSigned() bool { return c.selfSigned }
 
 // Expiry reports when the current certificate expires, for the health
 // endpoint. A POP whose certificate is about to lapse should be visible
