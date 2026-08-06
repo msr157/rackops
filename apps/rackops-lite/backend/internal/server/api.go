@@ -6,6 +6,9 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -30,10 +33,30 @@ type API struct {
 	// InstallID anonymously identifies this install to the vendor CRM
 	// (support tickets, reset-email relay). Random UUID, minted once.
 	InstallID string
+	// DataDir is the server's state directory — shared with the embedded
+	// local agent, whose node-id file identifies the control plane's own
+	// machine in the fleet (see localNodeID).
+	DataDir string
 	// Cluster is the raft layer (nil = single-server).
 	Cluster *raftstore.Cluster
 	// applyGuard applies replicated state on followers only.
 	applyGuard func([]byte)
+}
+
+// localNodeID returns the node ID of the control plane's own machine. The
+// embedded local agent persists it at <dataDir>/node-id; empty when the
+// server runs with --no-local-agent or before the agent's first start. Read
+// per call (no cache): it's one small cached-by-the-OS file, and the first
+// calls can race the agent's start.
+func (a *API) localNodeID() string {
+	if a.DataDir == "" {
+		return ""
+	}
+	b, err := os.ReadFile(filepath.Join(a.DataDir, "node-id"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
 }
 
 // Router builds the full HTTP mux.
@@ -379,6 +402,28 @@ func (a *API) reconcileNode(nodeID string, reported []types.ContainerStatus) {
 			Payload: string(payload), CreatedAt: time.Now(),
 		})
 		a.Store.AddEvent("tunnel", svc.Name+": quick tunnel disappeared — restarting (URL will change)", nodeID, svc.ID)
+	}
+
+	// The dashboard's own quick tunnel heals exactly like a service tunnel:
+	// operator turned it on, the cloudflared container vanished from the
+	// control-plane machine → restart it (the URL rotates).
+	if nodeID == a.localNodeID() {
+		dashLost := false
+		a.Store.View(func() {
+			dashLost = a.Store.Ingress.DashboardTunnel &&
+				a.Store.Ingress.DashboardTunnelURL != "" && !tunnels[dashboardTunnelID]
+		})
+		if dashLost && healAllowed("qt-"+dashboardTunnelID) {
+			port, _ := strconv.Atoi(a.listenPort())
+			payload, _ := json.Marshal(DeployPayload{ServiceID: dashboardTunnelID, Name: "dashboard", Port: port})
+			taskID := NewID()
+			pendingTunnels.Store(taskID, dashboardTunnelID)
+			a.Store.EnqueueTask(nodeID, types.AgentTask{
+				ID: taskID, Kind: types.TaskTunnelStart, ServiceID: dashboardTunnelID,
+				Payload: string(payload), CreatedAt: time.Now(),
+			})
+			a.Store.AddEvent("tunnel", "Dashboard quick tunnel disappeared — restarting (URL will change)", nodeID, "")
+		}
 	}
 
 	if edgeMissing && healAllowed("edge") {
@@ -746,9 +791,15 @@ func (a *API) handleJoinCommand(w http.ResponseWriter, r *http.Request) {
 		host = a.advertiseAddr()
 	}
 	// --org routes the new machine into the active org at first ingest.
+	// installCommand is the from-scratch path: the release installer's agent
+	// mode downloads the binary, sets up Docker + a service, and joins — one
+	// paste on a bare machine. command remains the bare-binary variant.
 	writeJSON(w, map[string]string{
 		"command": fmt.Sprintf("rackops agent --server http://%s --token %s --org %s", host, a.JoinToken, org.ID),
-		"token":   a.JoinToken,
+		"installCommand": fmt.Sprintf(
+			"curl -fsSL https://github.com/%s/releases/latest/download/install.sh | sudo bash -s -- agent --server http://%s --token %s --org %s",
+			releaseRepo, host, a.JoinToken, org.ID),
+		"token": a.JoinToken,
 	})
 }
 

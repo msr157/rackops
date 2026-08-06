@@ -8,12 +8,13 @@ import { CopyBtn, Modal, Spinner } from './ui';
 
 type JoinState =
   | { phase: 'loading' }
-  | { phase: 'ready'; command: string }
+  | { phase: 'ready'; command: string; installCommand?: string }
   | { phase: 'error'; message: string };
 
-// AddMachineModal is command-first: one instruction, the join command with a
-// Copy button, one caption about the token. When the machine reports in, the
-// modal says so and Done turns primary.
+// AddMachineModal is command-first: one instruction, the installer one-liner
+// with a Copy button, one caption about the token. The bare `rackops agent`
+// command stays available for machines that already have the binary. When the
+// machine reports in, the modal says so and Done turns primary.
 export function AddMachineModal({ onClose }: { onClose: () => void }) {
   const { nodes } = useData();
   const [state, setState] = useState<JoinState>({ phase: 'loading' });
@@ -26,7 +27,7 @@ export function AddMachineModal({ onClose }: { onClose: () => void }) {
   const load = useCallback(() => {
     setState({ phase: 'loading' });
     api.joinCommand()
-      .then((r) => setState({ phase: 'ready', command: r.command }))
+      .then((r) => setState({ phase: 'ready', command: r.command, installCommand: r.installCommand }))
       .catch((e) => {
         const msg = cleanError(e);
         setState({
@@ -43,8 +44,8 @@ export function AddMachineModal({ onClose }: { onClose: () => void }) {
   return (
     <Modal title="Add a machine" icon={<HardDrive size={16} />} onClose={onClose}>
       <p className="dim" style={{ marginBottom: 14, lineHeight: 1.6 }}>
-        Copy the <code className="mono">rackops</code> binary to the new machine, then run
-        this command on it. The machine joins the rack within seconds.
+        Run this one line on the new machine (Linux, macOS, or WSL2). It installs
+        RackOps and everything it needs, then the machine joins the rack within seconds.
       </p>
 
       {state.phase === 'loading' && (
@@ -57,9 +58,11 @@ export function AddMachineModal({ onClose }: { onClose: () => void }) {
       )}
       {state.phase === 'ready' && (
         <>
-          <div className="row" style={{ gap: 8 }}>
-            <code className="code-block" style={{ flex: 1 }}>{state.command}</code>
-            <CopyBtn text={state.command} label="Copy" />
+          <div className="row" style={{ gap: 8, alignItems: 'flex-start' }}>
+            <code className="code-block" style={{ flex: 1, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+              {state.installCommand ?? state.command}
+            </code>
+            <CopyBtn text={state.installCommand ?? state.command} label="Copy" />
           </div>
           <div className="row" style={{ marginTop: 10, alignItems: 'flex-start' }}>
             <span className="faint" style={{ flex: 1, lineHeight: 1.6 }}>
@@ -70,6 +73,15 @@ export function AddMachineModal({ onClose }: { onClose: () => void }) {
               <RotateCw size={12} aria-hidden /> New command
             </button>
           </div>
+          {state.installCommand && (
+            <div className="row" style={{ marginTop: 12, alignItems: 'flex-start' }}>
+              <span className="faint" style={{ flex: 1, lineHeight: 1.6 }}>
+                Already has the <code className="mono">rackops</code> binary?
+                Run <code className="mono">{state.command}</code> instead.
+              </span>
+              <CopyBtn text={state.command} label="Copy" />
+            </div>
+          )}
         </>
       )}
       {state.phase === 'error' && (

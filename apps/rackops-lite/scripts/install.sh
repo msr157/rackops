@@ -1,17 +1,45 @@
 #!/bin/sh
 # RackOps installer — Linux, macOS, and Windows/WSL2.
 #
+# Control plane (the machine you'll open the dashboard on):
 #   curl -fsSL https://github.com/msr157/rackops/releases/latest/download/install.sh | sudo bash
 #
-# Downloads the RackOps server binary, installs everything it needs (Docker,
-# compose, git), and starts it. Re-running the same command upgrades in place.
-# Set RACKOPS_PORT to change the port (default 8080).
+# Agent (joins an existing control plane — the dashboard's "Add machine"
+# dialog prints this line for you, token and all):
+#   curl -fsSL .../install.sh | sudo bash -s -- agent --server http://HOST:8080 --token TOKEN --org ORG
+#
+# Both download the same rackops binary, install everything it needs (Docker,
+# compose, git), and start it as a service. Re-running the same command
+# upgrades in place. Set RACKOPS_PORT to change the server port (default 8080).
 set -eu
 
 REPO="msr157/rackops"
 PORT="${RACKOPS_PORT:-8080}"
 BIN="/usr/local/bin/rackops"
 LOG="$(mktemp /tmp/rackops-install.XXXXXX.log)"
+
+# ---------------------------------------------------------------------------
+# Mode — `agent` as the first argument joins an existing control plane
+# instead of standing up a new one. Everything before Launch is identical.
+# ---------------------------------------------------------------------------
+MODE="server"
+SERVER=""; TOKEN=""; ORG=""
+if [ "${1:-}" = "agent" ]; then
+  MODE="agent"
+  shift
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --server) SERVER="${2:-}"; shift 2 ;;
+      --token)  TOKEN="${2:-}";  shift 2 ;;
+      --org)    ORG="${2:-}";    shift 2 ;;
+      *) printf 'unknown agent option: %s\n' "$1" >&2; exit 1 ;;
+    esac
+  done
+  [ -n "$SERVER" ] || { printf 'agent mode needs --server http://HOST:PORT\n' >&2; exit 1; }
+  [ -n "$TOKEN" ]  || { printf 'agent mode needs --token (Machines → Add machine shows it)\n' >&2; exit 1; }
+  # Accept a bare host:port; the agent speaks HTTP to the control plane.
+  case "$SERVER" in http://*|https://*) ;; *) SERVER="http://$SERVER" ;; esac
+fi
 
 # ---------------------------------------------------------------------------
 # Palette — RackOps design language: phosphor amber on near-black, LED status.
@@ -268,6 +296,87 @@ fi
 # Launch
 # ---------------------------------------------------------------------------
 section "Launch"
+
+if [ "$MODE" = "agent" ]; then
+  # Preflight: prove the control plane is reachable from THIS machine before
+  # installing a service that would silently retry forever. The most common
+  # failure is a join command copied from a dashboard opened on localhost.
+  reach() { $FETCH "$SERVER/api/auth/status" >/dev/null 2>&1; }
+  if step "checking the control plane at $SERVER…" reach; then
+    ok "control plane reachable"
+  else
+    die "can't reach $SERVER from this machine — if that address is localhost or a LAN IP the control plane doesn't actually have, re-copy the join command from a dashboard opened on a reachable address"
+  fi
+
+  AGENT_ARGS="agent --server $SERVER --token $TOKEN"
+  [ -n "$ORG" ] && AGENT_ARGS="$AGENT_ARGS --org $ORG"
+
+  if [ "$OS" = "darwin" ]; then
+    PLIST="/Library/LaunchDaemons/in.rackops.agent.plist"
+    {
+      printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>'
+      printf '%s\n' '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
+      printf '%s\n' '<plist version="1.0">'
+      printf '%s\n' '<dict>'
+      printf '%s\n' '  <key>Label</key><string>in.rackops.agent</string>'
+      printf '%s\n' '  <key>ProgramArguments</key>'
+      printf '%s\n' '  <array>'
+      printf '    <string>%s</string>\n' "$BIN"
+      for a in $AGENT_ARGS; do printf '    <string>%s</string>\n' "$a"; done
+      printf '%s\n' '  </array>'
+      printf '%s\n' '  <key>RunAtLoad</key><true/>'
+      printf '%s\n' '  <key>KeepAlive</key><true/>'
+      printf '%s\n' '  <key>StandardOutPath</key><string>/var/log/rackops-agent.log</string>'
+      printf '%s\n' '  <key>StandardErrorPath</key><string>/var/log/rackops-agent.log</string>'
+      printf '%s\n' '</dict>'
+      printf '%s\n' '</plist>'
+    } > "$PLIST"
+    launchctl bootout system/in.rackops.agent >/dev/null 2>&1 || true
+    launchctl bootstrap system "$PLIST" || die "launchctl couldn't start the agent — check /var/log/rackops-agent.log"
+    ok "launchd service ${DIM}— starts on boot, restarts on crash (logs: /var/log/rackops-agent.log)${R}"
+  elif command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+    cat > /etc/systemd/system/rackops-agent.service <<UNIT
+[Unit]
+Description=RackOps agent
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+ExecStart=$BIN $AGENT_ARGS
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+    systemctl daemon-reload
+    systemctl enable --now rackops-agent >/dev/null 2>&1 || systemctl restart rackops-agent
+    ok "systemd service ${DIM}— starts on boot, restarts on crash${R}"
+  else
+    # No systemd (e.g. plain WSL2): run detached in the background.
+    pkill -f "$BIN agent" 2>/dev/null || true
+    mkdir -p /root/.rackops
+    # shellcheck disable=SC2086 # AGENT_ARGS is intentionally word-split
+    setsid env HOME=/root "$BIN" $AGENT_ARGS >/root/.rackops/agent.log 2>&1 < /dev/null &
+    ok "running in the background ${DIM}— logs: /root/.rackops/agent.log${R}"
+  fi
+
+  say ""
+  say "  ${DIM}╭──────────────────────────────────────────────╮${R}"
+  say "  ${DIM}│${R}                                              ${DIM}│${R}"
+  say "  ${DIM}│${R}   ${GREEN}●${R}  ${BOLD}Machine joined${R}                          ${DIM}│${R}"
+  say "  ${DIM}│${R}                                              ${DIM}│${R}"
+  say "  ${DIM}│${R}   It reports in every couple of seconds —    ${DIM}│${R}"
+  say "  ${DIM}│${R}   watch it appear under Machines in your     ${DIM}│${R}"
+  say "  ${DIM}│${R}   dashboard:                                 ${DIM}│${R}"
+  printf '  %s│%s      %s%-40s%s%s│%s\n' "$DIM" "$R" "$AMBER" "$SERVER" "$R" "$DIM" "$R"
+  say "  ${DIM}│${R}                                              ${DIM}│${R}"
+  say "  ${DIM}╰──────────────────────────────────────────────╯${R}"
+  say "     ${DIM}update later → re-run this same command${R}"
+  say ""
+  rm -f "$LOG"
+  exit 0
+fi
 
 if [ "$OS" = "darwin" ]; then
   # launchd is macOS's systemd: RunAtLoad starts it on boot, KeepAlive

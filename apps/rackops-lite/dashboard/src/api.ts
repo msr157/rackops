@@ -77,11 +77,12 @@ export interface Domain {
 }
 export interface NetworkDiagnosis {
   edgeEnabled: boolean; edgeStatus?: string; edgeNodeId?: string;
-  hasDirectIp: boolean; lanOnly: boolean; meshEnabled: boolean; joinCommand: string;
+  hasDirectIp: boolean; lanOnly: boolean; meshEnabled: boolean;
   nodes: { id: string; name: string; lanIp: string; publicIp?: string; reachability: 'direct' | 'nat' | 'unknown' }[] | null;
 }
 export interface IngressConfig {
   enabled: boolean; nodeId: string; httpPort: number; httpsPort: number; acmeEmail: string;
+  dashboardDomain?: string; dashboardTunnel?: boolean; dashboardTunnelUrl?: string;
   status?: string; statusMsg?: string; lastDeploy?: string;
 }
 export interface MeshStatus {
@@ -205,6 +206,8 @@ export const api = {
   networkDiagnosis: () => req<NetworkDiagnosis>('/api/network/diagnosis'),
   ingress: () => req<IngressConfig>('/api/ingress'),
   setIngress: (cfg: IngressConfig) => req<IngressConfig>('/api/ingress', { method: 'POST', body: JSON.stringify(cfg) }),
+  setDashboardTunnel: (enabled: boolean) =>
+    req<IngressConfig | { status: string }>('/api/network/dashboard-tunnel', { method: 'POST', body: JSON.stringify({ enabled }) }),
   setServiceDomain: (id: string, domain: string, ingress: string) =>
     req<Service>(`/api/services/${id}/domain`, { method: 'POST', body: JSON.stringify({ domain, ingress }) }),
   exposeService: (id: string) =>
@@ -238,7 +241,7 @@ export const api = {
   assistant: (message: string, history?: ChatTurn[], page?: string) =>
     req<{ answer: string; provider: string }>('/api/assistant', { method: 'POST', body: JSON.stringify({ message, history, page }) }),
   testAssistant: () => req<{ ok: boolean; provider: string; error?: string }>('/api/assistant/test', { method: 'POST' }),
-  joinCommand: () => req<{ command: string; token: string }>('/api/join-command'),
+  joinCommand: () => req<{ command: string; installCommand?: string; token: string }>('/api/join-command'),
   // Organizations
   orgs: () => req<Organization[]>('/api/orgs'),
   createOrg: (name: string) => req<Organization>('/api/orgs', { method: 'POST', body: JSON.stringify({ name }) }),
