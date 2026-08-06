@@ -275,7 +275,6 @@ func (a *API) handleNetworkDiagnosis(w http.ResponseWriter, r *http.Request) {
 		HasDirectIP bool       `json:"hasDirectIp"` // some node IS publicly addressed
 		LanOnly     bool       `json:"lanOnly"`     // no node has a confirmed public path
 		Nodes       []nodeDiag `json:"nodes"`
-		JoinCommand string     `json:"joinCommand"`
 		MeshEnabled bool       `json:"meshEnabled"`
 	}
 	a.Store.View(func() {
@@ -298,7 +297,9 @@ func (a *API) handleNetworkDiagnosis(w http.ResponseWriter, r *http.Request) {
 	})
 	out.LanOnly = !out.HasDirectIP
 	out.MeshEnabled = a.Mesh != nil
-	out.JoinCommand = fmt.Sprintf("rackops agent --server http://<vps-public-ip>:%s --token %s", a.listenPort(), a.JoinToken)
+	// No join command here on purpose: the VPS-anchor path stands up a FRESH
+	// control plane, whose join token this server cannot know. The wizard
+	// sends people to that dashboard's own Add-machine dialog instead.
 	writeJSON(w, out)
 }
 

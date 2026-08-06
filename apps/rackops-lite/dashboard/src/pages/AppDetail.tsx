@@ -467,6 +467,7 @@ function NetworkingTab({ svc, reload }: { svc: Service; reload: () => void }) {
   const { nodes, ingress, refresh } = useData();
   const [domains, setDomains] = useState<Domain[]>([]);
   const [domainsLoaded, setDomainsLoaded] = useState(false);
+  const [lanOnly, setLanOnly] = useState(false);
   const [tunnelBusy, setTunnelBusy] = useState(false);
   const [exposeBusy, setExposeBusy] = useState(false);
   // Which route call is in flight. Picking in the select is local-only;
@@ -478,6 +479,10 @@ function NetworkingTab({ svc, reload }: { svc: Service; reload: () => void }) {
 
   useEffect(() => {
     api.domains().then((d) => { setDomains(d ?? []); setDomainsLoaded(true); }).catch(() => {});
+    // Reachability decides which option wears "Recommended" below: an instant
+    // nip.io URL on a LAN-only fleet resolves to a private IP — dead from the
+    // internet — while the tunnel works from anywhere.
+    api.networkDiagnosis().then((d) => setLanOnly(!!d?.lanOnly)).catch(() => {});
   }, []);
 
   // While a tunnel is starting, its URL lands via the 4s status refresh.
@@ -555,17 +560,29 @@ function NetworkingTab({ svc, reload }: { svc: Service; reload: () => void }) {
 
       {svc.port > 0 && (
         <>
-          {/* Option 1: instant URL */}
+          {/* Option 1: instant URL. Recommended only when the internet can
+              actually reach the edge; on a LAN-only fleet the honest badge
+              moves to the tunnel and this one gets a plain warning. The
+              button stays usable — reachability inference can be wrong. */}
           <div className="section-title">
             <Zap size={14} aria-hidden /> Instant URL
-            <span className="badge accent">Recommended</span>
+            {!lanOnly && <span className="badge accent">Recommended</span>}
             <InfoTip wide>
               Publishes this app at a free {`<app>.<ip>.nip.io`} address through your own
               edge proxy. No DNS setup and no third party; the address keeps working for
               as long as the edge runs.
             </InfoTip>
           </div>
-          <div className="dim" style={{ marginBottom: 10 }}>Free nip.io address through your own edge.</div>
+          <div className="dim" style={{ marginBottom: 10 }}>
+            Free nip.io address through your own edge.
+            {lanOnly && (
+              <span style={{ display: 'block', marginTop: 4 }} className="faint">
+                <TriangleAlert size={11} aria-hidden /> Your machines have no public IP, so this URL
+                would only open from inside your network. For a link that works from anywhere,
+                use the quick tunnel below.
+              </span>
+            )}
+          </div>
           <div className="row wrap">
             <button className="btn" disabled={exposeBusy || !edgeReady} onClick={expose}>
               {exposeBusy ? <Spinner size={13} /> : <Zap size={13} aria-hidden />} Get instant URL
@@ -578,11 +595,13 @@ function NetworkingTab({ svc, reload }: { svc: Service; reload: () => void }) {
           </div>
 
           {/* Option 2: quick tunnel — the one real on/off here, so it wears
-              the toggle block. */}
+              the toggle block. On a LAN-only fleet it inherits Recommended:
+              it's the only option that works from the internet there. */}
           <div className="setting toggle" style={{ marginTop: 28 }}>
             <div style={{ minWidth: 0, flex: 1 }}>
               <div className="setting-title">
                 <Cloud size={14} aria-hidden /> Quick tunnel
+                {lanOnly && <span className="badge accent">Recommended</span>}
                 <InfoTip wide>
                   A Cloudflare tunnel with a public HTTPS URL. No account, no port forwarding,
                   works behind any router. The URL changes when the tunnel restarts, so treat
