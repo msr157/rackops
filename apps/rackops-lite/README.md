@@ -12,6 +12,22 @@ curl -fsSL https://github.com/msr157/rackops/releases/latest/download/install.sh
 
 Works on any **Linux** machine (x86-64 or ARM) and on **macOS** (Apple Silicon or Intel). Root (`sudo`) is required — the installer sets up Docker, a system service, and a binary in `/usr/local/bin`. Re-running the same command later **updates** RackOps in place. It also discovers containers already running on the machine and adopts them, so your existing services show up in the dashboard ready to manage.
 
+### Add more machines
+
+Open **Machines → Add machine** in the dashboard — it hands you a ready-made one-liner (the same installer in `agent` mode, join token included) to paste on the new machine:
+
+```sh
+curl -fsSL https://github.com/msr157/rackops/releases/latest/download/install.sh | \
+  sudo bash -s -- agent --server http://<control-plane>:8080 --token <join-token>
+```
+
+The machine installs Docker if needed, joins the fleet, and reports in every couple of seconds. Agents **dial out** to the control plane — machines behind NAT/CGNAT join without any port forwarding.
+
+### Firewall / cloud notes
+
+- **UDP 51820 inbound on the control-plane machine** — the WireGuard mesh listens there. Without it, cross-machine routing (edge → apps on other machines) can't establish; agents still report fine over HTTP. Change it with `--mesh-port`, or set `--mesh-port 0` to disable the mesh.
+- **`--advertise <ip-or-host>`** — on clouds where the machine's primary interface holds a private IP (AWS, GCP, Oracle…), auto-detection picks that private address. Pass the public IP (or DNS name) so agents, Traefik, and the mesh reach the server on an address that routes.
+
 ### macOS
 
 The same one-liner installs the binary and a launchd service (starts on boot, restarts on crash, logs to `/var/log/rackops.log`). Two macOS differences:
@@ -54,7 +70,7 @@ cd apps/rackops-lite/backend && go build -o rackops ./cmd/rackops
 - **Intelligent placement** — multi-constraint scorer (CPU/memory/storage/thermal headroom + NVMe/GPU capability) ranks the org's nodes; `nodeId: "auto"` deploys to the winner
 - **Deployments** — image, git (Dockerfile/nixpacks/auto), and compose-stack deploys via Docker/podman with env vars, port mapping, restart policy; start/stop/restart/redeploy/remove; adoption of containers that already exist on a machine
 - **Projects → Environments → Services** hierarchy (Dokploy-style)
-- **Networking** — Traefik edge with Let's Encrypt, domain verification wizard, WireGuard mesh with relays for CGNAT nodes, zero-DNS nip.io URLs, Cloudflare quick tunnels
+- **Networking** — Traefik edge with Let's Encrypt, domain verification wizard, WireGuard mesh with relays for CGNAT nodes, zero-DNS nip.io URLs, Cloudflare quick tunnels (for apps and for the dashboard itself)
 - **Auth & API** — owner/admin/member/viewer roles, password reset (emailed + always in the server log), API keys that act with their owner's role, interactive Swagger docs at `/swagger`, and `rackops mcp` for AI tools (VS Code/Claude/Cursor)
 - **Support** — in-dashboard tickets answered by RackOps support, with replies landing back in the thread
 - **Alert engine** — sustained-condition alerts (CPU/memory/thermal/disk/node-down) that auto-resolve the moment the condition clears

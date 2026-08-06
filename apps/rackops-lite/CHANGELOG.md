@@ -2,14 +2,31 @@
 
 Notable user-visible changes to RackOps Lite are recorded here.
 
-## Unreleased
+## v0.6.0 - 2026-08-06
 
-- Show the real RackOps mark everywhere: the browser-tab icon and the in-app logo are now the brand "R" instead of a leftover template icon.
-- Make every Copy button work on dashboards served over plain HTTP. The clipboard write now falls back to the legacy selection path on insecure origins, so join commands, IPs, API keys, and invite links copy instead of reporting "copy failed".
-- Move the activity feed off Home onto a dedicated Activity page (in the sidebar, the ⌘K palette, and the notification bell), with filters for apps, machines, alerts, and workspace events. Home stays a one-glance status answer.
-- Fix the "Add machine" join command pointing at `localhost` when the dashboard is opened on `http://localhost:8080` — it now embeds an address the new machine can actually reach.
-- Stop cross-node domain routing from flapping on multi-machine fleets: relay listeners were torn down and rebuilt every couple of seconds because every machine's report — not just the edge machine's — reconciled them.
-- Label the installer's final printed address "(network)" instead of "(LAN)" — on a VPS it is the public IP and the only address that works from your browser.
+### Adding machines is one paste now
+
+- **The installer grew an `agent` mode.** "Add machine" hands you a single command that installs RackOps *and* everything it needs (Docker, compose, git) on the new machine, joins it to your rack, and registers a boot-time service — Linux, macOS, and WSL2. No more copying binaries around. It preflights that the control plane is actually reachable before installing anything.
+- **Join commands always point somewhere reachable.** A dashboard opened on `localhost` used to mint a join command telling the new machine to join itself; loopback now falls back to the server's advertised address.
+
+### Reach your dashboard from anywhere
+
+- **Dashboard quick tunnel** — one switch on the Network page's new *Remote access* section gives the dashboard itself a public `trycloudflare.com` URL: no port forwarding, works behind CGNAT, auto-restarts if the tunnel container dies. Made for home-lab installs the internet can't reach.
+- **Dashboard domain** — installs with a public edge can serve the dashboard at a real domain through Traefik (HTTPS included once Let's Encrypt is on). Set it in the edge form.
+
+### Honest guidance
+
+- The **VPS anchor wizard** now tells the truth: install a fresh control plane on the VPS, create your account there, and join this machine from the VPS dashboard — instead of handing out a join command with a token the new VPS would reject. It also warns that apps don't migrate.
+- **"Recommended" moved to the option that works.** On a fleet with no public IP, an instant nip.io URL only opens inside your network — the badge now sits on the quick tunnel there, with a plain warning on the instant URL.
+- README documents the two things NAT'd and cloud installs trip on: inbound **UDP 51820** for the mesh, and `--advertise` for machines whose primary interface holds a private IP.
+
+### Fixes and polish
+
+- Every **Copy button works on plain-HTTP dashboards** now (LAN/VPS IPs): clipboard writes fall back to the legacy selection path on insecure origins.
+- The **real RackOps logo** replaced the leftover template icon in the browser tab, the top nav, the boot screen, and the sign-in card.
+- The **activity feed moved off Home** to a dedicated Activity page (sidebar, ⌘K, notification bell) with area filters; Home stays a one-glance status answer.
+- **Cross-node domain routing no longer flaps** on multi-machine fleets: relay listeners were being torn down and rebuilt every couple of seconds by non-edge machines' reports.
+- The installer labels its printed address "(network)" instead of "(LAN)" — on a VPS that's the public IP and the only one that works from your browser.
 
 ## v0.5.0 - 2026-08-06
 

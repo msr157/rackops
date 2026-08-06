@@ -17,6 +17,18 @@ interface Release { version: string; date: string; title: string; changes: Relea
 
 const releases: Release[] = [
   {
+    version: 'v0.6.0', date: 'August 6, 2026', title: 'One-paste machines and remote access',
+    changes: [
+      { lead: 'One-paste Add machine', text: ' — the join dialog now hands you a single installer command that sets up Docker, installs RackOps, and joins the machine to your rack as a boot-time service (Linux, macOS, WSL2).' },
+      { lead: 'Dashboard quick tunnel', text: ' — a switch under Network → Remote access gives this dashboard a public URL in seconds: no port forwarding, works behind CGNAT, heals itself if the tunnel dies.' },
+      { lead: 'Dashboard domain', text: ' — installs with a public edge can serve the dashboard at a real domain through Traefik, with HTTPS once Let’s Encrypt is on.' },
+      { lead: 'Honest recommendations', text: ' — on racks with no public IP, "Recommended" moved from the instant URL (LAN-only there) to the quick tunnel, and the VPS-anchor wizard now walks the path that actually works.' },
+      { lead: 'Copy buttons', text: ' work everywhere now, including dashboards served over plain http:// on a LAN or VPS IP.' },
+      { lead: 'Activity page', text: ' — the event feed moved off Home into its own filterable page; Home stays a one-glance status answer. The real RackOps logo landed in the tab and the chrome, too.' },
+      { lead: 'Steadier multi-machine routing', text: ' — cross-node domain routes no longer reset every couple of seconds on fleets with more than one machine.' },
+    ],
+  },
+  {
     version: 'v0.5.0', date: 'August 6, 2026', title: 'macOS, live logs, and hardened sessions',
     changes: [
       { lead: 'macOS support', text: ' — the same install one-liner now works on Apple Silicon and Intel Macs: launchd service, in-place self-update, Docker via Docker Desktop or colima.' },
