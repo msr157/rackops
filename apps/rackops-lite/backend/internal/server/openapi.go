@@ -72,6 +72,7 @@ func (a *API) apiRoutes() []route {
 		{"GET", "/api/network/diagnosis", "network", "Analyze public reachability (LAN-only? NAT?)", a.handleNetworkDiagnosis, false},
 		{"GET", "/api/ingress", "network", "Edge proxy (Traefik) configuration + status", a.handleGetIngress, false},
 		{"POST", "/api/ingress", "network", "Enable/disable/update the edge proxy", a.handleSetIngress, false},
+		{"POST", "/api/network/dashboard-tunnel", "network", "Start/stop a quick tunnel for the dashboard itself (remote access behind NAT)", a.handleDashboardTunnel, false},
 		{"GET", "/api/traefik/config", "network", "Traefik dynamic config (consumed by the edge container)", a.handleTraefikConfig, true},
 		{"POST", "/api/services/{id}/domain", "network", "Route a domain to a service", a.handleSetServiceDomain, false},
 		{"POST", "/api/services/{id}/expose", "network", "Mint a zero-DNS nip.io URL for a service", a.handleExposeService, false},

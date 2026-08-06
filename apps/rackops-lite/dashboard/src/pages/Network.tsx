@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Globe, Shield, Waypoints, Boxes, AlertTriangle, Plus, Trash2, RefreshCw, ChevronDown,
-  ChevronRight, Lock, Rocket, Cloud, ArrowRight, ArrowLeft, Route, Network,
+  ChevronRight, Lock, Rocket, Cloud, ArrowRight, ArrowLeft, Route, Network, Radio,
 } from 'lucide-react';
 import { api } from '../api';
 import type { Domain, IngressConfig, MeshStatus, ClusterStatus, NetworkDiagnosis } from '../api';
@@ -11,7 +11,7 @@ import { useToast, cleanError } from '../components/toast';
 import { useConfirm } from '../components/confirm';
 import {
   Crumbs, EmptyState, Field, InfoTip, Led, CopyBtn, CopyField, Modal, Pill, RowMenu, Skeleton,
-  SkeletonRows, Spinner, UrlChip, publicUrls,
+  SkeletonRows, Spinner, Switch, UrlChip, publicUrls,
 } from '../components/ui';
 
 // recordHost: what goes in the registrar's "Host/Name" field.
@@ -85,7 +85,9 @@ export function NetworkPage() {
   const [ingressNode, setIngressNode] = useState('');
   const [httpPort, setHttpPort] = useState('80');
   const [httpsPort, setHttpsPort] = useState('443');
+  const [dashDomain, setDashDomain] = useState('');
   const [busy, setBusy] = useState<false | 'apply' | 'disable'>(false);
+  const [tunnelBusy, setTunnelBusy] = useState(false);
 
   const [wizardOpen, setWizardOpen] = useState(false);
   const [wizStep, setWizStep] = useState<1 | 2>(1);
@@ -121,6 +123,7 @@ export function NetworkPage() {
           if (i.httpsPort) setHttpsPort(String(i.httpsPort));
           setAcmeEmail(i.acmeEmail ?? '');
           setAutoTls(!!i.acmeEmail);
+          setDashDomain(i.dashboardDomain ?? '');
         }
       })
       .catch(() => setIngressState((s) => (s === 'ready' ? s : 'error')));
@@ -132,8 +135,11 @@ export function NetworkPage() {
   }, []);
   useEffect(load, [load]);
 
-  // Poll while anything is settling: edge starting, or domains not green yet.
-  const settling = (ingress?.enabled && ingress.status !== 'running') || domains.some((d) => d.status !== 'verified');
+  // Poll while anything is settling: edge starting, domains not green yet,
+  // or a dashboard tunnel waiting for its trycloudflare URL.
+  const settling = (ingress?.enabled && ingress.status !== 'running')
+    || domains.some((d) => d.status !== 'verified')
+    || (!!ingress?.dashboardTunnel && !ingress.dashboardTunnelUrl);
   useEffect(() => {
     if (!settling) return;
     const t = setInterval(() => {
@@ -209,12 +215,27 @@ export function NetworkPage() {
         httpPort: parseInt(httpPort, 10) || 80,
         httpsPort: parseInt(httpsPort, 10) || 443,
         acmeEmail: autoTls ? acmeEmail.trim() : '',
+        dashboardDomain: dashDomain.trim(),
       });
       toast.ok(enabled ? 'Edge deploying. Status updates live on this page.' : 'Edge disabled.');
       clearTouched();
       load();
     } catch (e) { toast.err(cleanError(e)); }
     setBusy(false);
+  };
+
+  // The dashboard's own quick tunnel: one switch, outcome lands via the
+  // settling poll (the URL arrives async from the agent).
+  const toggleDashTunnel = async (on: boolean) => {
+    if (tunnelBusy) return;
+    setTunnelBusy(true);
+    try {
+      await api.setDashboardTunnel(on);
+      if (on) toast.ok('Tunnel starting. The public URL appears here in a few seconds.');
+      else toast.ok('Dashboard tunnel stopped.');
+      load();
+    } catch (e) { toast.err(cleanError(e)); }
+    setTunnelBusy(false);
   };
 
   // Submitting the form is the only way changes reach the edge; Enter in any
@@ -249,6 +270,7 @@ export function NetworkPage() {
     setHttpsPort(String(ingress?.httpsPort || 443));
     setAcmeEmail(ingress?.acmeEmail ?? '');
     setAutoTls(!!ingress?.acmeEmail);
+    setDashDomain(ingress?.dashboardDomain ?? '');
     setAcmeError('');
     clearTouched();
   };
@@ -274,6 +296,7 @@ export function NetworkPage() {
     || httpPort !== String(ingress?.httpPort || 80)
     || httpsPort !== String(ingress?.httpsPort || 443)
     || effAcme !== savedAcme
+    || dashDomain.trim() !== (ingress?.dashboardDomain ?? '')
   );
 
   // Wizard preselection: any directly reachable machine means port forwarding
@@ -388,6 +411,71 @@ export function NetworkPage() {
         <EmptyState icon={<Globe size={18} />} title="Nothing is public yet">
           <div>Open any app's <strong>Networking</strong> tab to give it an instant URL, a tunnel, or a domain.</div>
         </EmptyState>
+      )}
+
+      {/* Remote access: reaching THIS dashboard from outside the LAN. The
+          quick-tunnel switch is the NAT answer; installs with a public edge
+          get the dashboard-domain field in the edge form below. */}
+      <div className="section-title">
+        <Radio size={15} aria-hidden /> Remote access
+        <InfoTip wide>
+          A quick tunnel gives this dashboard a public <code>trycloudflare.com</code> URL in
+          seconds — no port forwarding, works behind CGNAT. The URL changes whenever the
+          tunnel restarts. For a permanent address, use a dashboard domain on the edge
+          (below) instead.
+        </InfoTip>
+      </div>
+      <div className="dim" style={{ marginBottom: 12 }}>
+        Reach this dashboard when you&rsquo;re away from this network.
+      </div>
+      {ingressState === 'loading' ? <SkeletonRows count={1} height={44} /> : ingressState === 'ready' && (
+        <div className="list">
+          <div className="list-row" style={{ alignItems: 'center' }}>
+            <Cloud size={15} style={{ color: 'var(--dim)', flex: 'none' }} aria-hidden />
+            <span style={{ minWidth: 0, flex: 1 }}>
+              <strong>Dashboard quick tunnel</strong>
+              <span className="dim" style={{ display: 'block' }}>
+                {ingress?.dashboardTunnel
+                  ? ingress.dashboardTunnelUrl
+                    ? 'Live — the URL changes if the tunnel restarts.'
+                    : 'Starting… the public URL appears here in a few seconds.'
+                  : 'Off. Turn it on to get a public URL for this dashboard, even behind NAT.'}
+              </span>
+              {ingress?.dashboardTunnel && ingress.dashboardTunnelUrl && (
+                <span className="row" style={{ marginTop: 6 }}>
+                  <UrlChip url={ingress.dashboardTunnelUrl} />
+                  <CopyBtn text={ingress.dashboardTunnelUrl} />
+                </span>
+              )}
+            </span>
+            <span className="row" style={{ gap: 8, flex: 'none' }}>
+              {(tunnelBusy || (ingress?.dashboardTunnel && !ingress.dashboardTunnelUrl)) && <Spinner size={13} />}
+              <Switch checked={!!ingress?.dashboardTunnel} disabled={tunnelBusy}
+                ariaLabel="Dashboard quick tunnel" onChange={toggleDashTunnel} />
+            </span>
+          </div>
+          {edgeReady && (
+            <div className="list-row">
+              <Shield size={15} style={{ color: 'var(--dim)', flex: 'none' }} aria-hidden />
+              <span style={{ minWidth: 0, flex: 1 }}>
+                <strong>Dashboard domain</strong>
+                <span className="dim" style={{ display: 'block' }}>
+                  {ingress?.dashboardDomain
+                    ? <>Serving this dashboard at <span className="mono">{ingress.dashboardDomain}</span>{tlsOn ? ' with HTTPS' : ''}.</>
+                    : 'Give the dashboard a permanent address through the edge — set it in the Edge proxy form below.'}
+                </span>
+              </span>
+              {ingress?.dashboardDomain
+                ? <UrlChip url={`${tlsOn ? 'https' : 'http'}://${ingress.dashboardDomain}`} />
+                : (
+                  <button type="button" className="btn sm" style={{ flex: 'none' }}
+                    onClick={() => document.getElementById('network-config')?.scrollIntoView({ behavior: 'smooth' })}>
+                    Set up <ArrowRight size={11} aria-hidden />
+                  </button>
+                )}
+            </div>
+          )}
+        </div>
       )}
 
       {/* Domains */}
@@ -643,6 +731,13 @@ export function NetworkPage() {
                 )}
               </Field>
             )}
+            <Field label="Dashboard domain (optional)"
+              hint="Serve this dashboard itself at a domain through the edge — point the same A record at the edge IP. Needs the edge machine to reach the control plane (same machine or same network).">
+              {(p) => (
+                <input className="input" {...p} placeholder="rack.example.com" value={dashDomain}
+                  onChange={(e) => { markTouched(); setDashDomain(e.target.value); }} />
+              )}
+            </Field>
 
             {/* One apply intent at a time: while a live edge has unapplied
                 edits, the warn notice carries Update + Discard; otherwise
@@ -814,16 +909,24 @@ export function NetworkPage() {
                     <ol style={{ margin: 0, paddingLeft: 18 }}>
                       <li>Get any small VPS with a public IP (Hetzner, DigitalOcean, Oracle free tier).</li>
                       <li>
-                        Run the control plane there:
-                        <div style={{ margin: '6px 0' }}><CopyField text="rackops server --listen :8080" /></div>
+                        Install RackOps on it — the VPS becomes your control plane:
+                        <div style={{ margin: '6px 0' }}>
+                          <CopyField text="curl -fsSL https://github.com/msr157/rackops/releases/latest/download/install.sh | sudo bash" />
+                        </div>
                       </li>
+                      <li>Open <span className="mono">http://&lt;vps-ip&gt;:8080</span> and create your owner account there.</li>
                       <li>
-                        Join this machine to it (dials out, no port forwarding needed):
-                        <div style={{ margin: '6px 0' }}><CopyField text={diagnosis.joinCommand} /></div>
+                        In the VPS dashboard: <b>Machines → Add machine</b>, then run the command it
+                        shows on this machine. This machine dials out and joins — no port forwarding needed.
                       </li>
-                      <li>On the VPS dashboard, enable the <b>edge on the VPS machine</b> (ports 80/443).</li>
-                      <li>Your apps stay home; traffic flows VPS → encrypted mesh → here, automatically.</li>
+                      <li>Still on the VPS dashboard, enable the <b>edge on the VPS machine</b> (ports 80/443).</li>
+                      <li>Your apps run at home; traffic flows VPS → encrypted mesh → here, automatically.</li>
                     </ol>
+                    <div className="faint" style={{ marginTop: 8 }}>
+                      Heads up: the VPS dashboard becomes the one you manage everything from. Apps and
+                      settings on this install don&rsquo;t migrate — redeploy your apps from the VPS dashboard
+                      onto this machine once it has joined.
+                    </div>
                   </div>
                 </>
               )}
@@ -834,12 +937,15 @@ export function NetworkPage() {
                     <ol style={{ margin: 0, paddingLeft: 18 }}>
                       <li>Open any app's <b>Networking</b> tab.</li>
                       <li>
-                        Hit <b><Cloud size={11} aria-hidden /> Start tunnel</b>: a free
+                        Turn on <b><Cloud size={11} aria-hidden /> Quick tunnel</b>: a free
                         public <span className="mono">trycloudflare.com</span> URL appears in seconds, even behind
                         CGNAT or a mobile hotspot.
                       </li>
                     </ol>
-                    <div className="faint" style={{ marginTop: 8 }}>The URL changes on every restart: great for demos, not production.</div>
+                    <div className="faint" style={{ marginTop: 8 }}>
+                      The URL changes on every restart: great for demos, not production. The dashboard
+                      itself gets the same treatment under <b>Remote access</b> on this page.
+                    </div>
                   </div>
                 </>
               )}

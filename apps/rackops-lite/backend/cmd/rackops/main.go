@@ -26,7 +26,7 @@ import (
 	"github.com/rackops/rackops/internal/telemetry"
 )
 
-const version = "0.5.0"
+const version = "0.6.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -169,6 +169,7 @@ func runServer(args []string) {
 		InstallID: server.LoadOrCreateInstallID(*dataDir),
 		DashFS:    server.DashboardFS(),
 		History:   server.NewHistory(*dataDir),
+		DataDir:   *dataDir,
 	}
 
 	// Node-down watchdog.

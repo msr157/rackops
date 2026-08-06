@@ -162,6 +162,13 @@ func (a *API) handleSetIngress(w http.ResponseWriter, r *http.Request) {
 		cfg.HTTPSPort = 443
 	}
 	cfg.ACMEEmail = strings.TrimSpace(cfg.ACMEEmail)
+	cfg.DashboardDomain = strings.ToLower(strings.TrimSpace(cfg.DashboardDomain))
+	// The dashboard tunnel is server-managed state with its own endpoint; an
+	// edge reconfigure must never silently reset it.
+	a.Store.View(func() {
+		cfg.DashboardTunnel = a.Store.Ingress.DashboardTunnel
+		cfg.DashboardTunnelURL = a.Store.Ingress.DashboardTunnelURL
+	})
 	var node *types.Node
 	a.Store.View(func() { node = a.Store.Nodes[cfg.NodeID] })
 	if cfg.Enabled && node == nil {
@@ -561,6 +568,29 @@ func (a *API) handleTraefikConfig(w http.ResponseWriter, r *http.Request) {
 		"loadBalancer": map[string]any{
 			"servers": []map[string]string{{"url": "http://" + a.advertiseAddr()}},
 		},
+	}
+
+	// Operator-chosen dashboard domain: the edge serves the control plane
+	// itself, with a real certificate once ACME is on. Reaches the dashboard
+	// at the advertised address, so it works whenever the edge machine can
+	// reach the control plane (same machine, or same network).
+	if ingress.DashboardDomain != "" {
+		dashRouter := map[string]any{
+			"rule":        fmt.Sprintf("Host(`%s`)", ingress.DashboardDomain),
+			"service":     "rackops-dashboard",
+			"entryPoints": []string{"web"},
+			"middlewares": []string{"rackops-edge"},
+		}
+		if ingress.ACMEEmail != "" {
+			dashRouter["entryPoints"] = []string{"web", "websecure"}
+			dashRouter["tls"] = map[string]any{"certResolver": "le"}
+		}
+		routers["rackops-dashboard"] = dashRouter
+		services["rackops-dashboard"] = map[string]any{
+			"loadBalancer": map[string]any{
+				"servers": []map[string]string{{"url": "http://" + a.advertiseAddr()}},
+			},
+		}
 	}
 
 	writeJSON(w, map[string]any{

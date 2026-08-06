@@ -367,6 +367,16 @@ type IngressConfig struct {
 	HTTPSPort int    `json:"httpsPort"` // default 443
 	ACMEEmail string `json:"acmeEmail"` // enables Let's Encrypt when set
 
+	// Remote access to the dashboard itself (not app routing).
+	// DashboardDomain serves the control plane through the Traefik edge on
+	// this hostname (HTTPS via ACME when configured) — for installs whose
+	// edge machine can reach the control plane. DashboardTunnel runs a
+	// cloudflared quick tunnel on the control-plane machine instead — the
+	// NAT/CGNAT answer, no ports required; the URL rotates on restart.
+	DashboardDomain    string `json:"dashboardDomain,omitempty"`
+	DashboardTunnel    bool   `json:"dashboardTunnel,omitempty"`
+	DashboardTunnelURL string `json:"dashboardTunnelUrl,omitempty"` // server-maintained
+
 	// Runtime status (server-maintained, not user input).
 	Status     string    `json:"status,omitempty"`     // pending | running | failed
 	StatusMsg  string    `json:"statusMsg,omitempty"`  // last deploy log tail / error
