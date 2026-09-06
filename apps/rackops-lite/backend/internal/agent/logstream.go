@@ -169,12 +169,13 @@ func (a *Agent) startFollow(parent context.Context, p DeployPayload) {
 	}
 	ctx, cancel := context.WithTimeout(parent, maxFollowDuration)
 	f := &follower{cancel: cancel}
+	key := p.ServiceID + "\x00" + p.StreamID
 
 	a.followMu.Lock()
-	if old, ok := a.follows[p.StreamID]; ok {
+	if old, ok := a.follows[key]; ok {
 		old.cancel() // replace an existing follower for this stream
 	}
-	a.follows[p.StreamID] = f
+	a.follows[key] = f
 	a.followMu.Unlock()
 
 	go func() {
@@ -195,8 +196,8 @@ func (a *Agent) startFollow(parent context.Context, p DeployPayload) {
 		a.followMu.Lock()
 		// Only remove our own registration; a newer follower for this stream
 		// may have replaced us (map holds a different *follower then).
-		if a.follows[p.StreamID] == f {
-			delete(a.follows, p.StreamID)
+		if a.follows[key] == f {
+			delete(a.follows, key)
 		}
 		a.followMu.Unlock()
 		cancel()
@@ -204,10 +205,11 @@ func (a *Agent) startFollow(parent context.Context, p DeployPayload) {
 }
 
 // stopFollow cancels a live log follower by stream ID (no-op if unknown).
-func (a *Agent) stopFollow(streamID string) {
+func (a *Agent) stopFollow(serviceID, streamID string) {
+	key := serviceID + "\x00" + streamID
 	a.followMu.Lock()
-	f := a.follows[streamID]
-	delete(a.follows, streamID)
+	f := a.follows[key]
+	delete(a.follows, key)
 	a.followMu.Unlock()
 	if f != nil {
 		f.cancel()

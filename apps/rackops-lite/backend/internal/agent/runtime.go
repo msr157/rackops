@@ -9,7 +9,6 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -21,6 +20,22 @@ import (
 // Runtime wraps a Docker-compatible container CLI (docker or podman).
 type Runtime struct {
 	Bin string
+	ctx context.Context
+}
+
+func (r *Runtime) command(name string, args ...string) *exec.Cmd {
+	ctx := r.ctx
+	if ctx == nil {
+		// Telemetry and one-off runtime reads must not wedge reporting.
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
+		// The short-lived deadline is released when it fires; task commands
+		// instead inherit the worker's explicitly cancelled context.
+		context.AfterFunc(ctx, cancel)
+	}
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.WaitDelay = 5 * time.Second
+	return cmd
 }
 
 // DetectRuntime finds docker or podman on PATH (docker preferred).
@@ -47,21 +62,31 @@ func DetectRuntime() (*Runtime, error) {
 // the labeled ones lets the control plane detect missing containers and heal
 // them; reporting the external ones lets it adopt pre-existing workloads so
 // they show up and become manageable.
-func (r *Runtime) List() []types.ContainerStatus {
+func (r *Runtime) List() ([]types.ContainerStatus, error) {
 	stats := r.stats()
-	list := r.listLabeled("rackops.service", false, stats)
-	list = append(list, r.listLabeled("rackops.tunnel", true, stats)...)
-	return append(list, r.listExternal(stats)...)
+	list, err := r.listLabeled("rackops.service", false, stats)
+	if err != nil {
+		return nil, err
+	}
+	tunnels, err := r.listLabeled("rackops.tunnel", true, stats)
+	if err != nil {
+		return nil, err
+	}
+	external, err := r.listExternal(stats)
+	if err != nil {
+		return nil, err
+	}
+	return append(append(list, tunnels...), external...), nil
 }
 
 // listExternal collects containers NOT created by RackOps — anything without a
 // rackops label and not named with the rackops- prefix. These are surfaced so
 // the control plane can adopt them.
-func (r *Runtime) listExternal(stats map[string]containerStat) []types.ContainerStatus {
-	out, err := exec.Command(r.Bin, "ps", "-a",
+func (r *Runtime) listExternal(stats map[string]containerStat) ([]types.ContainerStatus, error) {
+	out, err := r.command(r.Bin, "ps", "-a",
 		"--format", "{{.ID}}|{{.Names}}|{{.Image}}|{{.State}}|{{.Ports}}|{{.Labels}}").Output()
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	var list []types.ContainerStatus
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
@@ -70,7 +95,7 @@ func (r *Runtime) listExternal(stats map[string]containerStat) []types.Container
 		}
 		f := strings.SplitN(line, "|", 6)
 		if len(f) < 6 {
-			continue
+			return nil, fmt.Errorf("invalid container inventory response")
 		}
 		name := f[1]
 		labels := f[5]
@@ -90,16 +115,16 @@ func (r *Runtime) listExternal(stats map[string]containerStat) []types.Container
 		}
 		list = append(list, cs)
 	}
-	return list
+	return list, nil
 }
 
 // listLabeled collects containers carrying one rackops label.
-func (r *Runtime) listLabeled(label string, tunnel bool, stats map[string]containerStat) []types.ContainerStatus {
-	out, err := exec.Command(r.Bin, "ps", "-a",
+func (r *Runtime) listLabeled(label string, tunnel bool, stats map[string]containerStat) ([]types.ContainerStatus, error) {
+	out, err := r.command(r.Bin, "ps", "-a",
 		"--filter", "label="+label,
 		"--format", "{{.ID}}|{{.Names}}|{{.Image}}|{{.State}}|{{.Labels}}").Output()
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	var list []types.ContainerStatus
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
@@ -108,9 +133,12 @@ func (r *Runtime) listLabeled(label string, tunnel bool, stats map[string]contai
 		}
 		f := strings.Split(line, "|")
 		if len(f) < 5 {
-			continue
+			return nil, fmt.Errorf("invalid container inventory response")
 		}
 		cs := types.ContainerStatus{ID: f[0], Name: f[1], Image: f[2], State: strings.ToLower(f[3]), Tunnel: tunnel}
+		if retainedContainer(cs.Name) {
+			continue
+		}
 		for _, lbl := range strings.Split(f[4], ",") {
 			if kv := strings.SplitN(lbl, "=", 2); len(kv) == 2 && kv[0] == label {
 				cs.ServiceID = kv[1]
@@ -122,7 +150,7 @@ func (r *Runtime) listLabeled(label string, tunnel bool, stats map[string]contai
 		}
 		list = append(list, cs)
 	}
-	return list
+	return list, nil
 }
 
 type containerStat struct {
@@ -132,7 +160,7 @@ type containerStat struct {
 
 // stats samples per-container CPU/memory in one shot.
 func (r *Runtime) stats() map[string]containerStat {
-	out, err := exec.Command(r.Bin, "stats", "--no-stream",
+	out, err := r.command(r.Bin, "stats", "--no-stream",
 		"--format", "{{.ID}}|{{.CPUPerc}}|{{.MemUsage}}").Output()
 	if err != nil {
 		return nil
@@ -200,15 +228,40 @@ func (r *Runtime) Deploy(p DeployPayload, logs *logSink) (containerID string, ho
 	default:
 		// Pull the image, streaming progress live.
 		logs.WriteString("$ " + r.Bin + " pull " + p.Image + "\n")
-		pull := exec.Command(r.Bin, "pull", p.Image)
+		pull := r.command(r.Bin, "pull", p.Image)
 		pull.Stdout, pull.Stderr = logs, logs
 		if pullErr := pull.Run(); pullErr != nil {
 			return "", 0, logs.String(), fmt.Errorf("pull failed: %w", pullErr)
 		}
 	}
 
-	// Replace any prior container for this service.
-	_ = exec.Command(r.Bin, "rm", "-f", name).Run()
+	// Validate mounts before interrupting the existing workload.
+	for _, mount := range p.Mounts {
+		if _, err := mountSpec(p, mount); err != nil {
+			return "", 0, logs.String(), err
+		}
+	}
+	// Pin the image selected by this deployment even if its tag changes later.
+	imageID, imageErr := r.command(r.Bin, "image", "inspect", "--format", "{{.Id}}", p.Image).Output()
+	if imageErr != nil {
+		return "", 0, logs.String(), fmt.Errorf("cannot resolve deployment image: %w", imageErr)
+	}
+	p.Image = strings.TrimSpace(string(imageID))
+	if p.Image == "" {
+		return "", 0, logs.String(), fmt.Errorf("empty deployment image identity")
+	}
+	previous, retainErr := retainPrevious(p, func(args ...string) ([]byte, error) { return r.command(r.Bin, args...).Output() })
+	if retainErr != nil {
+		return "", 0, logs.String(), retainErr
+	}
+	if previous != "" {
+		logs.WriteString("Previous container retained stopped as " + previous + ". Its data may be shared with the replacement; inspect before restarting it.\n")
+		defer func() {
+			if err != nil {
+				err = &recoveryError{err}
+			}
+		}()
+	}
 
 	restart := p.RestartPol
 	if restart == "" {
@@ -282,10 +335,12 @@ func (r *Runtime) Deploy(p DeployPayload, logs *logSink) (containerID string, ho
 		args = append(args, strings.Fields(p.Command)...)
 	}
 
-	logs.WriteString("$ " + r.Bin + " " + strings.Join(args, " ") + "\n")
+	// Arguments include environment values and may include credentials in
+	// the command itself. Do not echo the deploy configuration into logs.
+	logs.WriteString("$ " + r.Bin + " run [configuration omitted]\n")
 	// Stream the run output live while also capturing it to parse the ID.
 	var runBuf bytes.Buffer
-	run := exec.Command(r.Bin, args...)
+	run := r.command(r.Bin, args...)
 	run.Stdout = io.MultiWriter(logs, &runBuf)
 	run.Stderr = run.Stdout
 	if err := run.Run(); err != nil {
@@ -308,19 +363,38 @@ func (r *Runtime) Deploy(p DeployPayload, logs *logSink) (containerID string, ho
 	// Capture the first seconds of runtime output — an instant crash (bad
 	// command, port bind, missing env) shows up right here in the deploy log
 	// instead of requiring a separate trip to the Logs tab.
-	time.Sleep(2 * time.Second)
-	if first, err := exec.Command(r.Bin, "logs", "--tail", "40", name).CombinedOutput(); err == nil && len(strings.TrimSpace(string(first))) > 0 {
+	waitCtx := r.ctx
+	if waitCtx == nil {
+		waitCtx = context.Background()
+	}
+	if !sleepCtx(waitCtx, 2*time.Second) {
+		return cid, hostPort, logs.String(), waitCtx.Err()
+	}
+	if first, err := r.command(r.Bin, "logs", "--tail", "40", name).CombinedOutput(); err == nil && len(strings.TrimSpace(string(first))) > 0 {
 		logs.WriteString("--- first container output ---\n")
 		logs.Write(first)
 		if !strings.HasSuffix(string(first), "\n") {
 			logs.WriteString("\n")
 		}
 	}
-	if state, err := exec.Command(r.Bin, "inspect", "-f", "{{.State.Status}}", name).Output(); err == nil {
-		st := strings.TrimSpace(string(state))
-		logs.WriteString("container state after start: " + st + "\n")
-		if st != "running" {
-			return cid, hostPort, logs.String(), fmt.Errorf("container exited immediately (state %s) — see output above", st)
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		state, inspectErr := r.command(r.Bin, "inspect", "--format", "{{json .State}}", name).Output()
+		if inspectErr != nil {
+			return cid, hostPort, logs.String(), fmt.Errorf("cannot verify replacement health: %w", inspectErr)
+		}
+		healthy, healthErr := containerHealth(state)
+		if healthErr != nil {
+			return cid, hostPort, logs.String(), healthErr
+		}
+		if healthy {
+			break
+		}
+		if time.Now().After(deadline) {
+			return cid, hostPort, logs.String(), fmt.Errorf("replacement health check did not become healthy within 60 seconds")
+		}
+		if !sleepCtx(waitCtx, time.Second) {
+			return cid, hostPort, logs.String(), waitCtx.Err()
 		}
 	}
 	return cid, hostPort, logs.String(), nil
@@ -361,13 +435,13 @@ func firstPublishedPort(ports string) int {
 
 // Simple runs a one-shot container command (stop/start/restart/rm).
 func (r *Runtime) Simple(args ...string) (string, error) {
-	out, err := exec.Command(r.Bin, args...).CombinedOutput()
+	out, err := r.command(r.Bin, args...).CombinedOutput()
 	return string(out), err
 }
 
 // Logs fetches recent logs for a container.
 func (r *Runtime) Logs(container string, tail int) (string, error) {
-	out, err := exec.Command(r.Bin, "logs", "--tail", strconv.Itoa(tail), container).CombinedOutput()
+	out, err := r.command(r.Bin, "logs", "--tail", strconv.Itoa(tail), container).CombinedOutput()
 	return string(out), err
 }
 
@@ -378,7 +452,7 @@ func (r *Runtime) LogsSince(container string, tail int, since string) (string, e
 		args = append(args, "--since", since)
 	}
 	args = append(args, container)
-	out, err := exec.Command(r.Bin, args...).CombinedOutput()
+	out, err := r.command(r.Bin, args...).CombinedOutput()
 	return string(out), err
 }
 
@@ -399,10 +473,17 @@ func (r *Runtime) FollowLogs(ctx context.Context, container string, tail int, si
 // FollowComposeLogs streams a compose stack's aggregated logs into w until ctx
 // is cancelled.
 func (r *Runtime) FollowComposeLogs(ctx context.Context, p DeployPayload, tail int, since string, w io.Writer) error {
-	home, _ := os.UserHomeDir()
-	dir := filepath.Join(home, ".rackops", "stacks", sanitize(p.Name)+"-"+p.ServiceID)
-	project := "rackops-" + sanitize(p.Name)
-	args := []string{"compose", "-p", project, "logs", "-f", "--tail", strconv.Itoa(tail)}
+	dir, project, err := composeLocation(p)
+	if err != nil {
+		return err
+	}
+	if err = verifyComposeOwnership(dir, project, func(args ...string) ([]byte, error) { return r.command(r.Bin, args...).Output() }); err != nil {
+		return err
+	}
+	args, err := composeArgs(dir, project, "logs", "-f", "--tail", strconv.Itoa(tail))
+	if err != nil {
+		return err
+	}
 	if since != "" {
 		args = append(args, "--since", since)
 	}
@@ -458,9 +539,9 @@ func (r *Runtime) StartQuickTunnel(serviceID string, port int) (string, error) {
 		return "", fmt.Errorf("service has no port to tunnel")
 	}
 	name := quickTunnelName(serviceID)
-	_ = exec.Command(r.Bin, "rm", "-f", name).Run()
+	_ = r.command(r.Bin, "rm", "-f", name).Run()
 
-	out, err := exec.Command(r.Bin, "run", "-d", "--name", name,
+	out, err := r.command(r.Bin, "run", "-d", "--name", name,
 		"--label", "rackops.tunnel="+serviceID,
 		"--network", "host",
 		"--restart", "unless-stopped",
@@ -476,23 +557,23 @@ func (r *Runtime) StartQuickTunnel(serviceID string, port int) (string, error) {
 	re := regexp.MustCompile(`https://[a-z0-9-]+\.trycloudflare\.com`)
 	deadline := time.Now().Add(60 * time.Second)
 	for time.Now().Before(deadline) {
-		logs, _ := exec.Command(r.Bin, "logs", name).CombinedOutput()
+		logs, _ := r.command(r.Bin, "logs", name).CombinedOutput()
 		if m := re.Find(logs); m != nil {
 			return string(m), nil
 		}
 		// Bail early if the container already died (bad image/arch, no net).
-		state, _ := exec.Command(r.Bin, "inspect", "-f", "{{.State.Running}}", name).Output()
+		state, _ := r.command(r.Bin, "inspect", "-f", "{{.State.Running}}", name).Output()
 		if strings.TrimSpace(string(state)) == "false" {
 			tail := logs
 			if len(tail) > 300 {
 				tail = tail[len(tail)-300:]
 			}
-			_ = exec.Command(r.Bin, "rm", "-f", name).Run()
+			_ = r.command(r.Bin, "rm", "-f", name).Run()
 			return "", fmt.Errorf("cloudflared exited: %s", strings.TrimSpace(string(tail)))
 		}
 		time.Sleep(2 * time.Second)
 	}
-	_ = exec.Command(r.Bin, "rm", "-f", name).Run()
+	_ = r.command(r.Bin, "rm", "-f", name).Run()
 	return "", fmt.Errorf("timed out waiting for the trycloudflare URL (network blocking outbound?)")
 }
 

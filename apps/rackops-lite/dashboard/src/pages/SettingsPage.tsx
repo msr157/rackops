@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { AlertTriangle, Bell, Building2, Key, RotateCw, Settings as SettingsIcon, Zap } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
-import { api } from '../api';
+import { api, getToken } from '../api';
 import type { Settings } from '../api';
 import { useToast, cleanError } from '../components/toast';
 import { OrgPanel } from '../components/OrgPanel';
+import { CloudConnections } from '../components/CloudConnections';
 import { Crumbs, Field, InfoTip, Spinner, Switch, useUnsavedChanges } from '../components/ui';
 
 // The active tab lives in the URL (?tab=…), so refresh keeps the tab and Back
 // walks through tabs the operator actually visited. Unknown values fall back
 // to the first tab instead of rendering nothing.
-const TABS = ['organization', 'copilot', 'notifications'] as const;
+const TABS = ['organization', 'copilot', 'notifications', 'backups', 'cloud'] as const;
 type Tab = (typeof TABS)[number];
 
 // Pre-rename URLs (bookmarks, in-app links) keep landing on the tab they meant.
@@ -35,6 +36,33 @@ const MODEL_PRESETS: Record<VendorId, string[]> = {
 };
 
 const CUSTOM = '__custom__';
+
+function StateBackup() {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const download = async () => {
+    setBusy(true); setError('');
+    try {
+      const response = await fetch('/api/backups/state', { headers: { Authorization: `Bearer ${getToken()}` } });
+      if (!response.ok) throw new Error(await response.text());
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement('a');
+      link.href = url; link.download = `rackops-state-${new Date().toISOString().slice(0, 10)}.enc`;
+      document.body.appendChild(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 30_000);
+    } catch (e) { setError(cleanError(e)); }
+    finally { setBusy(false); }
+  };
+  return <section className="card">
+    <h2 className="section-title">Encrypted control-plane snapshot</h2>
+    <p>Installation owners can download the current configuration, accounts and queued work.
+      Store the server&rsquo;s state encryption key separately; a snapshot cannot be restored without it.</p>
+    <p className="dim">App volumes, databases, and loose enrollment or mesh identity files are not
+      included. This snapshot is one part of a recovery backup, not a complete installation backup.</p>
+    {error && <p role="alert">{error}</p>}
+    <button className="btn" disabled={busy} onClick={() => void download()}>{busy ? 'Preparing…' : 'Download encrypted snapshot'}</button>
+  </section>;
+}
 
 // ModelSelect: presets as a real <select> (ids alone), with a Custom option
 // that reveals a free-text input for anything the preset list doesn't cover.
@@ -219,6 +247,8 @@ export function SettingsPage() {
           ['organization', <Building2 size={14} key="o" />, 'Organization'],
           ['copilot', <Key size={14} key="a" />, 'Copilot AI'],
           ['notifications', <Bell size={14} key="n" />, 'Notifications'],
+          ['backups', <Key size={14} key="b" />, 'State backup'],
+          ['cloud', <Key size={14} key="c" />, 'Cloud accounts'],
         ] as [Tab, React.ReactNode, string][]).map(([key, icon, label]) => (
           <button key={key} className={`tab ${tab === key ? 'active' : ''}`} onClick={() => setTab(key)}>
             {icon} {label}
@@ -227,6 +257,8 @@ export function SettingsPage() {
       </div>
 
       {tab === 'organization' && <OrgPanel />}
+      {tab === 'backups' && <StateBackup />}
+      {tab === 'cloud' && <CloudConnections />}
 
       {tab === 'copilot' && (
         <section>

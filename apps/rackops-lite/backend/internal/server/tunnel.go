@@ -25,10 +25,8 @@ const dashboardTunnelID = "dashboard"
 // a zero-account, zero-DNS public URL for TESTING (random on each restart,
 // bandwidth-limited by Cloudflare, not for production traffic).
 func (a *API) handleStartQuickTunnel(w http.ResponseWriter, r *http.Request) {
-	var svc *types.Service
-	a.Store.View(func() { svc = a.Store.Services[r.PathValue("id")] })
+	svc := a.serviceForNetworking(w, r)
 	if svc == nil {
-		http.Error(w, "service not found", http.StatusNotFound)
 		return
 	}
 	if svc.Port == 0 {
@@ -48,10 +46,8 @@ func (a *API) handleStartQuickTunnel(w http.ResponseWriter, r *http.Request) {
 
 // handleStopQuickTunnel tears the tunnel down and clears the URL.
 func (a *API) handleStopQuickTunnel(w http.ResponseWriter, r *http.Request) {
-	var svc *types.Service
-	a.Store.View(func() { svc = a.Store.Services[r.PathValue("id")] })
+	svc := a.serviceForNetworking(w, r)
 	if svc == nil {
-		http.Error(w, "service not found", http.StatusNotFound)
 		return
 	}
 	payload, _ := json.Marshal(DeployPayload{ServiceID: svc.ID, Name: svc.Name})
@@ -61,7 +57,7 @@ func (a *API) handleStopQuickTunnel(w http.ResponseWriter, r *http.Request) {
 	})
 	a.Store.Mutate(func() { svc.QuickTunnelURL = "" })
 	a.Store.AddEvent("tunnel", "Quick tunnel stopped for "+svc.Name, svc.NodeID, svc.ID)
-	a.Hub.Broadcast("service_update", svc)
+	a.serviceChanged(svc)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -161,6 +157,6 @@ func (a *API) applyTunnelResult(nodeID string, res types.TaskResult) bool {
 	} else {
 		a.Store.AddEvent("tunnel", "Quick tunnel failed for "+svc.Name+": "+tailLog(res.Log, 160), nodeID, svc.ID)
 	}
-	a.Hub.Broadcast("service_update", svc)
+	a.serviceChanged(svc)
 	return true
 }

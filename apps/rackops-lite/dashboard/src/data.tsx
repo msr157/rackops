@@ -95,6 +95,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       },
       node_joined: () => refreshRef.current(),
       node_down: () => refreshRef.current(),
+      services_changed: () => refreshRef.current(),
       service_update: (data) => {
         const s = data as Service;
         setServices((prev) => {

@@ -331,10 +331,15 @@ func (a *API) forwardTicket(ticketID string) {
 // Leader-only under HA (followers would double-poll).
 func (a *API) RunSupportSync() {
 	for {
-		time.Sleep(time.Minute)
+		select {
+		case <-a.Store.stopCh:
+			return
+		case <-time.After(time.Minute):
+		}
 		if a.Cluster != nil && !a.Cluster.IsLeader() {
 			continue
 		}
+		a.retryResetEmails(time.Now())
 		var retry, poll []string
 		a.Store.View(func() {
 			for id, t := range a.Store.Tickets {
@@ -352,6 +357,7 @@ func (a *API) RunSupportSync() {
 		for _, id := range poll {
 			a.pollTicketReplies(id)
 		}
+		a.retryEarlyAccess()
 	}
 }
 

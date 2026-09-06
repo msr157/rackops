@@ -9,6 +9,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -41,10 +42,12 @@ type Agent struct {
 	runtime   *Runtime
 	client    *http.Client
 	results   []types.TaskResult
+	journal   *taskJournal
 	mesh      meshState
 	// servicePorts tracks ports of services deployed on this node (from
 	// deploy payloads) so they can be proxied onto the mesh.
 	servicePorts map[string]int // serviceID -> port
+	portsMu      sync.Mutex
 	// publicIP is the internet-visible address (reflector-detected, refreshed
 	// hourly). Guarded by publicIPMu; "" until first detection completes.
 	publicIP   string
@@ -92,6 +95,16 @@ func New(cfg Config) (*Agent, error) {
 		}
 	}
 
+	journal, err := openTaskJournal(cfg.DataDir)
+	if err != nil {
+		return nil, fmt.Errorf("agent task journal: %w", err)
+	}
+	enrollCtx, enrollCancel := context.WithTimeout(context.Background(), 20*time.Second)
+	err = enrollAgent(enrollCtx, &cfg, string(id), journal, &http.Client{Timeout: 20 * time.Second})
+	enrollCancel()
+	if err != nil {
+		return nil, err
+	}
 	rt, err := DetectRuntime()
 	if err != nil {
 		log.Printf("agent: no container runtime found (%v) — deploys disabled, telemetry only", err)
@@ -101,6 +114,7 @@ func New(cfg Config) (*Agent, error) {
 
 	ag := &Agent{
 		cfg:          cfg,
+		journal:      journal,
 		nodeID:       string(id),
 		collector:    telemetry.NewCollector(),
 		runtime:      rt,
@@ -121,12 +135,25 @@ func New(cfg Config) (*Agent, error) {
 // cancellation it tears down the mesh interface and relay listeners so a
 // restart (or the host's shutdown) doesn't leak the WireGuard device or ports.
 func (a *Agent) Run(ctx context.Context) {
+	ctx, cancel := context.WithCancel(ctx)
+	workers := newTaskWorkers(ctx, func(ctx context.Context, task types.AgentTask) *types.TaskResult {
+		return a.journal.execute(ctx, task, a.execute)
+	})
 	log.Printf("agent: node %s (%s) reporting to %s every %s", a.cfg.Name, a.nodeID, a.cfg.ServerURL, a.cfg.Interval)
 	defer a.closeMesh()
 	defer a.closeFollows()
 	defer a.closeFrontDoor()
+	defer func() { cancel(); workers.wg.Wait() }()
 	hw := a.collector.Hardware()
 	lastHW := time.Now()
+	var inventory inventory
+	if a.runtime != nil {
+		go inventory.run(ctx, a.cfg.Interval, func(ctx context.Context) ([]types.ContainerStatus, error) {
+			runtime := *a.runtime
+			runtime.ctx = ctx
+			return runtime.List()
+		})
+	}
 
 	// Detect the internet-visible IP in the background (never blocks reports)
 	// and refresh hourly — home connections change IPs.
@@ -145,6 +172,16 @@ func (a *Agent) Run(ctx context.Context) {
 	}()
 
 	for {
+		// Collect finished work without waiting for builds or transfers.
+	collectResults:
+		for {
+			select {
+			case result := <-workers.results:
+				a.results = append(a.results, result)
+			default:
+				break collectResults
+			}
+		}
 		// Refresh full hardware inventory once a minute (drives/GPU usage change).
 		if time.Since(lastHW) > time.Minute {
 			hw = a.collector.Hardware()
@@ -155,15 +192,18 @@ func (a *Agent) Run(ctx context.Context) {
 		a.publicIPMu.Lock()
 		host.PublicIP = a.publicIP
 		a.publicIPMu.Unlock()
+		slots := workers.slots()
 		report := types.AgentReport{
-			NodeID:      a.nodeID,
-			Name:        a.cfg.Name,
-			OrgID:       a.cfg.OrgID,
-			Hardware:    hw,
-			Metrics:     a.collector.Metrics(),
-			Host:        host,
-			AgentVer:    a.cfg.Version,
-			TaskResults: a.results,
+			DurableTasks: true,
+			TaskSlots:    &slots,
+			NodeID:       a.nodeID,
+			Name:         a.cfg.Name,
+			OrgID:        a.cfg.OrgID,
+			Hardware:     hw,
+			Metrics:      a.collector.Metrics(),
+			Host:         host,
+			AgentVer:     a.cfg.Version,
+			TaskResults:  a.results,
 		}
 		if a.mesh.keys.Public != "" {
 			report.Mesh = &types.MeshInfo{PublicKey: a.mesh.keys.Public, MeshIP: a.mesh.meshIP}
@@ -174,9 +214,8 @@ func (a *Agent) Run(ctx context.Context) {
 		if fd := a.frontDoorState(); fd.PublicKey != "" {
 			report.FrontDoor = &fd
 		}
-		if a.runtime != nil {
-			report.Containers = a.runtime.List()
-		}
+		containers, valid := inventory.take()
+		report.Containers, report.ContainersValid = containers, &valid
 
 		resp, err := a.push(report)
 		if err != nil {
@@ -186,14 +225,36 @@ func (a *Agent) Run(ctx context.Context) {
 			}
 			continue
 		}
-		a.results = nil // delivered
+		if !resp.DurableTasks {
+			log.Printf("agent: control plane must be upgraded before this agent can execute tasks")
+			if !sleepCtx(ctx, a.cfg.Interval) {
+				return
+			}
+			continue
+		}
+		acked := make(map[string]bool, len(resp.AcknowledgedTasks))
+		for _, id := range resp.AcknowledgedTasks {
+			acked[id] = true
+		}
+		var pending, delivered []types.TaskResult
+		for _, result := range a.results {
+			if acked[result.TaskID] {
+				delivered = append(delivered, result)
+			} else {
+				pending = append(pending, result)
+			}
+		}
+		workers.forget(delivered)
+		a.results = pending
 
 		// Apply mesh assignment; expose the ports the server asks for plus
 		// any known locally (covers agent restarts before server catches up).
+		a.portsMu.Lock()
 		ports := make([]int, 0, len(a.servicePorts))
 		for _, p := range a.servicePorts {
 			ports = append(ports, p)
 		}
+		a.portsMu.Unlock()
 		if resp.Mesh != nil {
 			ports = append(ports, resp.Mesh.ExposePorts...)
 		}
@@ -201,11 +262,8 @@ func (a *Agent) Run(ctx context.Context) {
 		a.syncFrontDoor(ctx, resp.FrontDoor)
 
 		for _, task := range resp.Tasks {
-			res := a.execute(ctx, task)
-			// Follow tasks stream out-of-band and have no immediate result to
-			// report back; only enqueue results that carry output.
-			if res != nil {
-				a.results = append(a.results, *res)
+			if !workers.enqueue(task) {
+				a.results = append(a.results, types.TaskResult{TaskID: task.ID, ServiceID: task.ServiceID, Log: "agent task capacity exceeded; retry the operation"})
 			}
 		}
 		if !sleepCtx(ctx, a.cfg.Interval) {
@@ -273,12 +331,21 @@ func (a *Agent) execute(ctx context.Context, task types.AgentTask) *types.TaskRe
 		a.startFollow(ctx, p)
 		return nil
 	case types.TaskLogsStop:
-		a.stopFollow(p.StreamID)
+		a.stopFollow(p.ServiceID, p.StreamID)
 		return nil
 	}
 
 	if a.runtime == nil {
 		res.Log = "no container runtime available on this node"
+		return &res
+	}
+	runtime := *a.runtime
+	runtime.ctx = ctx
+	if p.ComposeYML != "" && (task.Kind == types.TaskStart || task.Kind == types.TaskStop || task.Kind == types.TaskRestart) {
+		out, err := runtime.composeAction(p, string(task.Kind))
+		res.Log, res.OK = out, err == nil
+		var recovery *recoveryError
+		res.Uncertain = errors.As(err, &recovery)
 		return &res
 	}
 
@@ -287,7 +354,7 @@ func (a *Agent) execute(ctx context.Context, task types.AgentTask) *types.TaskRe
 		// Stream build/pull/run output live (keyed by the deployment/task ID)
 		// while still accumulating the full log for the deployment record.
 		sink := a.newLogSink(ctx, task.ID, p.ServiceID, "deploy")
-		cid, hostPort, _, err := a.runtime.Deploy(p, sink)
+		cid, hostPort, _, err := runtime.Deploy(p, sink)
 		if err != nil {
 			sink.WriteString("\nERROR: " + err.Error() + "\n")
 		}
@@ -295,29 +362,35 @@ func (a *Agent) execute(ctx context.Context, task types.AgentTask) *types.TaskRe
 		res.ContainerID = cid
 		res.HostPort = hostPort
 		res.OK = err == nil
+		var recovery *recoveryError
+		res.Uncertain = errors.As(err, &recovery)
 		if err == nil && hostPort > 0 {
+			a.portsMu.Lock()
 			a.servicePorts[p.ServiceID] = hostPort
+			a.portsMu.Unlock()
 		}
 	case types.TaskStop:
-		out, err := a.runtime.Simple("stop", targetContainer(p))
+		out, err := runtime.Simple("stop", targetContainer(p))
 		res.Log, res.OK = out, err == nil
 	case types.TaskStart:
-		out, err := a.runtime.Simple("start", targetContainer(p))
+		out, err := runtime.Simple("start", targetContainer(p))
 		res.Log, res.OK = out, err == nil
 	case types.TaskRestart:
-		out, err := a.runtime.Simple("restart", targetContainer(p))
+		out, err := runtime.Simple("restart", targetContainer(p))
 		res.Log, res.OK = out, err == nil
 	case types.TaskRemove:
 		if p.ComposeYML != "" {
-			out, err := a.runtime.composeDown(p)
+			out, err := runtime.composeDown(p)
 			res.Log, res.OK = out, err == nil
 		} else {
-			out, err := a.runtime.Simple("rm", "-f", targetContainer(p))
+			out, err := runtime.Simple("rm", "-f", targetContainer(p))
 			res.Log, res.OK = out, err == nil
 		}
 		// Any quick tunnel attached to the service goes with it.
-		_, _ = a.runtime.Simple("rm", "-f", quickTunnelName(p.ServiceID))
+		_, _ = runtime.Simple("rm", "-f", quickTunnelName(p.ServiceID))
+		a.portsMu.Lock()
 		delete(a.servicePorts, p.ServiceID)
+		a.portsMu.Unlock()
 	case types.TaskLogs:
 		res.Log, res.OK = a.fetchLogs(p)
 	case types.TaskListDir:
@@ -327,14 +400,14 @@ func (a *Agent) execute(ctx context.Context, task types.AgentTask) *types.TaskRe
 			res.Log = "ERROR: " + err.Error()
 		}
 	case types.TaskTunnelStart:
-		url, err := a.runtime.StartQuickTunnel(p.ServiceID, p.Port)
+		url, err := runtime.StartQuickTunnel(p.ServiceID, p.Port)
 		if err != nil {
 			res.Log = "ERROR: " + err.Error()
 		} else {
 			res.Log, res.OK = url, true
 		}
 	case types.TaskTunnelStop:
-		_, _ = a.runtime.Simple("rm", "-f", quickTunnelName(p.ServiceID))
+		_, _ = runtime.Simple("rm", "-f", quickTunnelName(p.ServiceID))
 		res.OK = true
 	default:
 		res.Log = "unknown task kind: " + string(task.Kind)

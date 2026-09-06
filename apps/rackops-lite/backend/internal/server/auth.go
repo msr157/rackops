@@ -21,9 +21,10 @@ import (
 // ---- Minimal JWT (HS256) ----
 
 type jwtClaims struct {
-	Sub  string `json:"sub"` // user ID
-	Role string `json:"role"`
-	Exp  int64  `json:"exp"`
+	Version uint64 `json:"version,omitempty"`
+	Sub     string `json:"sub"` // user ID
+	Role    string `json:"role"`
+	Exp     int64  `json:"exp"`
 }
 
 func signJWT(secret []byte, c jwtClaims) string {
@@ -73,11 +74,14 @@ func (a *API) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 // handleSignup provisions an account. The first account becomes Owner;
 // afterwards only admins can create users (enforced by middleware).
 func (a *API) handleSignup(w http.ResponseWriter, r *http.Request) {
+	a.Store.signupMu.Lock()
+	defer a.Store.signupMu.Unlock()
 	var req struct {
-		Email    string `json:"email"`
-		FullName string `json:"fullName"`
-		Password string `json:"password"`
-		Role     string `json:"role"`
+		SetupToken string `json:"setupToken"`
+		Email      string `json:"email"`
+		FullName   string `json:"fullName"`
+		Password   string `json:"password"`
+		Role       string `json:"role"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -102,6 +106,14 @@ func (a *API) handleSignup(w http.ResponseWriter, r *http.Request) {
 	if exists {
 		http.Error(w, "email already registered", http.StatusConflict)
 		return
+	}
+	if first {
+		var expected string
+		a.Store.View(func() { expected = a.Store.BootstrapToken })
+		if expected == "" || !hmac.Equal([]byte(expected), []byte(req.SetupToken)) {
+			http.Error(w, "enter the setup token from the server startup log to create the owner account", http.StatusForbidden)
+			return
+		}
 	}
 	if !first {
 		// Only authenticated admins/owners may add users. Auth routes are
@@ -135,6 +147,9 @@ func (a *API) handleSignup(w http.ResponseWriter, r *http.Request) {
 	}
 	a.Store.Mutate(func() {
 		a.Store.Users[u.ID] = u
+		if first {
+			a.Store.BootstrapToken = ""
+		}
 		// Enroll into the default org so the account has a seat somewhere
 		// (invitation signups enroll into their invited org instead — see
 		// handleAcceptInvitation). Platform owner/admin hold the org.
@@ -159,6 +174,10 @@ func (a *API) handleSignup(w http.ResponseWriter, r *http.Request) {
 		}
 	})
 	a.Store.AddEvent("auth", "User created: "+u.Email+" ("+string(role)+")", "", "")
+	if err := a.Store.persistOnce(); err != nil {
+		http.Error(w, "account persistence failed; check server storage before continuing", http.StatusInternalServerError)
+		return
+	}
 
 	token := signJWT(a.Store.SessionSecret(), jwtClaims{Sub: u.ID, Role: string(u.Role), Exp: time.Now().Add(7 * 24 * time.Hour).Unix()})
 	writeJSON(w, map[string]any{"token": token, "user": u.Sanitized()})
@@ -187,7 +206,7 @@ func (a *API) handleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid credentials", http.StatusUnauthorized)
 		return
 	}
-	token := signJWT(a.Store.SessionSecret(), jwtClaims{Sub: user.ID, Role: string(user.Role), Exp: time.Now().Add(7 * 24 * time.Hour).Unix()})
+	token := signJWT(a.Store.SessionSecret(), jwtClaims{Sub: user.ID, Role: string(user.Role), Version: user.SessionVersion, Exp: time.Now().Add(7 * 24 * time.Hour).Unix()})
 	// Remember where operators actually reach the dashboard — reset links are
 	// built on this (see dashboardURL).
 	a.recordDashboardURL(r)
@@ -321,6 +340,7 @@ func (a *API) authMiddleware(next http.Handler) http.Handler {
 		return !strings.HasPrefix(p, "/api/") ||
 			strings.HasPrefix(p, "/api/auth/") ||
 			p == "/api/agent/ingest" ||
+			p == "/api/agent/enroll" ||
 			p == "/api/agent/logstream" ||
 			p == "/api/traefik/config" ||
 			p == "/api/edge-probe" ||
@@ -335,14 +355,17 @@ func (a *API) authMiddleware(next http.Handler) http.Handler {
 			p == "/api/openapi.json"
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if open(r.URL.Path) {
-			next.ServeHTTP(w, r)
-			return
-		}
-		// Zero users => setup mode: API open until the owner account exists.
 		users := 0
 		a.Store.View(func() { users = len(a.Store.Users) })
-		if users == 0 {
+		if users == 0 && (strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/relay/")) {
+			switch r.URL.Path {
+			case "/api/auth/status", "/api/auth/signup", "/api/openapi.json", "/api/v1/early-access":
+			default:
+				http.Error(w, "complete owner setup before accessing the control plane", http.StatusForbidden)
+				return
+			}
+		}
+		if open(r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -375,6 +398,19 @@ func (a *API) authMiddleware(next http.Handler) http.Handler {
 				http.Error(w, "invalid token: "+err.Error(), http.StatusUnauthorized)
 				return
 			}
+		}
+		// Session roles are historical. Revocation and demotion take effect on
+		// the next request, without waiting for the signed token to expire.
+		current := false
+		a.Store.View(func() {
+			if user := a.Store.Users[claims.Sub]; user != nil && user.SessionVersion == claims.Version {
+				claims.Role = string(user.Role)
+				current = true
+			}
+		})
+		if !current {
+			http.Error(w, "account is no longer active", http.StatusUnauthorized)
+			return
 		}
 		// Coarse RBAC: viewers are read-only on fleet state. Managing their
 		// OWN API keys is account-scoped, not a fleet mutation — the token
@@ -418,7 +454,7 @@ func (a *API) claimsForAPIKey(secret string) *jwtClaims {
 	if time.Since(tok.LastUsed) > time.Minute {
 		a.Store.Mutate(func() { tok.LastUsed = time.Now() })
 	}
-	return &jwtClaims{Sub: user.ID, Role: string(user.Role), Exp: time.Now().Add(time.Minute).Unix()}
+	return &jwtClaims{Sub: user.ID, Role: string(user.Role), Version: user.SessionVersion, Exp: time.Now().Add(time.Minute).Unix()}
 }
 
 func contextWithClaims(r *http.Request, c *jwtClaims) *http.Request {

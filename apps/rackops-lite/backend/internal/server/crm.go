@@ -67,9 +67,8 @@ func crmPost(path string, payload any, out any) error {
 }
 
 // relayResetEmail asks the CRM to send the password-reset email from the
-// support address. Best-effort: the reset link is already in the server log,
-// so a failed relay degrades the experience but never blocks recovery.
-func (a *API) relayResetEmail(email, link string) {
+// support address. Failure is logged without the recovery link or recipient.
+func (a *API) relayResetEmail(email, link string) error {
 	var name string
 	a.Store.View(func() { name = a.Store.InstanceName })
 	err := crmPost("/ingest/v1/reset-email", map[string]any{
@@ -80,6 +79,7 @@ func (a *API) relayResetEmail(email, link string) {
 		"version":      ServerVersion,
 	}, nil)
 	if err != nil {
-		log.Printf("auth: reset email relay unavailable (%v) — the reset link in this log is the fallback", err)
+		log.Print("auth: reset email relay unavailable; check CRM/SMTP delivery configuration")
 	}
+	return err
 }

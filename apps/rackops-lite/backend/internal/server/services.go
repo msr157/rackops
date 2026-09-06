@@ -252,6 +252,14 @@ func (a *API) handleCreateService(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// A redaction marker can only refer to a value already stored on an
+	// existing service; it is never a deployable environment value.
+	resolvedEnv, err := resolveEnvUpdate(nil, req.Env)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	req.Env = resolvedEnv
 	svc := req.Service
 	svc.ID = NewID()
 	svc.Status = types.StatusBuilding
@@ -272,7 +280,7 @@ func (a *API) handleCreateService(w http.ResponseWriter, r *http.Request) {
 		placement = " (auto-placed)"
 	}
 	a.Store.AddEvent("deploy", fmt.Sprintf("Deploying %s to %s%s", svc.Name, nodeName, placement), svc.NodeID, svc.ID)
-	a.Hub.Broadcast("service_update", &svc)
+	a.serviceChanged(&svc)
 	writeJSON(w, &svc)
 }
 
@@ -295,7 +303,8 @@ func (a *API) queueDeploy(svc *types.Service, trigger string) *types.Deployment 
 
 	payload, _ := json.Marshal(DeployPayload{
 		ServiceID: svc.ID, Name: svc.Name, Image: svc.Image,
-		GitRepo: svc.GitRepo, GitBranch: svc.GitBranch, GitToken: svc.GitToken,
+		ContainerID: svc.ContainerID,
+		GitRepo:     svc.GitRepo, GitBranch: svc.GitBranch, GitToken: svc.GitToken,
 		ComposeYML: svc.ComposeYML, Port: svc.Port, ContainerPort: svc.ContainerPort, Ports: svc.Ports,
 		Command: svc.Command, Env: svc.Env, Volumes: svc.Volumes, Mounts: svc.Mounts,
 		PinnedPath: svc.PinnedPath, MemLimitMB: svc.MemLimitMB,
@@ -335,8 +344,11 @@ func (a *API) serviceForOrg(w http.ResponseWriter, r *http.Request) (*types.Serv
 
 // handleServiceAction handles start/stop/restart/redeploy.
 func (a *API) handleServiceAction(w http.ResponseWriter, r *http.Request) {
-	svc, _, _ := a.serviceForOrg(w, r)
+	svc, _, member := a.serviceForOrg(w, r)
 	if svc == nil {
+		return
+	}
+	if !requireServiceControl(w, member) {
 		return
 	}
 	action := r.PathValue("action")
@@ -355,7 +367,7 @@ func (a *API) handleServiceAction(w http.ResponseWriter, r *http.Request) {
 		kind := map[string]types.TaskKind{
 			"start": types.TaskStart, "stop": types.TaskStop, "restart": types.TaskRestart,
 		}[action]
-		payload, _ := json.Marshal(DeployPayload{ServiceID: svc.ID, Name: svc.Name, ExternalName: svc.ExternalName, ContainerID: svc.ContainerID})
+		payload, _ := json.Marshal(DeployPayload{ServiceID: svc.ID, Name: svc.Name, ExternalName: svc.ExternalName, ContainerID: svc.ContainerID, ComposeYML: svc.ComposeYML})
 		a.Store.EnqueueTask(svc.NodeID, types.AgentTask{
 			ID: NewID(), Kind: kind, ServiceID: svc.ID, Payload: string(payload), CreatedAt: time.Now(),
 		})
@@ -367,7 +379,7 @@ func (a *API) handleServiceAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.Store.AddEvent("service", fmt.Sprintf("%s: %s requested", svc.Name, action), svc.NodeID, svc.ID)
-	a.Hub.Broadcast("service_update", svc)
+	a.serviceChanged(svc)
 	writeJSON(w, svc)
 }
 
@@ -392,6 +404,6 @@ func (a *API) handleDeleteService(w http.ResponseWriter, r *http.Request) {
 	})
 	a.Store.Mutate(func() { delete(a.Store.Services, id) })
 	a.Store.AddEvent("service", "Service removed: "+svc.Name, svc.NodeID, svc.ID)
-	a.Hub.Broadcast("service_removed", map[string]string{"id": id})
+	a.serviceChanged(svc)
 	w.WriteHeader(http.StatusNoContent)
 }

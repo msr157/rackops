@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/rackops/rackops/internal/types"
@@ -83,13 +82,12 @@ func (c *Collector) discoverDrives() []types.Drive {
 		var bestSize float64
 		for dev, mp := range mounts {
 			if strings.HasPrefix(dev, "/dev/"+name) {
-				var st syscall.Statfs_t
-				if err := syscall.Statfs(mp, &st); err == nil {
-					total := float64(st.Blocks) * float64(st.Bsize) / 1e9
+				total, available, err := filesystemSpace(mp)
+				if err == nil {
 					if total > bestSize {
 						bestSize = total
 						bestMount = mp
-						d.UsedGB = round1(total - float64(st.Bavail)*float64(st.Bsize)/1e9)
+						d.UsedGB = round1(total - available)
 					}
 				}
 			}

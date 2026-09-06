@@ -397,10 +397,8 @@ func (a *API) handleSetServiceDomain(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	var svc *types.Service
-	a.Store.View(func() { svc = a.Store.Services[r.PathValue("id")] })
+	svc := a.serviceForNetworking(w, r)
 	if svc == nil {
-		http.Error(w, "service not found", http.StatusNotFound)
 		return
 	}
 	domain := strings.ToLower(strings.TrimSpace(req.Domain))
@@ -427,7 +425,7 @@ func (a *API) handleSetServiceDomain(w http.ResponseWriter, r *http.Request) {
 	if svc.Domain != "" {
 		a.Store.AddEvent("ingress", fmt.Sprintf("%s routed to %s", svc.Name, svc.Domain), svc.NodeID, svc.ID)
 	}
-	a.Hub.Broadcast("service_update", svc)
+	a.serviceChanged(svc)
 	writeJSON(w, svc)
 }
 
@@ -435,20 +433,18 @@ func (a *API) handleSetServiceDomain(w http.ResponseWriter, r *http.Request) {
 // reachable immediately, without the user owning or configuring any domain.
 // The name resolves to the ingress node's public (or LAN) IP via nip.io.
 func (a *API) handleExposeService(w http.ResponseWriter, r *http.Request) {
-	var svc *types.Service
+	svc := a.serviceForNetworking(w, r)
+	if svc == nil {
+		return
+	}
 	var edgeIP string
 	var edgeEnabled bool
 	a.Store.View(func() {
-		svc = a.Store.Services[r.PathValue("id")]
 		edgeEnabled = a.Store.Ingress.Enabled
 		if n := a.Store.Nodes[a.Store.Ingress.NodeID]; n != nil {
 			edgeIP = firstNonEmpty(n.PublicIP, n.IP)
 		}
 	})
-	if svc == nil {
-		http.Error(w, "service not found", http.StatusNotFound)
-		return
-	}
 	if svc.Port == 0 {
 		http.Error(w, "service has no HTTP port to expose", http.StatusBadRequest)
 		return
@@ -472,7 +468,7 @@ func (a *API) handleExposeService(w http.ResponseWriter, r *http.Request) {
 		svc.UpdatedAt = time.Now()
 	})
 	a.Store.AddEvent("ingress", fmt.Sprintf("%s exposed at %s", svc.Name, domain), svc.NodeID, svc.ID)
-	a.Hub.Broadcast("service_update", svc)
+	a.serviceChanged(svc)
 	writeJSON(w, map[string]string{"domain": domain, "url": "http://" + domain})
 }
 

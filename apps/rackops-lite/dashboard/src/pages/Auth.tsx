@@ -10,7 +10,7 @@ type Mode = 'login' | 'signup' | 'forgot' | 'reset';
 const BROKEN_RESET_MSG = 'This reset link is incomplete. Request a new one.';
 
 export function AuthScreen({ onAuthed }: { onAuthed: () => void }) {
-  // Landing on /reset-password?token=… (from the email or the server log)
+  // Landing on /reset-password?token=… from the recovery email.
   // opens straight into reset mode. A reset link that lost its token lands on
   // the forgot form with an explanation — never silently on plain sign-in,
   // which would read as "the link did nothing".
@@ -22,6 +22,7 @@ export function AuthScreen({ onAuthed }: { onAuthed: () => void }) {
   const [needsSetup, setNeedsSetup] = useState(false);
   const [email, setEmail] = useState('');
   const [fullName, setFullName] = useState('');
+  const [setupToken, setSetupToken] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [notice, setNotice] = useState('');
@@ -69,7 +70,7 @@ export function AuthScreen({ onAuthed }: { onAuthed: () => void }) {
 
     setBusy(true);
     try {
-      const r = mode === 'signup' ? await api.signup(email, fullName, password)
+      const r = mode === 'signup' ? await api.signup(email, fullName, password, setupToken)
         : mode === 'reset' ? await api.resetPassword(resetToken, password)
         : await api.login(email, password);
       setToken(r.token);
@@ -104,14 +105,19 @@ export function AuthScreen({ onAuthed }: { onAuthed: () => void }) {
 
       {mode === 'forgot' && (
         <p className="dim" style={{ marginBottom: 16, lineHeight: 1.6 }}>
-          Enter your account email. We&rsquo;ll send a reset link. It&rsquo;s also printed in the
-          server log (<code className="mono">journalctl -u rackops</code>) if email can&rsquo;t reach you.
+          Enter your account email to request a reset link. If it does not arrive,
+          contact your installation administrator to check email delivery.
         </p>
       )}
 
       {/* A real <form>, so Enter submits from any field. noValidate keeps the
           messages below as the single source of validation truth. */}
       <form noValidate onSubmit={(e) => { e.preventDefault(); if (!busy && !(mode === 'forgot' && sent)) submit(); }}>
+        {needsSetup && mode === 'signup' && <Field label="Owner setup token"
+          hint="Use the single-use token printed in your RackOps server startup log (journalctl -u rackops on Linux).">
+          {(p) => <input className="input mono" {...p} type="password" value={setupToken} autoComplete="off"
+            onChange={(e) => setSetupToken(e.target.value)} />}
+        </Field>}
         {mode === 'signup' && (
           <Field label="Full name">
             {(p) => (

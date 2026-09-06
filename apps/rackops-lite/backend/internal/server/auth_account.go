@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"strings"
@@ -39,6 +38,18 @@ func (a *API) authedClaims(r *http.Request) *jwtClaims {
 		return a.claimsForAPIKey(token)
 	}
 	c, _ := parseJWT(a.Store.SessionSecret(), token)
+	if c != nil {
+		valid := false
+		a.Store.View(func() {
+			if user := a.Store.Users[c.Sub]; user != nil && user.SessionVersion == c.Version {
+				c.Role = string(user.Role)
+				valid = true
+			}
+		})
+		if !valid {
+			return nil
+		}
+	}
 	return c
 }
 
@@ -73,17 +84,17 @@ func (a *API) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		Current string `json:"current"`
 		New     string `json:"new"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
+		http.Error(w, "invalid password-change request", http.StatusBadRequest)
 		return
 	}
-	if len(req.New) < 8 {
-		http.Error(w, "new password must be at least 8 characters", http.StatusBadRequest)
+	if len(req.New) < 8 || len(req.New) > 72 {
+		http.Error(w, "new password must contain 8 to 72 bytes", http.StatusBadRequest)
 		return
 	}
-	var user *types.User
-	a.Store.View(func() { user = a.Store.Users[claims.Sub] })
-	if user == nil {
+	var user types.User
+	a.Store.View(func() { if current := a.Store.Users[claims.Sub]; current != nil { user = *current } })
+	if user.ID == "" {
 		http.Error(w, "account no longer exists", http.StatusUnauthorized)
 		return
 	}
@@ -96,8 +107,25 @@ func (a *API) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	a.Store.Mutate(func() { user.PasswordHash = string(hash) })
-	a.Store.AddEvent("auth", "Password changed: "+user.Email, "", "")
+	changed := false
+	a.Store.Mutate(func() {
+		current := a.Store.Users[claims.Sub]
+		// Password verification ran outside the lock; refuse to overwrite a
+		// concurrent recovery or password change with that stale verification.
+		if current == nil || current.PasswordHash != user.PasswordHash || current.SessionVersion != user.SessionVersion { return }
+		current.PasswordHash = string(hash)
+		current.SessionVersion++
+		current.ResetTokenHash = ""
+		current.ResetExpires = time.Time{}
+		delete(a.Store.ResetEmails, current.ID)
+		for id, key := range a.Store.Tokens { if key.UserID == current.ID { delete(a.Store.Tokens, id) } }
+		changed = true
+	})
+	if !changed { http.Error(w, "account changed while checking the password; sign in again", http.StatusConflict); return }
+	if err := a.Store.persistOnce(); err != nil {
+		http.Error(w, "password change could not be saved; contact your installation administrator", http.StatusServiceUnavailable)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -155,9 +183,8 @@ func sha256Hex(s string) string {
 
 // handleForgotPassword issues a single-use, 1-hour reset token. The response
 // is identical whether or not the account exists (no enumeration). The reset
-// link is ALWAYS written to the server log — that is the recovery path that
-// works on every install, even fully offline ones — and additionally relayed
-// to the RackOps CRM, which emails it from the support address.
+// link is sent only to the email relay. Logs and event feeds must never carry
+// account recovery credentials.
 func (a *API) handleForgotPassword(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Email string `json:"email"`
@@ -170,7 +197,7 @@ func (a *API) handleForgotPassword(w http.ResponseWriter, r *http.Request) {
 	uniform := func() {
 		writeJSON(w, map[string]any{
 			"ok":      true,
-			"message": "If that account exists, a reset link has been sent to its email address. The link is also printed in the server log (journalctl -u rackops).",
+			"message": "If that account exists and email delivery is available, a reset link will be sent. If it does not arrive, contact your installation administrator.",
 		})
 	}
 	if req.Email == "" || !strings.Contains(req.Email, "@") {
@@ -193,17 +220,22 @@ func (a *API) handleForgotPassword(w http.ResponseWriter, r *http.Request) {
 	})
 	if user != nil {
 		raw := make([]byte, 24)
-		_, _ = rand.Read(raw)
+		if _, err := rand.Read(raw); err != nil {
+			uniform()
+			return
+		}
 		token := hex.EncodeToString(raw)
+		link := a.dashboardURL(r) + "/reset-password?token=" + token
 		a.Store.Mutate(func() {
 			user.ResetTokenHash = sha256Hex(token)
 			user.ResetExpires = time.Now().Add(time.Hour)
+			a.Store.ResetEmails[user.ID] = &ResetEmail{UserID: user.ID, Email: user.Email, Link: link, TokenHash: user.ResetTokenHash, ExpiresAt: user.ResetExpires}
 		})
-		link := a.dashboardURL(r) + "/reset-password?token=" + token
-		// The log line is the universal fallback — sudo access recovers any account.
-		log.Printf("auth: password reset requested for %s — reset link (valid 1h): %s", user.Email, link)
-		a.Store.AddEvent("auth", "Password reset requested: "+user.Email, "", "")
-		go a.relayResetEmail(user.Email, link)
+		if err := a.Store.persistOnce(); err != nil {
+			uniform()
+			return
+		}
+		go a.deliverResetEmail(user.ID, time.Now())
 	}
 	uniform()
 }
@@ -244,16 +276,38 @@ func (a *API) handleResetPassword(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	consumed := false
 	a.Store.Mutate(func() {
+		// Recheck under the write lock: concurrent reset requests may both
+		// pass the first lookup, but only one may consume this credential.
+		current := a.Store.Users[user.ID]
+		if current != user || user.ResetTokenHash == "" || time.Now().After(user.ResetExpires) || subtle.ConstantTimeCompare([]byte(user.ResetTokenHash), []byte(want)) != 1 {
+			return
+		}
 		user.PasswordHash = string(hash)
-		user.ResetTokenHash = "" // single use
+		user.ResetTokenHash = ""
 		user.ResetExpires = time.Time{}
+		user.SessionVersion++
+		delete(a.Store.ResetEmails, user.ID)
+		for id, key := range a.Store.Tokens {
+			if key.UserID == user.ID {
+				delete(a.Store.Tokens, id)
+			}
+		}
+		consumed = true
 	})
-	a.Store.AddEvent("auth", "Password reset completed: "+user.Email, "", "")
+	if !consumed {
+		http.Error(w, "this reset link is invalid or has expired — request a new one", http.StatusForbidden)
+		return
+	}
+	if err := a.Store.persistOnce(); err != nil {
+		http.Error(w, "password change could not be saved; contact your installation administrator", http.StatusServiceUnavailable)
+		return
+	}
 
 	// Sign the user straight in — they just proved control of the account.
 	token := signJWT(a.Store.SessionSecret(), jwtClaims{
-		Sub: user.ID, Role: string(user.Role), Exp: time.Now().Add(7 * 24 * time.Hour).Unix(),
+		Sub: user.ID, Role: string(user.Role), Version: user.SessionVersion, Exp: time.Now().Add(7 * 24 * time.Hour).Unix(),
 	})
 	writeJSON(w, map[string]any{"token": token, "user": user.Sanitized()})
 }

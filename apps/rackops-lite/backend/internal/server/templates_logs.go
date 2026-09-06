@@ -82,7 +82,7 @@ type logChunk struct {
 // appends to the in-progress Deployment.Log so the deployment record and any
 // late-joining viewer stay complete. Auth: the agent join token.
 func (a *API) handleLogStream(w http.ResponseWriter, r *http.Request) {
-	if a.JoinToken != "" && r.Header.Get("X-Rackops-Token") != a.JoinToken {
+	if !a.agentAuthorized(r.Header.Get("X-Rackops-Node"), r.Header.Get("X-Rackops-Token")) {
 		http.Error(w, "invalid join token", http.StatusUnauthorized)
 		return
 	}
@@ -96,13 +96,39 @@ func (a *API) handleLogStream(w http.ResponseWriter, r *http.Request) {
 	if kind == "" {
 		kind = "runtime"
 	}
+	orgID := ""
+	valid := false
+	a.Store.View(func() {
+		svc := a.Store.Services[serviceID]
+		if svc == nil || svc.NodeID != r.Header.Get("X-Rackops-Node") {
+			return
+		}
+		if kind == "deploy" {
+			d := a.Store.Deployments[stream]
+			if d == nil || d.ServiceID != serviceID {
+				return
+			}
+		} else if kind != "runtime" {
+			return
+		}
+		if project := a.Store.Projects[svc.ProjectID]; project != nil {
+			orgID = project.OrgID
+		} else if node := a.Store.Nodes[svc.NodeID]; node != nil {
+			orgID = node.OrgID
+		}
+		valid = orgID != ""
+	})
+	if !valid {
+		http.Error(w, "stream does not belong to the reported service and node", http.StatusForbidden)
+		return
+	}
 
 	buf := make([]byte, 4096)
 	for {
 		n, err := r.Body.Read(buf)
 		if n > 0 {
 			text := string(buf[:n])
-			a.Hub.Broadcast("log_chunk", logChunk{Stream: stream, ServiceID: serviceID, Kind: kind, Text: text})
+			a.Hub.BroadcastOrg(orgID, "log_chunk", logChunk{Stream: stream, ServiceID: serviceID, Kind: kind, Text: text})
 			// Keep the deployment record growing live so the Deployments tab and
 			// reloads show progress, not just the final blob.
 			if kind == "deploy" {
@@ -113,7 +139,7 @@ func (a *API) handleLogStream(w http.ResponseWriter, r *http.Request) {
 			break // EOF or client gone
 		}
 	}
-	a.Hub.Broadcast("log_chunk", logChunk{Stream: stream, ServiceID: serviceID, Kind: kind, End: true})
+	a.Hub.BroadcastOrg(orgID, "log_chunk", logChunk{Stream: stream, ServiceID: serviceID, Kind: kind, End: true})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -137,19 +163,16 @@ func (a *API) appendDeploymentLog(deploymentID, text string) {
 // streaming the service's runtime logs live over the log-stream channel. The
 // client passes a stream ID it will match against `log_chunk` SSE events.
 func (a *API) handleStartLogStream(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	svc, _, _ := a.serviceForOrg(w, r)
+	if svc == nil {
+		return
+	}
 	var req struct {
 		StreamID string `json:"streamId"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	if req.StreamID == "" {
 		http.Error(w, "streamId required", http.StatusBadRequest)
-		return
-	}
-	var svc *types.Service
-	a.Store.View(func() { svc = a.Store.Services[id] })
-	if svc == nil {
-		http.Error(w, "service not found", http.StatusNotFound)
 		return
 	}
 	since := ""
@@ -170,16 +193,13 @@ func (a *API) handleStartLogStream(w http.ResponseWriter, r *http.Request) {
 
 // handleStopLogStream queues a logs-stop task ending a runtime follow.
 func (a *API) handleStopLogStream(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	svc, _, _ := a.serviceForOrg(w, r)
+	if svc == nil {
+		return
+	}
 	streamID := r.URL.Query().Get("streamId")
 	if streamID == "" {
 		http.Error(w, "streamId required", http.StatusBadRequest)
-		return
-	}
-	var svc *types.Service
-	a.Store.View(func() { svc = a.Store.Services[id] })
-	if svc == nil {
-		w.WriteHeader(http.StatusNoContent) // already gone; nothing to stop
 		return
 	}
 	payload, _ := json.Marshal(DeployPayload{ServiceID: svc.ID, Name: svc.Name, StreamID: streamID})

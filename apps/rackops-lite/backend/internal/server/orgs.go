@@ -305,6 +305,8 @@ func (a *API) handleUpdateOrg(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) handleDeleteOrg(w http.ResponseWriter, r *http.Request) {
+	a.cloudOperationMu.Lock()
+	defer a.cloudOperationMu.Unlock()
 	org, _ := a.orgForManage(w, r)
 	if org == nil {
 		return
@@ -313,6 +315,21 @@ func (a *API) handleDeleteOrg(w http.ResponseWriter, r *http.Request) {
 	count, empty := 0, true
 	a.Store.View(func() {
 		count = len(a.Store.Orgs)
+		for _, operation := range a.Store.CloudProvisioning {
+			if operation.OrgID == org.ID {
+				empty = false
+			}
+		}
+		for _, connection := range a.Store.CloudConnections {
+			if connection.OrgID == org.ID {
+				empty = false
+			}
+		}
+		for _, operation := range a.Store.AWSProvisioning {
+			if operation.OrgID == org.ID {
+				empty = false
+			}
+		}
 		for _, p := range a.Store.Projects {
 			if p.OrgID == org.ID {
 				empty = false
@@ -334,7 +351,7 @@ func (a *API) handleDeleteOrg(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !empty {
-		http.Error(w, "move or delete this organization's projects, machines, and domains first", http.StatusConflict)
+		http.Error(w, "resolve this organization's projects, machines, domains, cloud connections and provisioning operations first", http.StatusConflict)
 		return
 	}
 	a.Store.Mutate(func() {
@@ -660,7 +677,7 @@ func (a *API) handleAcceptInvitation(w http.ResponseWriter, r *http.Request) {
 	a.Store.AddEvent("org", "Invitation accepted: "+user.Email+" joined "+orgName, "", "")
 
 	token := signJWT(a.Store.SessionSecret(), jwtClaims{
-		Sub: user.ID, Role: string(user.Role), Exp: time.Now().Add(7 * 24 * time.Hour).Unix(),
+		Sub: user.ID, Role: string(user.Role), Version: user.SessionVersion, Exp: time.Now().Add(7 * 24 * time.Hour).Unix(),
 	})
 	writeJSON(w, map[string]any{"token": token, "user": user.Sanitized(), "org": orgName})
 }

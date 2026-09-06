@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+	"net/mail"
 	"strings"
 	"time"
 
@@ -72,8 +73,13 @@ func (a *API) handleEarlyAccess(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "email, name, and industry are required", http.StatusBadRequest)
 		return
 	}
-	if !strings.Contains(req.Email, "@") || len(req.Email) > 320 {
+	address, err := mail.ParseAddress(req.Email)
+	if err != nil || address.Address != req.Email || len(req.Email) > 320 {
 		http.Error(w, "invalid email address", http.StatusBadRequest)
+		return
+	}
+	if len(req.Name) > 200 || len(req.Industry) > 200 || len(req.Notes) > 8000 {
+		http.Error(w, "name or industry exceeds 200 bytes, or notes exceed 8000 bytes", http.StatusBadRequest)
 		return
 	}
 
@@ -99,6 +105,51 @@ func (a *API) handleEarlyAccess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	a.Store.AddEvent("early_access", "Early access requested by "+req.Email, "", "")
+	if err := a.Store.persistOnce(); err != nil {
+		http.Error(w, "could not persist request", http.StatusServiceUnavailable)
+		return
+	}
 	writeJSON(w, map[string]string{"status": "recorded"})
+}
+
+// retryEarlyAccess forwards explicitly submitted enterprise enquiries only;
+// no infrastructure configuration or telemetry is included.
+func (a *API) retryEarlyAccess() {
+	if a.InstallID == "" {
+		return
+	}
+	var pending []types.EarlyAccessLead
+	a.Store.View(func() {
+		for _, lead := range a.Store.EarlyAccess {
+			if !lead.Forwarded {
+				pending = append(pending, *lead)
+			}
+			if len(pending) == 20 {
+				break
+			}
+		}
+	})
+	if len(pending) == 0 {
+		return
+	}
+	if err := a.Store.persistOnce(); err != nil {
+		return
+	}
+	for _, lead := range pending {
+		err := crmPost("/ingest/v1/leads", map[string]any{
+			"installId": a.InstallID, "id": lead.ID, "email": lead.Email,
+			"name": lead.Name, "industry": lead.Industry, "notes": lead.Notes,
+		}, nil)
+		if err != nil {
+			return
+		}
+		a.Store.Mutate(func() {
+			if current := a.Store.EarlyAccess[strings.ToLower(lead.Email)]; current != nil && current.ID == lead.ID {
+				current.Forwarded = true
+			}
+		})
+		if err := a.Store.persistOnce(); err != nil {
+			return
+		}
+	}
 }

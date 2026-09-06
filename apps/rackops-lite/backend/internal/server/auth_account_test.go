@@ -22,6 +22,7 @@ func testAPI(t *testing.T, roles ...types.UserRole) (*API, map[types.UserRole]st
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = store.Close() })
 	users := map[types.UserRole]string{}
 	hash, _ := bcrypt.GenerateFromPassword([]byte("correct-horse"), bcrypt.MinCost)
 	for _, role := range roles {

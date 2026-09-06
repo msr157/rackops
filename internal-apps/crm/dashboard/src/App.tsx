@@ -8,6 +8,7 @@ import { OverviewPage } from './pages/Overview';
 import { InstallsPage, InstallDetailPage } from './pages/Installs';
 import { TicketsPage, TicketDetailPage } from './pages/Tickets';
 import { FrontDoorPage } from './pages/FrontDoor';
+import { LeadsPage } from './pages/Leads';
 
 export default function App() {
   const [authed, setAuthed] = useState<boolean>(() => !!getToken());
@@ -38,6 +39,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
     { to: '/', label: 'Overview', icon: <LayoutGrid size={16} />, end: true },
     { to: '/installs', label: 'Installs', icon: <Server size={16} />, count: overview?.installs },
     { to: '/tickets', label: 'Tickets', icon: <Inbox size={16} />, count: overview?.openTickets },
+    { to: '/leads', label: 'Enterprise leads', icon: <Inbox size={16} /> },
     { to: '/frontdoor', label: 'Front Door', icon: <Globe size={16} /> },
   ];
 
@@ -81,6 +83,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
             <Route path="/tickets" element={<TicketsPage />} />
             <Route path="/tickets/:installId/:id" element={<TicketDetailPage />} />
             <Route path="/frontdoor" element={<FrontDoorPage />} />
+            <Route path="/leads" element={<LeadsPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>

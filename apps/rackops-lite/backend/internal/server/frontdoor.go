@@ -234,7 +234,7 @@ func (a *API) handleEnableServiceFrontDoor(w http.ResponseWriter, r *http.Reques
 	} else {
 		a.Store.AddEvent("frontdoor", fmt.Sprintf("%s is public at https://%s", svc.Name, host), svc.NodeID, svc.ID)
 	}
-	a.Hub.Broadcast("service_update", svc)
+	a.serviceChanged(svc)
 	writeJSON(w, map[string]string{"domain": host, "url": "https://" + host})
 }
 
@@ -258,7 +258,7 @@ func (a *API) handleDisableServiceFrontDoor(w http.ResponseWriter, r *http.Reque
 		a.Store.AddEvent("frontdoor", "Removed a public address, but the edge did not confirm: "+err.Error(), svc.NodeID, svc.ID)
 	}
 	a.Store.AddEvent("frontdoor", svc.Name+" is no longer public", svc.NodeID, svc.ID)
-	a.Hub.Broadcast("service_update", svc)
+	a.serviceChanged(svc)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -324,7 +324,7 @@ func (a *API) enrollFrontDoor() error {
 		"hostnames": a.frontDoorHostnames(),
 	})
 	req, err := http.NewRequest(http.MethodPut,
-		strings.TrimSuffix(a.FrontDoorAdmin, "/")+"/admin/tenants/"+cfg.TenantID,
+		strings.TrimSuffix(a.FrontDoorAdmin, "/")+"/enroll/v1/tenants/"+cfg.TenantID,
 		bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("could not reach the RackOps edge: %w", err)

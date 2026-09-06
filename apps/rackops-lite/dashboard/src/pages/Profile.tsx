@@ -125,7 +125,7 @@ function ChangePasswordSection() {
     setBusy(true);
     try {
       await api.changePassword(current, next);
-      toast.ok('Password changed.');
+      toast.ok('Password changed. Sign in with your new password.');
       setCurrent(''); setNext(''); setConfirm('');
     } catch (e) { toast.err(cleanError(e)); }
     setBusy(false);
@@ -134,6 +134,7 @@ function ChangePasswordSection() {
   return (
     <section>
       <div className="section-title">Change password</div>
+      <p className="dim">Changing your password signs out every session, revokes your API keys, and invalidates pending password-reset links.</p>
       <div className="grid-3">
         <Field label="Current password">
           {(p) => <PasswordInput {...p} value={current} onChange={setCurrent} autoComplete="current-password" />}

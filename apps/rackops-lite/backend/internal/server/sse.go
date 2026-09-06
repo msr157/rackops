@@ -50,6 +50,12 @@ func (h *Hub) BroadcastOrg(orgID, event string, payload any) {
 
 // Serve streams events to one client, scoped to orgID.
 func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, orgID string) {
+	h.ServeFiltered(w, r, orgID, nil)
+}
+
+// Filtering at delivery time also covers messages queued before a permission
+// change. Authorization callbacks run outside the hub lock.
+func (h *Hub) ServeFiltered(w http.ResponseWriter, r *http.Request, orgID string, allow func([]byte) bool) {
 	fl, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
@@ -78,6 +84,9 @@ func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, orgID string) {
 	for {
 		select {
 		case msg := <-ch:
+			if allow != nil && !allow(msg) {
+				continue
+			}
 			if _, err := w.Write(msg); err != nil {
 				return
 			}

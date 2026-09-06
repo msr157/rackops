@@ -81,6 +81,7 @@ type Registry struct {
 	path string
 
 	mu       sync.RWMutex
+	flushMu  sync.Mutex
 	tenants  map[string]*Tenant // tenant ID -> tenant
 	byHost   map[string]string  // hostname -> tenant ID
 	dirty    bool
@@ -122,6 +123,8 @@ func OpenRegistry(path string) (*Registry, error) {
 // Writes go to a temp file and are renamed into place, so a crash mid-write
 // leaves the previous good registry rather than a truncated one.
 func (r *Registry) Flush() error {
+	r.flushMu.Lock()
+	defer r.flushMu.Unlock()
 	r.mu.Lock()
 	if !r.dirty {
 		r.mu.Unlock()
@@ -137,16 +140,25 @@ func (r *Registry) Flush() error {
 
 	data, err := json.MarshalIndent(list, "", "  ")
 	if err != nil {
+		r.markDirty()
 		return fmt.Errorf("edge: encode registry: %w", err)
 	}
 	tmp := r.path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		r.markDirty()
 		return fmt.Errorf("edge: write registry: %w", err)
 	}
 	if err := os.Rename(tmp, r.path); err != nil {
+		r.markDirty()
 		return fmt.Errorf("edge: replace registry: %w", err)
 	}
 	return nil
+}
+
+func (r *Registry) markDirty() {
+	r.mu.Lock()
+	r.dirty = true
+	r.mu.Unlock()
 }
 
 // Upsert creates or updates a tenant, replacing its hostname set.
@@ -163,9 +175,19 @@ func (r *Registry) Upsert(t Tenant) (*Tenant, error) {
 			return nil, fmt.Errorf("invalid hostname %q", h)
 		}
 	}
+	if t.Workspace != "" && (len(t.Workspace) > 63 || strings.Contains(t.Workspace, ".") || strings.ToLower(t.Workspace) != t.Workspace || !validHostname(t.Workspace+".example")) {
+		return nil, errors.New("workspace must be a lowercase DNS label")
+	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if t.Workspace != "" {
+		for id, existing := range r.tenants {
+			if id != t.ID && existing.Workspace == t.Workspace {
+				return nil, errors.New("workspace already belongs to another tenant")
+			}
+		}
+	}
 
 	// A hostname may belong to exactly one tenant. Rejecting the whole
 	// upsert (rather than silently stealing the name) is what stops a

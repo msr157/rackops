@@ -139,6 +139,9 @@ type EnvVar struct {
 	Key    string `json:"key"`
 	Value  string `json:"value"`
 	Secret bool   `json:"secret"`
+	// Redacted is a response/update marker, never stored as configuration.
+	// An update with Redacted=true preserves the existing value for this key.
+	Redacted bool `json:"redacted,omitempty"`
 }
 
 // ServiceKind is what sort of workload a service is.
@@ -411,12 +414,13 @@ const (
 // User is an operator account. PasswordHash must replicate across the cluster
 // (raft state), so it is serialized; API responses strip it via Sanitized().
 type User struct {
-	ID           string    `json:"id"`
-	Email        string    `json:"email"`
-	FullName     string    `json:"fullName"`
-	PasswordHash string    `json:"passwordHash,omitempty"`
-	Role         UserRole  `json:"role"`
-	CreatedAt    time.Time `json:"createdAt"`
+	ID             string    `json:"id"`
+	Email          string    `json:"email"`
+	FullName       string    `json:"fullName"`
+	PasswordHash   string    `json:"passwordHash,omitempty"`
+	SessionVersion uint64    `json:"sessionVersion,omitempty"`
+	Role           UserRole  `json:"role"`
+	CreatedAt      time.Time `json:"createdAt"`
 	// Password reset: only the SHA-256 of the reset token is stored, and it is
 	// single-use — consumed (cleared) on a successful reset or on expiry.
 	ResetTokenHash string    `json:"resetTokenHash,omitempty"`
@@ -704,16 +708,22 @@ type FrontDoorConfig struct {
 
 // AgentReport is what an agent pushes to the control plane each interval.
 type AgentReport struct {
-	NodeID      string            `json:"nodeId"`
-	Name        string            `json:"name"`
-	OrgID       string            `json:"orgId,omitempty"` // org this node was joined into (--org)
-	Hardware    Hardware          `json:"hardware"`
-	Metrics     Metrics           `json:"metrics"`
-	Host        HostInfo          `json:"host"`
-	Containers  []ContainerStatus `json:"containers"`
-	AgentVer    string            `json:"agentVersion"`
-	Mesh        *MeshInfo         `json:"mesh,omitempty"`
-	TaskResults []TaskResult      `json:"taskResults,omitempty"`
+	// TaskSlots opts into bounded delivery. Nil preserves legacy agents.
+	TaskSlots *int `json:"taskSlots,omitempty"`
+	// DurableTasks negotiates retained delivery and persistent agent deduplication.
+	DurableTasks bool              `json:"durableTasks,omitempty"`
+	NodeID       string            `json:"nodeId"`
+	Name         string            `json:"name"`
+	OrgID        string            `json:"orgId,omitempty"` // org this node was joined into (--org)
+	Hardware     Hardware          `json:"hardware"`
+	Metrics      Metrics           `json:"metrics"`
+	Host         HostInfo          `json:"host"`
+	Containers   []ContainerStatus `json:"containers"`
+	// Nil retains legacy semantics. False means inventory is unavailable or stale.
+	ContainersValid *bool        `json:"containersValid,omitempty"`
+	AgentVer        string       `json:"agentVersion"`
+	Mesh            *MeshInfo    `json:"mesh,omitempty"`
+	TaskResults     []TaskResult `json:"taskResults,omitempty"`
 	// FrontDoor reports this node's tunnel state. Sent only by the node
 	// holding the tunnel; nil everywhere else.
 	FrontDoor *FrontDoorState `json:"frontDoor,omitempty"`
@@ -812,6 +822,7 @@ type AgentTask struct {
 
 // TaskResult reports the outcome of an executed AgentTask.
 type TaskResult struct {
+	Uncertain   bool   `json:"uncertain,omitempty"`
 	TaskID      string `json:"taskId"`
 	ServiceID   string `json:"serviceId,omitempty"` // echoes the task's service (correlates non-deploy results)
 	OK          bool   `json:"ok"`
@@ -822,9 +833,11 @@ type TaskResult struct {
 
 // AgentResponse is the control plane's reply to an AgentReport push.
 type AgentResponse struct {
-	Tasks      []AgentTask `json:"tasks"`
-	Mesh       *MeshInfo   `json:"mesh,omitempty"`
-	LeaderAddr string      `json:"leaderAddr,omitempty"` // set when this server is not the Raft leader
+	DurableTasks      bool        `json:"durableTasks,omitempty"`
+	AcknowledgedTasks []string    `json:"acknowledgedTasks,omitempty"`
+	Tasks             []AgentTask `json:"tasks"`
+	Mesh              *MeshInfo   `json:"mesh,omitempty"`
+	LeaderAddr        string      `json:"leaderAddr,omitempty"` // set when this server is not the Raft leader
 	// FrontDoor is the tunnel assignment for this node. Sent to the node
 	// holding the tunnel; nil (meaning "do not run one") for every other.
 	FrontDoor *FrontDoorSpec `json:"frontDoor,omitempty"`
@@ -836,6 +849,7 @@ type AgentResponse struct {
 // apps/website/src/website/components/sections/CTA.tsx and must not change
 // without updating that form.
 type EarlyAccessLead struct {
+	Forwarded bool      `json:"forwarded,omitempty"`
 	ID        string    `json:"id"`
 	Email     string    `json:"email"`
 	Name      string    `json:"name"`

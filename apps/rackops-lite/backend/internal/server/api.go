@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -13,14 +14,23 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rackops/rackops/internal/cloud"
 	"github.com/rackops/rackops/internal/raftstore"
 	"github.com/rackops/rackops/internal/types"
 )
 
 // API is the control plane HTTP server.
 type API struct {
-	Store *Store
-	Hub   *Hub
+	nodeEnrollmentMu   sync.Mutex
+	cloudIdentityCheck func(context.Context, string, string, json.RawMessage) (cloud.Identity, error)
+	cloudOperationMu   sync.Mutex
+	awsIdentityCheck   func(context.Context, string, cloud.AWSCredentials) (cloud.Identity, error)
+	awsMachineCheck    func(context.Context, string, cloud.AWSCredentials, cloud.AWSMachineSpec, string) (cloud.MachineInspection, error)
+	cloudMachineCheck  func(context.Context, string, string, json.RawMessage, cloud.MachineSpec, string) (cloud.MachineInspection, error)
+	deliveryMu         sync.Mutex
+	resetDeliveryMu    sync.Mutex
+	Store              *Store
+	Hub                *Hub
 	// History records downsampled metric rings for charts and deltas
 	// (nil = endpoints answer with empty series; ingest skips recording).
 	History *History
@@ -87,7 +97,7 @@ func (a *API) Router() http.Handler {
 		if org == nil {
 			return
 		}
-		a.Hub.Serve(w, r, org.ID)
+		a.Hub.ServeFiltered(w, r, org.ID, func(message []byte) bool { return a.eventVisible(r, org.ID, message) })
 	})
 
 	// ---- Mesh relay proxy ----
@@ -120,20 +130,33 @@ func (a *API) Router() http.Handler {
 // ---- Agent ingest ----
 
 func (a *API) handleIngest(w http.ResponseWriter, r *http.Request) {
-	if a.JoinToken != "" && r.Header.Get("X-Rackops-Token") != a.JoinToken {
-		http.Error(w, "invalid join token", http.StatusUnauthorized)
-		return
-	}
+	r.Body = http.MaxBytesReader(w, r.Body, 4<<20)
 	var rep types.AgentReport
 	if err := json.NewDecoder(r.Body).Decode(&rep); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	if !a.agentAuthorized(rep.NodeID, r.Header.Get("X-Rackops-Token")) {
+		http.Error(w, "invalid node credential", http.StatusUnauthorized)
+		return
+	}
 
+	inventoryValid := rep.ContainersValid == nil || *rep.ContainersValid
+	if !inventoryValid {
+		rep.Containers = nil
+	}
 	var node *types.Node
 	isNew := false
+	authorized := false
 	a.Store.Mutate(func() {
+		if !a.agentAuthorizedLocked(rep.NodeID, r.Header.Get("X-Rackops-Token")) {
+			return
+		}
+		authorized = true
 		node = a.Store.Nodes[rep.NodeID]
+		if node != nil && node.Status == types.NodeJoining {
+			isNew = true
+		}
 		if node == nil {
 			isNew = true
 			node = &types.Node{
@@ -198,7 +221,7 @@ func (a *API) handleIngest(w http.ResponseWriter, r *http.Request) {
 				}
 				continue
 			}
-			if svc := a.Store.Services[cs.ServiceID]; svc != nil {
+			if svc := a.Store.Services[cs.ServiceID]; svc != nil && svc.NodeID == rep.NodeID {
 				svc.ContainerID = cs.ID
 				svc.CPUPct = cs.CPUPct
 				svc.MemUsedMB = cs.MemUsedMB
@@ -212,22 +235,41 @@ func (a *API) handleIngest(w http.ResponseWriter, r *http.Request) {
 		}
 	})
 
+	if !authorized {
+		http.Error(w, "node credential was revoked", http.StatusUnauthorized)
+		return
+	}
 	// Fold this report into the metric history rings (charts, deltas).
 	a.History.Observe(rep.NodeID, rep.Metrics, rep.Containers)
 
 	// Process task results.
+	a.deliveryMu.Lock()
+	defer a.deliveryMu.Unlock()
+	var acknowledged []string
 	for _, res := range rep.TaskResults {
-		a.applyTaskResult(rep.NodeID, res)
+		if rep.DurableTasks {
+			if a.acceptTaskResult(rep.NodeID, res) {
+				acknowledged = append(acknowledged, res.TaskID)
+			}
+		} else {
+			a.applyTaskResult(rep.NodeID, res)
+		}
 	}
 
 	// Adopt containers that were already running on the node (created outside
 	// RackOps) so pre-existing workloads show up and become manageable.
-	a.adoptExternal(rep.NodeID, rep.Containers)
+	if inventoryValid {
+		a.adoptExternal(rep.NodeID, rep.Containers)
+	}
 
 	// Reconcile: the agent's report is ground truth. A service marked running
 	// whose container is GONE (not merely stopped — absent) gets flagged
 	// failed and auto-healed; a tunnel whose container vanished is restarted.
-	a.reconcileNode(rep.NodeID, rep.Containers)
+	// A sample collected before the reported command finished is not evidence
+	// that its replacement is missing. Wait for the next inventory report.
+	if inventoryValid && len(rep.TaskResults) == 0 {
+		a.reconcileNode(rep.NodeID, rep.Containers)
+	}
 
 	if isNew {
 		a.Store.AddEvent("node_joined", fmt.Sprintf("Node %s joined the fleet (%s)", node.Name, node.Hardware.CPUModel), node.ID, "")
@@ -251,8 +293,25 @@ func (a *API) handleIngest(w http.ResponseWriter, r *http.Request) {
 
 	a.applyFrontDoorReport(rep.NodeID, rep.FrontDoor)
 
+	limit := -1
+	if rep.TaskSlots != nil {
+		limit = max(0, min(*rep.TaskSlots, 64))
+	}
+	var tasks []types.AgentTask
+	if rep.DurableTasks {
+		var err error
+		tasks, err = a.Store.deliverTasks(rep.NodeID, max(0, limit), time.Now())
+		if err != nil {
+			http.Error(w, "task state could not be saved; agent will retry", http.StatusServiceUnavailable)
+			return
+		}
+	} else {
+		tasks = a.Store.DrainTasksLimit(rep.NodeID, limit)
+	}
 	resp := types.AgentResponse{
-		Tasks: a.Store.DrainTasks(rep.NodeID),
+		DurableTasks:      true,
+		Tasks:             tasks,
+		AcknowledgedTasks: acknowledged,
 		// The tunnel assignment is desired state, re-asserted on every
 		// report rather than queued as a task: a task would be delivered
 		// once and lost across an agent restart, leaving the tunnel down
@@ -345,6 +404,9 @@ func (a *API) reconcileNode(nodeID string, reported []types.ContainerStatus) {
 			if svc.NodeID != nodeID {
 				continue
 			}
+			if a.Store.taskBlocksHealing(nodeID, svc.ID) {
+				continue
+			}
 			// Compose stacks aren't label-tracked (compose owns their
 			// lifecycle); skip them to avoid false positives.
 			if svc.ComposeYML != "" {
@@ -371,11 +433,11 @@ func (a *API) reconcileNode(nodeID string, reported []types.ContainerStatus) {
 			}
 		}
 		for _, svc := range a.Store.Services {
-			if svc.NodeID == nodeID && svc.QuickTunnelURL != "" && !tunnels[svc.ID] {
+			if svc.NodeID == nodeID && svc.QuickTunnelURL != "" && !tunnels[svc.ID] && !a.Store.taskBlocksHealing(nodeID, svc.ID) {
 				tunnelLost = append(tunnelLost, svc)
 			}
 		}
-		if a.Store.Ingress.Enabled && a.Store.Ingress.NodeID == nodeID && !present[ingressServiceID] {
+		if a.Store.Ingress.Enabled && a.Store.Ingress.NodeID == nodeID && !present[ingressServiceID] && !a.Store.taskBlocksHealing(nodeID, ingressServiceID) {
 			if a.Store.Ingress.Status == "running" {
 				a.Store.Ingress.Status = "failed"
 				a.Store.Ingress.StatusMsg = "edge container disappeared — redeploying"
@@ -397,7 +459,7 @@ func (a *API) reconcileNode(nodeID string, reported []types.ContainerStatus) {
 		} else {
 			a.Store.AddEvent("service", fmt.Sprintf("%s: container missing (auto-heal retries shortly)", svc.Name), nodeID, svc.ID)
 		}
-		a.Hub.Broadcast("service_update", svc)
+		a.serviceChanged(svc)
 	}
 	// Still-absent failed services: retry quietly on the heal budget's cadence.
 	for _, svc := range missing {
@@ -407,7 +469,7 @@ func (a *API) reconcileNode(nodeID string, reported []types.ContainerStatus) {
 		a.Store.Mutate(func() { svc.Status = types.StatusBuilding })
 		a.queueDeploy(svc, "auto-heal")
 		a.Store.AddEvent("service", fmt.Sprintf("%s: retrying auto-heal (redeploy queued)", svc.Name), nodeID, svc.ID)
-		a.Hub.Broadcast("service_update", svc)
+		a.serviceChanged(svc)
 	}
 
 	for _, svc := range tunnelLost {
@@ -431,7 +493,7 @@ func (a *API) reconcileNode(nodeID string, reported []types.ContainerStatus) {
 		dashLost := false
 		a.Store.View(func() {
 			dashLost = a.Store.Ingress.DashboardTunnel &&
-				a.Store.Ingress.DashboardTunnelURL != "" && !tunnels[dashboardTunnelID]
+				a.Store.Ingress.DashboardTunnelURL != "" && !tunnels[dashboardTunnelID] && !a.Store.taskBlocksHealing(nodeID, dashboardTunnelID)
 		})
 		if dashLost && healAllowed("qt-"+dashboardTunnelID) {
 			port, _ := strconv.Atoi(a.listenPort())
@@ -547,10 +609,10 @@ func (a *API) adoptExternal(nodeID string, reported []types.ContainerStatus) {
 	})
 	for _, svc := range created {
 		a.Store.AddEvent("service", fmt.Sprintf("Adopted %q — a container already running on %s, now manageable here", svc.ExternalName, a.nodeName(nodeID)), nodeID, svc.ID)
-		a.Hub.Broadcast("service_update", svc)
+		a.serviceChanged(svc)
 	}
 	for _, svc := range updated {
-		a.Hub.Broadcast("service_update", svc)
+		a.serviceChanged(svc)
 	}
 }
 
@@ -618,7 +680,7 @@ func (a *API) applyTaskResult(nodeID string, res types.TaskResult) {
 			verb = "failed to deploy"
 		}
 		a.Store.AddEvent("deploy", fmt.Sprintf("Service %s %s on node %s", svc.Name, verb, nodeID), nodeID, svc.ID)
-		a.Hub.Broadcast("service_update", svc)
+		a.serviceChanged(svc)
 		a.NotifyDeploy(svc, res.OK)
 	}
 }
@@ -973,6 +1035,7 @@ func (a *API) handlePlacement(w http.ResponseWriter, r *http.Request) {
 // ---- helpers ----
 
 func writeJSON(w http.ResponseWriter, v any) {
+	v = publicServiceResponse(v)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(v)
 }

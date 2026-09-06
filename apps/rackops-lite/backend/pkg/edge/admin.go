@@ -50,12 +50,24 @@ func (a *AdminAPI) Handler() http.Handler {
 // It also skips /healthz, which the host app already serves — registering it
 // twice on one mux panics at startup.
 func (a *AdminAPI) Register(mux *http.ServeMux) {
+	a.RegisterEnrollment(mux)
+	mux.HandleFunc("POST /admin/tenants/{id}/enrollment", a.guard(a.handleIssueEnrollment))
 	mux.HandleFunc("GET /admin/tenants", a.guard(a.handleListTenants))
 	mux.HandleFunc("PUT /admin/tenants/{id}", a.guard(a.handleUpsertTenant))
 	mux.HandleFunc("DELETE /admin/tenants/{id}", a.guard(a.handleDeleteTenant))
 	mux.HandleFunc("GET /admin/tenants/{id}/usage", a.guard(a.handleUsage))
 	mux.HandleFunc("POST /admin/tenants/{id}/suspend", a.guard(a.handleSuspend))
 	mux.HandleFunc("GET /admin/sessions", a.guard(a.handleSessions))
+}
+
+func (a *AdminAPI) handleIssueEnrollment(w http.ResponseWriter, r *http.Request) {
+	token, expires, err := a.IssueEnrollmentToken(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, map[string]any{"token": token, "expiresAt": expires})
 }
 
 // guard enforces the bearer token in constant time.

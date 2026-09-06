@@ -1,5 +1,9 @@
 # RackOps — Project Map
 
+> Historical reference. Use [product context](docs/PRODUCT_CONTEXT.md) and
+> [the delivery ledger](docs/STABILIZATION.md) for current scope and verification.
+> Production's tree was imported into main in 1b7306a; 9f14a6f links the histories.
+
 > Complete codebase knowledge dump, generated from a full-repo deep read on 2026-07-15
 > (branch `production` @ `c8acf51`). Covers architecture, specs, wire protocols, remotes,
 > and known issues. Companion to [README.md](README.md) (commands) and [AGENTS.md](AGENTS.md)

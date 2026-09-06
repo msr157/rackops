@@ -10,6 +10,7 @@ import type { Service, ServiceUpdate, Mount, EnvVar, Deployment, Domain, DirEntr
 import { useData } from '../data';
 import { useToast, cleanError } from '../components/toast';
 import { useConfirm } from '../components/confirm';
+import { MigrationPreflight } from '../components/MigrationPreflight';
 import {
   CopyIconBtn, Crumbs, EmptyState, Field, InfoTip, Led, Modal, Pill, RowMenu, Skeleton,
   SkeletonRows, Spinner, Switch, UrlChip, UsageBar, dnsLabel, publicUrls, timeAgo, uid,
@@ -170,6 +171,11 @@ export function AppDetail() {
       toast.err('Nothing was saved. Fix the highlighted fields on the Settings tab first.');
       return;
     }
+		if (redeploy && !await confirm({
+			title: 'Start deployment maintenance now?',
+			body: 'This deployment can interrupt the app. Verify a current application-data backup before continuing. Single-container replacements retain the previous container stopped; shared data may change, so restarting an older version requires inspection. Compose stacks do not yet have this retention safeguard.',
+			confirmLabel: 'Start maintenance and deploy',
+		})) return;
     setBusyAction(redeploy ? 'saveRedeploy' : 'save');
     try {
       const upd: ServiceUpdate = {
@@ -177,7 +183,7 @@ export function AppDetail() {
         port: parseInt(draft.port, 10) || 0,
         containerPort: parseInt(draft.containerPort, 10) || 0,
         ports: draft.ports.split(',').map((p) => parseInt(p.trim(), 10)).filter((p) => p > 0),
-        env: draft.env.filter((e) => e.key).map((e) => ({ key: e.key, value: e.value, secret: e.secret })),
+        env: draft.env.filter((e) => e.key).map((e) => ({ key: e.key, value: e.value, secret: e.secret, redacted: e.redacted })),
         mounts: draft.mounts.filter((m) => m.target)
           .map((m) => ({ type: m.type, source: m.source, target: m.target, readOnly: m.readOnly, drivePath: m.drivePath })),
         memLimitMb: parseInt(draft.memLimitMb, 10) || 0,
@@ -196,6 +202,11 @@ export function AppDetail() {
 
   const act = async (action: string) => {
     if (!svc) return;
+		if (action === 'redeploy' && !await confirm({
+			title: `Redeploy ${svc.name} now?`,
+			body: 'This starts an immediate maintenance window and can interrupt the app. Verify a current application-data backup. Single-container replacements retain the previous container stopped; this does not roll back shared data. Compose stacks do not yet retain previous containers.',
+			confirmLabel: 'Start maintenance and redeploy',
+		})) return;
     setBusyAction(action);
     try {
       if (action === 'delete') {
@@ -340,6 +351,8 @@ export function AppDetail() {
         ))}
       </div>
 
+      <OperationRecovery serviceId={svc.id} />
+      <MigrationPreflight key={svc.id} serviceId={svc.id} />
       {tab === 'overview' && <OverviewTab svc={svc} nodeLabel={node?.name ?? svc.nodeId} urls={urls.map((u) => u.url)} />}
       {tab === 'networking' && <NetworkingTab svc={svc} reload={load} />}
       {tab === 'logs' && <LogsTab svc={svc} />}
@@ -353,6 +366,42 @@ export function AppDetail() {
 }
 
 /* ---------- Overview: facts left, live readouts right ---------- */
+
+function OperationRecovery({ serviceId }: { serviceId: string }) {
+  const [operations, setOperations] = useState<{ id: string; kind: string; state: string }[]>([]);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const confirm = useConfirm();
+  useEffect(() => {
+    let stopped = false;
+    const load = () => api.serviceOperations(serviceId).then((ops) => {
+      if (!stopped) { setOperations(ops); setError(''); }
+    }).catch((err) => { if (!stopped) setError(cleanError(err)); });
+    void load();
+    const timer = setInterval(load, 5000);
+    return () => { stopped = true; clearInterval(timer); };
+  }, [serviceId]);
+  const resolve = async (id: string) => {
+    if (!await confirm({ title: 'Resume automatic recovery?', body: 'Confirm you inspected the machine, checked the application data, and verified that the interrupted command is no longer running. RackOps may redeploy a missing container after this acknowledgement.', confirmLabel: 'I inspected the machine' })) return;
+    setBusy(true);
+    try {
+      await api.resolveServiceOperation(serviceId, id);
+      setOperations(await api.serviceOperations(serviceId));
+      setError('');
+    } catch (err) { setError(cleanError(err)); }
+    finally { setBusy(false); }
+  };
+  return <>
+    {error && <p role="alert">Operation status unavailable: {error}</p>}
+    {operations.filter((op) => op.state === 'recovery_required').map((op) => (
+      <div key={op.id} className="card" role="alert" style={{ marginBottom: 16, padding: 16 }}>
+        <strong>Interrupted {op.kind}: inspection required</strong>
+        <p>The outcome is uncertain. Automatic recovery is paused to protect your data. Inspect the machine and application before resuming.</p>
+        <button className="btn" disabled={busy} onClick={() => void resolve(op.id)}>Review and resume recovery</button>
+      </div>
+    ))}
+  </>;
+}
 
 // Memory speaks GB only once it earns it; below 1 GB the MB number is the
 // honest one.
@@ -1079,10 +1128,10 @@ function SettingsTab({ svc, draft, setDraft, nodes, busy, deleting, errors, onDe
               aria-invalid={!!errors.env[v.rid]}
               aria-describedby={errors.env[v.rid] ? `env-err-${v.rid}` : undefined}
               onChange={(e) => setEnv(v.rid, { key: e.target.value })} />
-            <input className="input mono" placeholder="value" type={v.secret ? 'password' : 'text'}
+            <input className="input mono" placeholder={v.redacted ? 'Stored value (unchanged)' : 'value'} type={v.secret ? 'password' : 'text'}
               value={v.value} readOnly={readOnly}
               aria-label={v.key ? `Value for ${v.key}` : `Variable ${i + 1} value`}
-              onChange={(e) => setEnv(v.rid, { value: e.target.value })} />
+              onChange={(e) => setEnv(v.rid, { value: e.target.value, redacted: false })} />
             <button className="icon-sq" aria-pressed={v.secret} disabled={readOnly}
               title={v.secret ? 'Shown as secret' : 'Mask as secret'}
               aria-label={v.secret ? `Stop masking ${v.key || 'this variable'}` : `Mask ${v.key || 'this variable'} as secret`}
@@ -1178,9 +1227,8 @@ function SettingsTab({ svc, draft, setDraft, nodes, busy, deleting, errors, onDe
       <div className="section-title">
         Resources &amp; machine
         <InfoTip wide>
-          Limits cap what the container may use; 0 means unlimited. Choosing a different
-          machine migrates the app on Save &amp; redeploy: the container moves, but data in
-          managed volumes stays on the old machine&rsquo;s disk.
+            Limits cap what the container may use; 0 means unlimited. Machine moves
+            are unavailable until RackOps can verify data transfer and recovery.
         </InfoTip>
       </div>
       <div className="grid-3">
@@ -1213,10 +1261,10 @@ function SettingsTab({ svc, draft, setDraft, nodes, busy, deleting, errors, onDe
           onChange={(e) => setDraft({ ...draft, gpu: e.target.checked })} /> GPU access (--gpus all)
       </label>
       <Field label="Runs on"
-        hint="Changing this migrates the app on Save &amp; redeploy; managed volumes don't move automatically."
+        hint="Machine moves are unavailable until verified data transfer and recovery are supported."
         style={{ marginBottom: 0 }}>
         {(p) => (
-          <select className="input" {...p} value={draft.nodeId} disabled={readOnly}
+          <select className="input" {...p} value={draft.nodeId} disabled
             onChange={(e) => setDraft({ ...draft, nodeId: e.target.value })}>
             {nodes.map((n) => {
               const sc = scores.find((s) => s.nodeId === n.id);

@@ -2,7 +2,6 @@ package server
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -30,16 +29,26 @@ type ServiceUpdate struct {
 }
 
 // handleUpdateService applies edits to a service. With Redeploy=true the
-// container is recreated with the new config; a node change migrates the
-// workload (remove on old node, deploy on new).
+// container is recreated with the new config. Machine moves require a
+// recoverable migration operation and are never performed by this endpoint.
 func (a *API) handleUpdateService(w http.ResponseWriter, r *http.Request) {
-	svc, org, _ := a.serviceForOrg(w, r)
+	svc, org, member := a.serviceForOrg(w, r)
 	if svc == nil {
+		return
+	}
+	if !requireServiceControl(w, member) {
 		return
 	}
 	var upd ServiceUpdate
 	if err := json.NewDecoder(r.Body).Decode(&upd); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	// Reject before changing any fields, including a save-only request. The
+	// old implementation changed the recorded node even without a redeploy,
+	// and removed the source before checking whether the destination worked.
+	if upd.NodeID != nil && *upd.NodeID != "" && *upd.NodeID != svc.NodeID {
+		http.Error(w, "machine moves are unavailable until a verified migration and recovery plan can be created; this app remains on its current machine", http.StatusConflict)
 		return
 	}
 	// A migration target must be the org's own hardware.
@@ -63,6 +72,16 @@ func (a *API) handleUpdateService(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate mounts before committing anything.
+	if upd.Env != nil {
+		var resolved []types.EnvVar
+		var err error
+		a.Store.View(func() { resolved, err = resolveEnvUpdate(svc.Env, *upd.Env) })
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		upd.Env = &resolved
+	}
 	if upd.Mounts != nil {
 		for _, m := range *upd.Mounts {
 			if m.Target == "" || !strings.HasPrefix(m.Target, "/") {
@@ -76,8 +95,6 @@ func (a *API) handleUpdateService(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	oldNode := svc.NodeID
-	migrate := false
 	a.Store.Mutate(func() {
 		if upd.Image != nil {
 			svc.Image = *upd.Image
@@ -115,34 +132,17 @@ func (a *API) handleUpdateService(w http.ResponseWriter, r *http.Request) {
 		if upd.GPU != nil {
 			svc.GPU = *upd.GPU
 		}
-		if upd.NodeID != nil && *upd.NodeID != "" && *upd.NodeID != svc.NodeID {
-			if a.Store.Nodes[*upd.NodeID] != nil {
-				svc.NodeID = *upd.NodeID
-				svc.AutoPlace = false
-				svc.RelayPort = 0 // re-derived by ingress for the new node
-				migrate = true
-			}
-		}
 		svc.UpdatedAt = time.Now()
 	})
 
 	if upd.Redeploy {
-		if migrate {
-			// Tear down on the old node, then deploy on the new one.
-			payload, _ := json.Marshal(DeployPayload{ServiceID: svc.ID, Name: svc.Name, ExternalName: svc.ExternalName, ContainerID: svc.ContainerID, ComposeYML: svc.ComposeYML})
-			a.Store.EnqueueTask(oldNode, types.AgentTask{
-				ID: NewID(), Kind: types.TaskRemove, ServiceID: svc.ID,
-				Payload: string(payload), CreatedAt: time.Now(),
-			})
-			a.Store.AddEvent("migrate", fmt.Sprintf("Migrating %s: %s -> %s", svc.Name, a.nodeName(oldNode), a.nodeName(svc.NodeID)), svc.NodeID, svc.ID)
-		}
 		a.Store.Mutate(func() { svc.Status = types.StatusBuilding })
 		a.queueDeploy(svc, "config-change")
 		a.Store.AddEvent("service", "Configuration applied, redeploying: "+svc.Name, svc.NodeID, svc.ID)
 	} else {
 		a.Store.AddEvent("service", "Configuration saved (pending redeploy): "+svc.Name, svc.NodeID, svc.ID)
 	}
-	a.Hub.Broadcast("service_update", svc)
+	a.serviceChanged(svc)
 	writeJSON(w, svc)
 }
 
@@ -171,10 +171,11 @@ func (a *API) nodeName(id string) string {
 // --since this moment, so old output disappears without touching the
 // container's on-disk log file.
 func (a *API) handleClearLogs(w http.ResponseWriter, r *http.Request) {
-	var svc *types.Service
-	a.Store.View(func() { svc = a.Store.Services[r.PathValue("id")] })
+	svc, _, member := a.serviceForOrg(w, r)
 	if svc == nil {
-		http.Error(w, "service not found", http.StatusNotFound)
+		return
+	}
+	if !requireServiceControl(w, member) {
 		return
 	}
 	a.Store.Mutate(func() { svc.LogsClearedAt = time.Now() })
@@ -184,11 +185,19 @@ func (a *API) handleClearLogs(w http.ResponseWriter, r *http.Request) {
 // handleNodeFS lists a directory on a node's host filesystem (folder browser).
 // Round-trips through the agent's task queue like log fetches do.
 func (a *API) handleNodeFS(w http.ResponseWriter, r *http.Request) {
+	org, member := a.requireOrg(w, r)
+	if org == nil {
+		return
+	}
 	nodeID := r.PathValue("id")
 	var node *types.Node
 	a.Store.View(func() { node = a.Store.Nodes[nodeID] })
-	if node == nil {
+	if node == nil || node.OrgID != org.ID {
 		http.Error(w, "node not found", http.StatusNotFound)
+		return
+	}
+	if !orgCan(member, func(p types.OrgPermissions) bool { return p.ManageMachines }) {
+		http.Error(w, "machine management permission is required to browse host files", http.StatusForbidden)
 		return
 	}
 	path := r.URL.Query().Get("path")

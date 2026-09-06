@@ -50,6 +50,10 @@ func main() {
 		runCLI(os.Args[1], os.Args[2:])
 	case "version":
 		fmt.Println("rackops", version)
+	case "restore-state":
+		runStateRestore(os.Args[2:])
+	case "recover-account":
+		runRecoverAccount(os.Args[2:])
 	default:
 		usage()
 		os.Exit(1)
@@ -61,6 +65,8 @@ func usage() {
 
 Usage:
   rackops server [flags]     Run the control plane (+ embedded local agent)
+  rackops restore-state [flags] Restore encrypted state into a new directory
+  rackops recover-account [flags] Recover an account into a new state directory
   rackops agent  [flags]     Run the node agent
   rackops probe              Print discovered hardware + live metrics (debug)
   rackops update             Self-update to the latest release
@@ -150,7 +156,11 @@ func runServer(args []string) {
 		log.Fatalf("server: %v", err)
 	}
 	// Migrate pre-org state and guarantee a default organization exists.
+	defer store.Close()
 	store.EnsureDefaultOrg()
+	if store.BootstrapToken != "" {
+		log.Printf("server: owner setup token (single use): %s", store.BootstrapToken)
+	}
 
 	// Join token: load or create.
 	token := loadOrCreateToken(*dataDir)
@@ -325,14 +335,25 @@ func readAll(resp *http.Response) ([]byte, error) {
 func runAgent(args []string) {
 	fs := flag.NewFlagSet("agent", flag.ExitOnError)
 	serverURL := fs.String("server", "", "control plane URL (required)")
-	token := fs.String("token", "", "join token (required)")
+	token := fs.String("token", "", "agent or enrollment token (use this or --token-file)")
+	tokenFile := fs.String("token-file", "", "read the agent token from a protected file instead of a command-line argument")
 	name := fs.String("name", "", "node display name")
 	org := fs.String("org", "", "organization ID to join (default: the server's default org)")
 	dataDir := fs.String("data-dir", defaultDataDir(), "state directory")
 	_ = fs.Parse(args)
 
+	if *tokenFile != "" {
+		if *token != "" {
+			log.Fatal("agent: use either --token or --token-file")
+		}
+		raw, err := os.ReadFile(*tokenFile)
+		if err != nil {
+			log.Fatal("agent: could not read token file")
+		}
+		*token = strings.TrimSpace(string(raw))
+	}
 	if *serverURL == "" || *token == "" {
-		fmt.Fprintln(os.Stderr, "agent: --server and --token are required")
+		fmt.Fprintln(os.Stderr, "agent: --server and either --token or --token-file are required")
 		os.Exit(1)
 	}
 	a, err := agent.New(agent.Config{

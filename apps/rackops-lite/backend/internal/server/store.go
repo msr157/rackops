@@ -2,9 +2,12 @@
 package server
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -18,7 +21,16 @@ import (
 // mutation methods are funneled through apply() so a Raft FSM can replace
 // the persistence layer without touching handlers (milestone: HA).
 type Store struct {
-	mu sync.RWMutex
+	NodeEnrollments map[string]*NodeEnrollment `json:"nodeEnrollments,omitempty"`
+	NodeCredentials map[string]*NodeCredential `json:"nodeCredentials,omitempty"`
+	mu              sync.RWMutex
+	persistMu       sync.Mutex
+	signupMu        sync.Mutex
+	BootstrapToken  string `json:"bootstrapToken,omitempty"`
+	stateKey        []byte
+	stopCh          chan struct{}
+	stopOnce        sync.Once
+	SchemaVersion   int `json:"schemaVersion"`
 
 	Nodes       map[string]*types.Node          `json:"nodes"`
 	Projects    map[string]*types.Project       `json:"projects"`
@@ -53,7 +65,12 @@ type Store struct {
 	// deploys/actions survive a control-plane restart; it is NOT applied from
 	// replicated snapshots — each leader owns task delivery to the agents it
 	// serves (see ImportJSON).
-	TaskQueue map[string][]types.AgentTask `json:"taskQueue,omitempty"`
+	TaskQueue         map[string][]types.AgentTask  `json:"taskQueue,omitempty"`
+	TaskOperations    map[string]*TaskOperation     `json:"taskOperations,omitempty"`
+	ResetEmails       map[string]*ResetEmail        `json:"resetEmails,omitempty"`
+	CloudConnections  map[string]*CloudConnection   `json:"cloudConnections,omitempty"`
+	AWSProvisioning   map[string]*AWSProvisioning   `json:"awsProvisioning,omitempty"`
+	CloudProvisioning map[string]*CloudProvisioning `json:"cloudProvisioning,omitempty"`
 
 	// JWTSecret signs user session tokens. A random per-cluster secret,
 	// generated once and then persisted and replicated so every HA peer agrees
@@ -106,33 +123,65 @@ type Settings struct {
 // NewStore loads state from dataDir or initializes a fresh store.
 func NewStore(dataDir string) (*Store, error) {
 	s := &Store{
-		Nodes:       map[string]*types.Node{},
-		Projects:    map[string]*types.Project{},
-		Envs:        map[string]*types.Environment{},
-		Services:    map[string]*types.Service{},
-		Deployments: map[string]*types.Deployment{},
-		Users:       map[string]*types.User{},
-		Tokens:      map[string]*types.APIToken{},
-		Alerts:      map[string]*types.Alert{},
-		Domains:     map[string]*types.Domain{},
-		Orgs:        map[string]*types.Organization{},
-		Invitations: map[string]*types.Invitation{},
-		Tickets:     map[string]*types.SupportTicket{},
-		EarlyAccess: map[string]*types.EarlyAccessLead{},
-		TaskQueue:   map[string][]types.AgentTask{},
-		dataDir:     dataDir,
+		SchemaVersion: 1,
+		stopCh:        make(chan struct{}),
+		Nodes:         map[string]*types.Node{},
+		Projects:      map[string]*types.Project{},
+		Envs:          map[string]*types.Environment{},
+		Services:      map[string]*types.Service{},
+		Deployments:   map[string]*types.Deployment{},
+		Users:         map[string]*types.User{},
+		Tokens:        map[string]*types.APIToken{},
+		Alerts:        map[string]*types.Alert{},
+		Domains:       map[string]*types.Domain{},
+		Orgs:          map[string]*types.Organization{},
+		Invitations:   map[string]*types.Invitation{},
+		Tickets:       map[string]*types.SupportTicket{},
+		EarlyAccess:   map[string]*types.EarlyAccessLead{},
+		TaskQueue:     map[string][]types.AgentTask{},
+		dataDir:       dataDir,
 	}
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return nil, err
 	}
 	path := filepath.Join(dataDir, "state.json")
-	if data, err := os.ReadFile(path); err == nil {
+	data, err := os.ReadFile(path)
+	if err == nil && len(data) == 0 {
+		return nil, fmt.Errorf("state file is empty; restore a verified backup before starting")
+	}
+	if err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("read state: %w", err)
+	}
+	encrypted := bytes.HasPrefix(data, stateMagic)
+	key, err := loadStateKey(dataDir, encrypted)
+	if err != nil {
+		return nil, err
+	}
+	s.stateKey = key
+	if encrypted {
+		data, err = decryptState(key, data)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if len(data) > 0 {
 		if err := json.Unmarshal(data, s); err != nil {
 			return nil, err
 		}
 	}
+	if s.SchemaVersion > 1 {
+		return nil, fmt.Errorf("state schema %d is newer than this binary supports", s.SchemaVersion)
+	}
+	s.SchemaVersion = 1
+	s.dirty = true
 	if s.TaskQueue == nil {
 		s.TaskQueue = map[string][]types.AgentTask{}
+	}
+	if s.TaskOperations == nil {
+		s.TaskOperations = map[string]*TaskOperation{}
+	}
+	if s.ResetEmails == nil {
+		s.ResetEmails = map[string]*ResetEmail{}
 	}
 	// State files written before early-access capture existed unmarshal this
 	// as nil; writing to a nil map panics.
@@ -149,6 +198,13 @@ func NewStore(dataDir string) (*Store, error) {
 		s.dirty = true
 	}
 	// Ensure a default project + environments exist.
+	if len(s.Users) == 0 && s.BootstrapToken == "" {
+		proof := make([]byte, 32)
+		if _, err := rand.Read(proof); err != nil {
+			return nil, err
+		}
+		s.BootstrapToken = hex.EncodeToString(proof)
+	}
 	if len(s.Projects) == 0 {
 		p := &types.Project{
 			ID: NewID(), Name: "Default Infrastructure",
@@ -161,34 +217,70 @@ func NewStore(dataDir string) (*Store, error) {
 		}
 		s.dirty = true
 	}
+	// Finish the legacy-to-encrypted conversion before serving requests.
+	if err := s.persistOnce(); err != nil {
+		return nil, err
+	}
 	go s.persistLoop()
 	return s, nil
 }
 
 // persistLoop snapshots state to disk when dirty.
 func (s *Store) persistLoop() {
-	for range time.Tick(2 * time.Second) {
-		s.mu.Lock()
-		if !s.dirty {
-			s.mu.Unlock()
-			continue
-		}
-		data, err := json.MarshalIndent(s, "", " ")
-		s.dirty = false
-		path := filepath.Join(s.dataDir, "state.json")
-		onDirty := s.OnDirty
-		importing := s.importing
-		s.mu.Unlock()
-		if err == nil {
-			tmp := path + ".tmp"
-			if err := os.WriteFile(tmp, data, 0o600); err == nil {
-				_ = os.Rename(tmp, path)
-			}
-			if onDirty != nil && !importing {
-				onDirty(data)
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.stopCh:
+			return
+		case <-ticker.C:
+			if err := s.persistOnce(); err != nil {
+				log.Printf("store: snapshot not saved; will retry: %v", err)
 			}
 		}
 	}
+}
+
+// Close stops background persistence and writes the last dirty snapshot.
+func (s *Store) Close() error {
+	s.stopOnce.Do(func() { close(s.stopCh) })
+	return s.persistOnce()
+}
+
+func (s *Store) persistOnce() error {
+	s.persistMu.Lock()
+	defer s.persistMu.Unlock()
+	s.mu.Lock()
+	if !s.dirty {
+		s.mu.Unlock()
+		return nil
+	}
+	data, err := json.Marshal(s)
+	if err != nil {
+		s.mu.Unlock()
+		return err
+	}
+	s.dirty = false
+	onDirty, importing := s.OnDirty, s.importing
+	s.importing = false
+	s.mu.Unlock()
+	sealed, err := encryptState(s.stateKey, data)
+	if err == nil {
+		err = atomicStateWrite(filepath.Join(s.dataDir, "state.json"), sealed)
+	}
+	if err != nil {
+		s.mu.Lock()
+		if !s.dirty {
+			s.importing = importing
+		}
+		s.dirty = true
+		s.mu.Unlock()
+		return err
+	}
+	if onDirty != nil && !importing {
+		onDirty(data)
+	}
+	return nil
 }
 
 // ImportJSON replaces replicated state (nodes/services/etc) from a snapshot.
@@ -199,6 +291,32 @@ func (s *Store) ImportJSON(data []byte) error {
 	if err := json.Unmarshal(data, &in); err != nil {
 		return err
 	}
+	if in.SchemaVersion < 0 || in.SchemaVersion > 1 {
+		return fmt.Errorf("unsupported replicated state schema %d", in.SchemaVersion)
+	}
+	if in.Nodes == nil || in.Projects == nil || in.Services == nil || in.Users == nil {
+		return fmt.Errorf("replicated state is missing required collections")
+	}
+	if len(in.Users) > 0 && len(in.JWTSecret) < 32 {
+		return fmt.Errorf("replicated user state is missing its session signing key")
+	}
+	ensureStateMap(&in.Envs)
+	ensureStateMap(&in.Deployments)
+	ensureStateMap(&in.Tokens)
+	ensureStateMap(&in.Alerts)
+	ensureStateMap(&in.Domains)
+	ensureStateMap(&in.Orgs)
+	ensureStateMap(&in.Invitations)
+	ensureStateMap(&in.Tickets)
+	ensureStateMap(&in.EarlyAccess)
+	ensureStateMap(&in.OrgSettings)
+	ensureStateMap(&in.ClusterHTTP)
+	ensureStateMap(&in.ResetEmails)
+	ensureStateMap(&in.CloudConnections)
+	ensureStateMap(&in.AWSProvisioning)
+	ensureStateMap(&in.CloudProvisioning)
+	ensureStateMap(&in.NodeEnrollments)
+	ensureStateMap(&in.NodeCredentials)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.importing = true
@@ -211,6 +329,24 @@ func (s *Store) ImportJSON(data []byte) error {
 	s.Tokens = in.Tokens
 	s.Alerts = in.Alerts
 	s.Domains = in.Domains
+	s.Orgs = in.Orgs
+	s.Invitations = in.Invitations
+	s.Tickets = in.Tickets
+	s.ResetEmails = in.ResetEmails
+	s.CloudConnections = in.CloudConnections
+	s.AWSProvisioning = in.AWSProvisioning
+	s.CloudProvisioning = in.CloudProvisioning
+	s.NodeEnrollments = in.NodeEnrollments
+	s.NodeCredentials = in.NodeCredentials
+	s.EarlyAccess = in.EarlyAccess
+	s.OrgSettings = in.OrgSettings
+	s.DashboardURL = in.DashboardURL
+	s.InstanceName = in.InstanceName
+	s.BootstrapToken = in.BootstrapToken
+	if len(in.Users) > 0 {
+		s.BootstrapToken = ""
+	}
+	s.SchemaVersion = 1
 	s.Ingress = in.Ingress
 	s.FrontDoor = in.FrontDoor
 	s.Settings = in.Settings
@@ -222,8 +358,13 @@ func (s *Store) ImportJSON(data []byte) error {
 		s.JWTSecret = in.JWTSecret
 	}
 	s.dirty = true // persist locally
-	s.importing = false
 	return nil
+}
+
+func ensureStateMap[K comparable, V any](m *map[K]V) {
+	if *m == nil {
+		*m = make(map[K]V)
+	}
 }
 
 // Mutate runs fn under the write lock and marks state dirty.
@@ -232,6 +373,7 @@ func (s *Store) Mutate(fn func()) {
 	defer s.mu.Unlock()
 	fn()
 	s.dirty = true
+	s.importing = false
 }
 
 // View runs fn under the read lock.
@@ -275,13 +417,22 @@ func (s *Store) EnqueueTask(nodeID string, task types.AgentTask) {
 
 // DrainTasks pops all pending tasks for a node.
 func (s *Store) DrainTasks(nodeID string) []types.AgentTask {
+	return s.DrainTasksLimit(nodeID, -1)
+}
+
+func (s *Store) DrainTasksLimit(nodeID string, limit int) []types.AgentTask {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	tasks := s.TaskQueue[nodeID]
 	if len(tasks) == 0 {
 		return nil
 	}
-	delete(s.TaskQueue, nodeID)
+	if limit >= 0 && len(tasks) > limit {
+		s.TaskQueue[nodeID] = tasks[limit:]
+		tasks = tasks[:limit]
+	} else {
+		delete(s.TaskQueue, nodeID)
+	}
 	s.dirty = true
 	return tasks
 }

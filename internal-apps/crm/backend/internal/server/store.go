@@ -80,6 +80,17 @@ CREATE TABLE IF NOT EXISTS installs (
 	last_seen     TIMESTAMP NOT NULL,
 	last_snapshot JSON
 );
+CREATE TABLE IF NOT EXISTS leads (
+ install_id TEXT NOT NULL,
+ id TEXT NOT NULL,
+ email TEXT NOT NULL,
+ name TEXT NOT NULL,
+ industry TEXT NOT NULL,
+ notes TEXT NOT NULL,
+ status TEXT NOT NULL DEFAULT 'new',
+ received_at TEXT NOT NULL,
+ PRIMARY KEY (install_id, id)
+);
 CREATE TABLE IF NOT EXISTS snapshots (
 	id         INTEGER PRIMARY KEY AUTOINCREMENT,
 	install_id TEXT NOT NULL,

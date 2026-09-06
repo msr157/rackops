@@ -193,8 +193,9 @@ ssh -N -L 8091:127.0.0.1:8091 rackops@pop1.rackops.in
 On the customer's RackOps server:
 
 ```sh
-# The admin token from Part 3, copied over
-sudo install -m 600 /dev/stdin /etc/rackops/fd.token <<<'<enrollment token>'
+# A tenant-bound grant issued from RackOps Admin for this install only.
+# Never copy the vendor signing/admin token to a customer machine.
+sudo install -m 600 /dev/stdin /etc/rackops/fd.token <<<'<tenant enrollment grant>'
 
 rackops server \
   --listen :8080 \
@@ -204,15 +205,15 @@ rackops server \
   --frontdoor-token-file /etc/rackops/fd.token
 ```
 
-Do not assemble these by hand. The **Front Door** page in RackOps Admin shows
-the exact line, token included, with a copy button — a typo here surfaces
-much later as a rejected key at connect time.
+The **Front Door** page in RackOps Admin registers the install's tenant ID,
+public key and unique workspace, then issues a tenant-bound grant. See
+[the enrollment procedure](FRONT_DOOR_ENROLLMENT.md). The grant expires after
+24 hours; later hostname changes require a fresh grant. Existing established
+tunnel identity does not expire with the grant.
 
-The enrollment token is a *machine* credential, separate from your console
-login: a customer's control plane is a daemon and cannot sign in
-interactively, and no customer should hold an operator password. It is
-created on first start at `<data-dir>/frontdoor-enroll.token`; rotate it by
-deleting that file and restarting.
+The Admin file `<data-dir>/frontdoor-enroll.token` is a vendor-only signing
+secret despite its legacy name. Never copy it to a customer or use it as a
+customer enrollment grant. Automated grant renewal is not implemented yet.
 
 Existing systemd unit? Add the four flags to `ExecStart` and
 `sudo systemctl restart rackops`.
@@ -302,7 +303,10 @@ and their transport, traffic against each quota, and a Suspend button that
 takes effect immediately. Since abuse reports arrive as support tickets in
 the same app, acting on one never means SSHing anywhere.
 
-The same operations over HTTP, using the enrollment token (`$T`):
+The following legacy `/admin/*` examples apply only to the standalone edge's
+private vendor-admin listener, using its vendor administrator credential.
+They are not customer enrollment calls and are not mounted by integrated
+RackOps Admin. Use the authenticated Admin dashboard for integrated operation:
 
 ```sh
 # Who is connected, over what

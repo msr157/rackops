@@ -56,6 +56,9 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("GET /ingest/v1/tickets/{ticketId}/replies", a.handleIngestReplies)
 	mux.HandleFunc("POST /ingest/v1/reset-email", a.handleIngestResetEmail)
 	mux.HandleFunc("POST /ingest/v1/snapshots", a.handleIngestSnapshot)
+	mux.HandleFunc("POST /ingest/v1/leads", a.handleIngestLead)
+	mux.HandleFunc("GET /api/leads", a.handleListLeads)
+	mux.HandleFunc("POST /api/leads/{id}/status", a.handleLeadStatus)
 
 	// Admin API — JWT bearer.
 	mux.HandleFunc("POST /api/auth/login", a.handleLogin)

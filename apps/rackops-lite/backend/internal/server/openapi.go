@@ -25,8 +25,11 @@ type route struct {
 // apiRoutes builds the full route table. Handlers close over the API value.
 func (a *API) apiRoutes() []route {
 	return []route{
+		{"GET", "/api/backups/state", "platform", "Download encrypted control-plane state (installation owner only; excludes volume data and loose identity files)", a.handleStateBackup, false},
 		// Agent protocol
 		{"POST", "/api/agent/ingest", "agent", "Agent telemetry ingest: report metrics/containers, receive queued tasks (join-token auth)", a.handleIngest, true},
+		{"POST", "/api/agent/enroll", "agent", "Exchange a single-use enrollment token for a client-persisted node identity", a.handleNodeEnroll, true},
+		{"POST", "/api/node-enrollments", "cloud", "Issue an organization-bound node enrollment token valid for one hour", a.handleCreateNodeEnrollment, false},
 		{"POST", "/api/agent/logstream", "agent", "Agent log-chunk push for live log streaming (join-token auth)", a.handleLogStream, true},
 
 		// Fleet
@@ -47,7 +50,16 @@ func (a *API) apiRoutes() []route {
 		{"GET", "/api/services", "apps", "List services (filter: ?project= &env=)", a.handleListServices, false},
 		{"POST", "/api/services", "apps", "Create + deploy a service (image/git/compose/template; nodeId \"auto\" places it)", a.handleCreateService, false},
 		{"GET", "/api/services/{id}", "apps", "Get one service", a.handleGetService, false},
-		{"PATCH", "/api/services/{id}", "apps", "Edit a service (redeploy=true applies immediately; node change migrates)", a.handleUpdateService, false},
+		{"GET", "/api/cloud-connections", "cloud", "List cloud connection metadata; credentials are never returned", a.handleCloudConnections, false},
+		{"POST", "/api/cloud-connections/{id}/machine-preflight", "cloud", "Inspect selected cloud image, VM size, disk and network metadata; no resources created or launch approval granted", a.handleCloudMachinePreflight, false},
+		{"GET", "/api/cloud-operations/{id}", "cloud", "Read organization-scoped provisioning receipts and agent enrollment progress; does not launch resources or certify application health", a.handleCloudProgress, false},
+		{"POST", "/api/cloud-connections", "cloud", "Validate and store an AWS, Azure or Google Cloud connection with explicit credentials; no resources created", a.handleCreateCloudConnection, false},
+		{"POST", "/api/cloud-connections/{id}/validate", "cloud", "Revalidate a saved cloud identity; does not verify provisioning permissions", a.handleValidateCloudConnection, false},
+		{"DELETE", "/api/cloud-connections/{id}", "cloud", "Remove saved credentials; does not delete cloud resources", a.handleDeleteCloudConnection, false},
+		{"POST", "/api/services/{id}/migration-preflight", "apps", "Read-only migration compatibility review; does not provision or approve a move", a.handleMigrationPreflight, false},
+		{"GET", "/api/services/{id}/operations", "apps", "List outstanding agent operations without configuration or logs", a.handleServiceOperations, false},
+		{"POST", "/api/services/{id}/operations/{operation}/resolve", "apps", "Acknowledge manual inspection of an uncertain operation and resume automatic healing (inspected=true)", a.handleResolveServiceOperation, false},
+		{"PATCH", "/api/services/{id}", "apps", "Edit a service (redeploy=true applies immediately; machine changes return 409)", a.handleUpdateService, false},
 		{"DELETE", "/api/services/{id}", "apps", "Remove a service and its container", a.handleDeleteService, false},
 		{"POST", "/api/services/{id}/{action}", "apps", "Service action: start | stop | restart | redeploy", a.handleServiceAction, false},
 		{"POST", "/api/services/{id}/clear-logs", "apps", "Hide log output before now (sets the log horizon)", a.handleClearLogs, false},
@@ -93,7 +105,7 @@ func (a *API) apiRoutes() []route {
 		{"POST", "/api/auth/login", "auth", "Sign in, returns a bearer token", a.handleLogin, true},
 		{"GET", "/api/auth/me", "auth", "The authenticated account", a.handleMe, true},
 		{"POST", "/api/auth/change-password", "auth", "Change the authenticated account's password", a.handleChangePassword, true},
-		{"POST", "/api/auth/forgot-password", "auth", "Request a password-reset link (emailed + printed in the server log)", a.handleForgotPassword, true},
+		{"POST", "/api/auth/forgot-password", "auth", "Request an emailed password-reset link (uniform response; no recovery credentials in logs)", a.handleForgotPassword, true},
 		{"POST", "/api/auth/reset-password", "auth", "Consume a reset token and set a new password", a.handleResetPassword, true},
 		{"GET", "/api/auth/invitation/{token}", "auth", "Preview an invitation (email, organization, role)", a.handleGetInvitation, true},
 		{"POST", "/api/auth/invitation", "auth", "Accept an invitation: create the account and join the organization", a.handleAcceptInvitation, true},

@@ -56,9 +56,13 @@ jobs:
     name: Go — Vet, Build & Test
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [apps/rackops-lite/backend, internal-apps/crm/backend]
     defaults:
       run:
-        working-directory: apps/rackops-lite/backend
+        working-directory: ${{ matrix.module }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -80,7 +84,12 @@ jobs:
         run: go build ./...
 
       - name: Test
-        run: go test ./...
+        run: go test -race ./...
+
+      - name: Verify standalone module
+        env:
+          GOWORK: 'off'
+        run: go build ./...
 
   docker-website:
     name: Docker — Website Image (deploy gate)
@@ -122,14 +131,33 @@ jobs:
           docker rm -f rackops-smoke
           exit 1
 
+  docker-admin:
+    name: Docker — RackOps Admin Image
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Admin image
+        run: docker build -f internal-apps/crm/Dockerfile -t rackops-admin:${{ github.sha }} .
+      - name: Smoke test Admin health
+        run: |
+          docker run -d --name admin-smoke -p 8091:8091 -e RACKOPS_ADMIN_EMAIL=ci@example.invalid -e RACKOPS_ADMIN_PASSWORD=disposable-ci-password rackops-admin:${{ github.sha }}
+          trap 'docker rm -f admin-smoke' EXIT
+          for i in $(seq 1 30); do
+            if curl -fs http://127.0.0.1:8091/healthz; then exit 0; fi
+            sleep 2
+          done
+          docker logs admin-smoke
+          exit 1
+
   deploy-gate:
-    name: Deploy Gate
-    needs: [web, go, docker-website, docker-backend]
+    name: Release validation
+    needs: [web, go, docker-website, docker-backend, docker-admin]
     runs-on: ubuntu-latest
     steps:
-      - name: Deployment handled by Dokploy
+      - name: Validation complete
         if: github.ref == 'refs/heads/main'
-        run: echo "✅ All checks passed — Dokploy deploys via its GitHub webhook."
+        run: echo "Checks passed. Configure Dokploy to require this result; an independent push webhook is not gated by this job."
 
       - name: Deployment skipped
         if: github.ref != 'refs/heads/main'

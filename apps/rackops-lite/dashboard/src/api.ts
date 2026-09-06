@@ -1,4 +1,32 @@
 // Shared API types mirrored from the Go backend.
+export interface AWSMachineSpec {
+  operationId: string; imageId: string; instanceType: string; subnetId: string;
+  securityGroupId: string; rootDevice: string; diskGb: number;
+}
+export interface GCPMachineSpec {
+  operationId: string; projectId: string; zone: string; machineType: string;
+  image: string; subnetwork: string; diskGb: number;
+}
+export interface AzureMachineSpec {
+  operationId: string; subscriptionId: string; resourceGroup: string; size: string;
+  imageId: string; networkInterfaceId: string; sshPublicKey: string; diskGb: number;
+}
+export interface MachineInspection {
+  provider: string; region: string; specFingerprint: string; checkedAt: string;
+  architecture: string; vcpus: number; memoryMb: number; zone: string; minimumDiskGb: number;
+  resourceCompatible: boolean; canLaunch: boolean; monthlyCostEstimate: number | null;
+  blockers: { code: string; message: string }[]; remainingChecks: string[];
+}
+export interface CloudConnection {
+  id: string; orgId: string; name: string; provider: string; region: string;
+  accountId: string; principal: string; validatedAt: string;
+}
+export interface MigrationReview {
+  serviceId: string; provider: string; region: string; architecture: string;
+  canStart: boolean; checkedAt: string;
+  blockers: { code: string; message: string }[];
+  monthlyCostEstimate: number | null; dataBytes: number | null; downtimeSeconds: number | null;
+}
 export interface GPU {
   index: number; vendor: string; model: string;
   vramTotalMb: number; vramUsedMb: number; utilPct: number; tempC: number; powerW: number;
@@ -26,7 +54,7 @@ export interface Node {
 }
 export interface Project { id: string; name: string; description: string; createdAt: string }
 export interface Environment { id: string; projectId: string; name: string }
-export interface EnvVar { key: string; value: string; secret: boolean }
+export interface EnvVar { key: string; value: string; secret: boolean; redacted?: boolean }
 export interface Mount {
   type: 'bind' | 'volume'; source: string; target: string; readOnly: boolean; drivePath?: string;
 }
@@ -186,6 +214,15 @@ export interface MetricsHistory {
 }
 
 export const api = {
+  createCloudConnection: (name: string, provider: string, region: string, credentials: Record<string, string>) => req<CloudConnection>('/api/cloud-connections', { method: 'POST', body: JSON.stringify({ name, provider, region, credentials }) }),
+  cloudConnections: () => req<CloudConnection[]>('/api/cloud-connections'),
+  inspectAWSMachine: (id: string, spec: AWSMachineSpec, architecture: string) => req<MachineInspection>(`/api/cloud-connections/${encodeURIComponent(id)}/machine-preflight`, { method: 'POST', body: JSON.stringify({ spec: { aws: spec }, architecture }) }),
+  inspectGCPMachine: (id: string, spec: GCPMachineSpec, architecture: string) => req<MachineInspection>(`/api/cloud-connections/${encodeURIComponent(id)}/machine-preflight`, { method: 'POST', body: JSON.stringify({ spec: { gcp: spec }, architecture }) }),
+  inspectAzureMachine: (id: string, spec: AzureMachineSpec, architecture: string) => req<MachineInspection>(`/api/cloud-connections/${encodeURIComponent(id)}/machine-preflight`, { method: 'POST', body: JSON.stringify({ spec: { azure: spec }, architecture }) }),
+  createAWSConnection: (name: string, region: string, credentials: { accessKeyId: string; secretAccessKey: string; sessionToken: string }) => req<CloudConnection>('/api/cloud-connections', { method: 'POST', body: JSON.stringify({ name, provider: 'aws', region, credentials }) }),
+  validateCloudConnection: (id: string) => req<CloudConnection>(`/api/cloud-connections/${encodeURIComponent(id)}/validate`, { method: 'POST' }),
+  deleteCloudConnection: (id: string) => req<void>(`/api/cloud-connections/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  migrationPreflight: (id: string, provider: string, region: string) => req<MigrationReview>(`/api/services/${encodeURIComponent(id)}/migration-preflight`, { method: 'POST', body: JSON.stringify({ provider, region }) }),
   overview: () => req<Overview>('/api/overview'),
   nodes: () => req<Node[]>('/api/nodes'),
   node: (id: string) => req<Node>(`/api/nodes/${id}`),
@@ -221,6 +258,8 @@ export const api = {
   stopLogStream: (id: string, streamId: string) =>
     req<void>(`/api/services/${id}/logs/stream?streamId=${encodeURIComponent(streamId)}`, { method: 'DELETE' }),
   serviceDeployments: (id: string) => req<Deployment[]>(`/api/services/${id}/deployments`),
+	serviceOperations: (id: string) => req<{ id: string; kind: string; state: string; createdAt: string }[]>(`/api/services/${id}/operations`),
+	resolveServiceOperation: (id: string, operation: string) => req(`/api/services/${id}/operations/${operation}/resolve`, { method: 'POST', body: JSON.stringify({ inspected: true }) }),
   domains: () => req<Domain[]>('/api/domains'),
   createDomain: (name: string) => req<Domain>('/api/domains', { method: 'POST', body: JSON.stringify({ name }) }),
   deleteDomain: (id: string) => req<void>(`/api/domains/${id}`, { method: 'DELETE' }),
@@ -247,8 +286,8 @@ export const api = {
   mesh: () => req<MeshStatus>('/api/mesh'),
   cluster: () => req<ClusterStatus>('/api/cluster'),
   authStatus: () => req<{ needsSetup: boolean }>('/api/auth/status'),
-  signup: (email: string, fullName: string, password: string) =>
-    req<{ token: string; user: User }>('/api/auth/signup', { method: 'POST', body: JSON.stringify({ email, fullName, password }) }),
+  signup: (email: string, fullName: string, password: string, setupToken?: string) =>
+    req<{ token: string; user: User }>('/api/auth/signup', { method: 'POST', body: JSON.stringify({ email, fullName, password, setupToken }) }),
   login: (email: string, password: string) =>
     req<{ token: string; user: User }>('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
   users: () => req<User[]>('/api/users'),
@@ -261,8 +300,11 @@ export const api = {
     req<{ id: string; name: string; token: string; expiresAt?: string }>('/api/tokens', { method: 'POST', body: JSON.stringify({ name, expiresIn }) }),
   deleteApiToken: (id: string) => req<void>(`/api/tokens/${id}`, { method: 'DELETE' }),
   me: () => req<User>('/api/auth/me'),
-  changePassword: (current: string, newPassword: string) =>
-    req<void>('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ current, new: newPassword }) }),
+  changePassword: async (current: string, newPassword: string) => {
+    await req<void>('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ current, new: newPassword }) });
+    clearToken();
+    window.dispatchEvent(new Event('rackops-logout'));
+  },
   forgotPassword: (email: string) =>
     req<{ ok: boolean; message: string }>('/api/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }) }),
   resetPassword: (token: string, password: string) =>

@@ -1,4 +1,8 @@
 // Shared API types mirrored from the Go backend (internal/server/types.go).
+export interface Lead {
+  id: string; installId: string; email: string; name: string;
+  industry: string; notes: string; status: string; receivedAt: string;
+}
 
 export interface UsageSnapshot {
   version: string; os: string; arch: string;
@@ -49,7 +53,6 @@ export interface FrontDoorStatus {
   popId?: string;
   zone?: string;
   publicAddr?: string;
-  enrollToken?: string;
   tenants: number;
   connected: number;
   requests: number;
@@ -117,6 +120,8 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  leads: (offset = 0) => req<Lead[]>(`/api/leads?offset=${offset}`),
+  leadStatus: (lead: Lead, status: string) => req<void>(`/api/leads/${encodeURIComponent(lead.id)}/status`, { method: 'POST', body: JSON.stringify({ installId: lead.installId, status }) }),
   login: (email: string, password: string) =>
     req<{ token: string }>('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
   overview: () => req<Overview>('/api/overview'),
@@ -134,6 +139,11 @@ export const api = {
       { method: 'POST', body: JSON.stringify({ body }) }),
   frontDoor: () => req<FrontDoorStatus>('/api/frontdoor'),
   tenants: () => req<Tenant[]>('/api/frontdoor/tenants'),
+  registerTenant: (id: string, publicKey: string, workspace: string) =>
+    req<Tenant>(`/api/frontdoor/tenants/${encodeURIComponent(id)}`,
+      { method: 'PUT', body: JSON.stringify({ publicKey, workspace, hostnames: [] }) }),
+  enrollment: (id: string) =>
+    req<{ token: string; expiresAt: string }>(`/api/frontdoor/tenants/${encodeURIComponent(id)}/enrollment`, { method: 'POST' }),
   tunnelSessions: () => req<TunnelSession[]>('/api/frontdoor/sessions'),
   suspendTenant: (id: string, suspended: boolean, reason?: string) =>
     req<{ suspended: boolean; reason: string }>(`/api/frontdoor/tenants/${encodeURIComponent(id)}/suspend`,

@@ -36,10 +36,9 @@ type FrontDoor struct {
 	// console so an operator can copy the exact value into a customer's
 	// server flags instead of reconstructing it.
 	PublicAddr string
-	// EnrollToken authenticates customer control planes on the /admin routes.
-	// It is a machine credential, distinct from the operator's login: a
-	// daemon cannot do an interactive sign-in, and no customer should hold
-	// an operator password.
+	// EnrollToken is the vendor-only signing secret for scoped enrollment
+	// grants. The legacy field/file name is retained for upgrade compatibility.
+	// It must never be returned to a customer or the dashboard.
 	EnrollToken string
 	// adminAPI serves those routes.
 	adminAPI *edge.AdminAPI
@@ -53,13 +52,26 @@ func (a *API) frontDoorRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/frontdoor/tenants/{id}", a.handleDeleteTenant)
 	mux.HandleFunc("POST /api/frontdoor/tenants/{id}/suspend", a.handleSuspendTenant)
 	mux.HandleFunc("GET /api/frontdoor/sessions", a.handleFrontDoorSessions)
+	mux.HandleFunc("POST /api/frontdoor/tenants/{id}/enrollment", a.handleIssueEnrollment)
 
-	// Machine-facing enrollment, on /admin/* with a static bearer token.
-	// These sit outside /api/* so the console's session middleware lets them
-	// through to the edge's own constant-time token check.
+	// Customer enrollment verifies tenant-bound grants outside console auth.
+	// Global vendor administration is never mounted on this public surface.
 	if a.FrontDoor != nil && a.FrontDoor.adminAPI != nil {
-		a.FrontDoor.adminAPI.Register(mux)
+		a.FrontDoor.adminAPI.RegisterEnrollment(mux)
 	}
+}
+
+func (a *API) handleIssueEnrollment(w http.ResponseWriter, r *http.Request) {
+	if !a.frontDoorReady(w) {
+		return
+	}
+	token, expires, err := a.FrontDoor.adminAPI.IssueEnrollmentToken(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, map[string]any{"token": token, "expiresAt": expires})
 }
 
 // frontDoorReady reports whether the tunnel is running, writing the 503 if
@@ -81,10 +93,6 @@ type FrontDoorStatus struct {
 	POPID      string `json:"popId,omitempty"`
 	Zone       string `json:"zone,omitempty"`
 	PublicAddr string `json:"publicAddr,omitempty"`
-	// EnrollToken is shown to the signed-in operator so they can paste a
-	// complete, correct set of flags to a customer rather than assembling
-	// them from three places.
-	EnrollToken  string    `json:"enrollToken,omitempty"`
 	Tenants      int       `json:"tenants"`
 	Connected    int       `json:"connected"`
 	Requests     int64     `json:"requests"`
@@ -112,7 +120,6 @@ func (a *API) handleFrontDoorStatus(w http.ResponseWriter, _ *http.Request) {
 		POPID:        fd.POPID,
 		Zone:         fd.Zone,
 		PublicAddr:   fd.PublicAddr,
-		EnrollToken:  fd.EnrollToken,
 		Tenants:      len(fd.Registry.List()),
 		Connected:    fd.Edge.SessionCount(),
 		Requests:     stats.Requests,

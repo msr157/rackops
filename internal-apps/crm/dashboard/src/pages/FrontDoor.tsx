@@ -26,6 +26,30 @@ export function FrontDoorPage() {
   const [tenants, setTenants] = useState<Tenant[] | null>(null);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
+  const [tenantId, setTenantId] = useState('');
+  const [publicKey, setPublicKey] = useState('');
+  const [workspace, setWorkspace] = useState('');
+  const [grant, setGrant] = useState<{ token: string; expiresAt: string } | null>(null);
+
+  const issueGrant = async (id: string) => {
+    setBusy(id); setError(''); setGrant(null);
+    try { setGrant(await api.enrollment(id)); }
+    catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(''); }
+  };
+
+  const register = async () => {
+    setBusy('register'); setError(''); setGrant(null);
+    try {
+      if ((tenants ?? []).some((t) => t.id === tenantId.trim())) {
+        throw new Error('This install is already registered. Issue a new credential from its row below.');
+      }
+      await api.registerTenant(tenantId.trim(), publicKey.trim(), workspace.trim());
+      setGrant(await api.enrollment(tenantId.trim()));
+      load();
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(''); }
+  };
 
   const load = useCallback(() => {
     api.frontDoor().then(setStatus).catch(() => {});
@@ -117,11 +141,22 @@ export function FrontDoorPage() {
       <div className="card" style={{ marginTop: 16 }}>
         <div className="eyebrow">Point an install at this edge</div>
         <div className="dim" style={{ marginBottom: 8 }}>
-          The complete set of flags for the customer&rsquo;s{' '}
-          <span className="mono">rackops server</span> — copy it whole rather than
-          reassembling it, since a typo here fails at connect time with a rejected key.
+          Register the install identity first, then issue its own enrollment credential.
+          Credentials expire after 24 hours; existing tunnels keep serving, but later
+          hostname changes require a fresh credential. Never share the vendor signing secret.
         </div>
         <CopyLine text={enrollFlags(status)} />
+        <form onSubmit={(event) => { event.preventDefault(); void register(); }} style={{ marginTop: 12 }}>
+          <label>Install tenant ID<input className="input" required value={tenantId} onChange={(e) => setTenantId(e.target.value)} /></label>
+          <label>Agent Ed25519 public key<input className="input" required pattern="[a-fA-F0-9]{64}" value={publicKey} onChange={(e) => setPublicKey(e.target.value)} /></label>
+          <label>Workspace<input className="input" required pattern="[a-z0-9]([a-z0-9-]*[a-z0-9])?" value={workspace} onChange={(e) => setWorkspace(e.target.value)} /></label>
+          <button className="btn sm" disabled={!!busy}>Register install and issue credential</button>
+        </form>
+        {grant && <div role="status" style={{ marginTop: 12 }}>
+          <div>Credential expires {new Date(grant.expiresAt).toLocaleString()}</div>
+          <CopyLine text={`--frontdoor-token ${grant.token}`} />
+          <button className="btn sm" onClick={() => setGrant(null)}>Hide credential</button>
+        </div>}
         <div className="dim" style={{ marginTop: 8, fontSize: 12 }}>
           The token authenticates the customer&rsquo;s control plane, not a person.
           Rotate it by deleting <span className="mono">frontdoor-enroll.token</span> from
@@ -138,7 +173,7 @@ export function FrontDoorPage() {
       <div className="section-title" style={{ marginTop: 22 }}>Tenants</div>
       {list.length === 0 ? (
         <EmptyState icon={<Globe size={22} />} title="No installs enrolled yet">
-          A tenant appears when a customer turns Front Door on in their console.
+          Register an install using its tenant ID, workspace, and agent public key above.
         </EmptyState>
       ) : (
         <div className="card" style={{ padding: 0 }}>
@@ -199,6 +234,9 @@ export function FrontDoorPage() {
                           </span>}
                     </td>
                     <td style={{ textAlign: 'right' }}>
+                      <button className="btn sm" disabled={!!busy || t.suspended} onClick={() => void issueGrant(t.id)}>
+                        Issue credential
+                      </button>
                       <button className="btn sm" disabled={busy === t.id} onClick={() => suspend(t)}>
                         {t.suspended ? <><Check size={13} /> Restore</> : <><Ban size={13} /> Suspend</>}
                       </button>
@@ -223,7 +261,7 @@ function enrollFlags(s: FrontDoorStatus): string {
     `--frontdoor-pop ${s.publicAddr}`,
     `--frontdoor-zone ${s.zone}`,
     '--frontdoor-admin https://<this-console>',
-    `--frontdoor-token ${s.enrollToken ?? '<enroll token>'}`,
+    '--frontdoor-token <tenant-enrollment-credential>',
   ].join(' ');
 }
 

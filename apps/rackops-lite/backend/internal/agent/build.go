@@ -28,11 +28,11 @@ func (r *Runtime) buildFromGit(p DeployPayload, logs *logSink) (image string, er
 		branch = "main"
 	}
 	logs.WriteString(fmt.Sprintf("$ git clone --depth 1 -b %s %s\n", branch, p.GitRepo))
-	out, err := exec.Command("git", "clone", "--depth", "1", "-b", branch, repo, workDir).CombinedOutput()
+	out, err := r.command("git", "clone", "--depth", "1", "-b", branch, repo, workDir).CombinedOutput()
 	logs.Write(redactToken(out, p.GitToken))
 	if err != nil {
 		// Retry default branch if the requested one doesn't exist.
-		out2, err2 := exec.Command("git", "clone", "--depth", "1", repo, workDir).CombinedOutput()
+		out2, err2 := r.command("git", "clone", "--depth", "1", repo, workDir).CombinedOutput()
 		logs.Write(redactToken(out2, p.GitToken))
 		if err2 != nil {
 			return "", fmt.Errorf("clone failed: %w", err2)
@@ -50,7 +50,7 @@ func (r *Runtime) buildFromGit(p DeployPayload, logs *logSink) (image string, er
 	// 2. Nixpacks if available.
 	if nix, lookErr := exec.LookPath("nixpacks"); lookErr == nil {
 		logs.WriteString("building with nixpacks\n")
-		nixCmd := exec.Command(nix, "build", workDir, "--name", image)
+		nixCmd := r.command(nix, "build", workDir, "--name", image)
 		nixCmd.Stdout, nixCmd.Stderr = logs, logs
 		if err := nixCmd.Run(); err == nil {
 			return image, nil
@@ -72,7 +72,7 @@ func (r *Runtime) buildFromGit(p DeployPayload, logs *logSink) (image string, er
 
 func (r *Runtime) dockerBuild(dir, image string, logs *logSink) error {
 	logs.WriteString("$ " + r.Bin + " build -t " + image + " .\n")
-	cmd := exec.Command(r.Bin, "build", "-t", image, ".")
+	cmd := r.command(r.Bin, "build", "-t", image, ".")
 	cmd.Dir = dir
 	// Stream build output live; the sink accumulates the full text (the
 	// deployment record trims it if huge — see applyTaskResult).
