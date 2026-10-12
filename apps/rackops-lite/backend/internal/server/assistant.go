@@ -42,11 +42,11 @@ func (a *API) handleAssistant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctxJSON := a.fleetContext()
 	org, _ := a.requireOrg(w, r)
 	if org == nil {
 		return
 	}
+	ctxJSON := a.fleetContext(org.ID)
 	s := a.Store.SettingsFor(org.ID)
 	provider := resolveAIProvider(s)
 
@@ -70,11 +70,11 @@ func (a *API) handleAssistant(w http.ResponseWriter, r *http.Request) {
 	case "openai":
 		answer, err = askOpenAI(s.OpenAIKey, s.OpenAIBase, s.OpenAIModel, system, turns)
 	default:
-		answer = a.builtinAssistant(req.Message)
+		answer = a.builtinAssistant(req.Message, org.ID)
 	}
 	if err != nil {
 		// Fall back to the rule engine rather than failing the chat.
-		answer = a.builtinAssistant(req.Message) +
+		answer = a.builtinAssistant(req.Message, org.ID) +
 			"\n\n_(" + provider + " provider error: " + err.Error() + " — answered by the built-in engine)_"
 		provider = "builtin(fallback)"
 	}
@@ -150,8 +150,8 @@ func (a *API) handleAssistantTest(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"ok": true, "provider": provider})
 }
 
-// fleetContext renders a compact JSON snapshot for grounding.
-func (a *API) fleetContext() string {
+// fleetContext renders a compact JSON snapshot for grounding, restricted to orgID.
+func (a *API) fleetContext(orgID string) string {
 	type nodeCtx struct {
 		Name   string   `json:"name"`
 		Status string   `json:"status"`
@@ -174,6 +174,9 @@ func (a *API) fleetContext() string {
 	var alerts []string
 	a.Store.View(func() {
 		for _, n := range a.Store.Nodes {
+			if n.OrgID != orgID {
+				continue
+			}
 			nc := nodeCtx{
 				Name: n.Name, Status: string(n.Status), CPU: n.Hardware.CPUModel,
 				CPUPct: n.Metrics.CPUPct, MemPct: n.Metrics.MemPct, TempC: n.Metrics.TempC,
@@ -187,6 +190,9 @@ func (a *API) fleetContext() string {
 			nodes = append(nodes, nc)
 		}
 		for _, s := range a.Store.Services {
+			if !a.serviceInOrg(s, orgID) {
+				continue
+			}
 			node := s.NodeID
 			if n := a.Store.Nodes[s.NodeID]; n != nil {
 				node = n.Name
@@ -194,7 +200,7 @@ func (a *API) fleetContext() string {
 			svcs = append(svcs, svcCtx{Name: s.Name, Status: string(s.Status), Node: node, Port: s.Port, Domain: s.Domain})
 		}
 		for _, al := range a.Store.Alerts {
-			if !al.Resolved {
+			if !al.Resolved && a.alertInOrg(al, orgID) {
 				alerts = append(alerts, string(al.Level)+": "+al.Message)
 			}
 		}
@@ -203,12 +209,12 @@ func (a *API) fleetContext() string {
 	return string(out)
 }
 
-// builtinAssistant is the zero-config rule engine.
-func (a *API) builtinAssistant(msg string) string {
+// builtinAssistant is the zero-config rule engine scoped to orgID.
+func (a *API) builtinAssistant(msg string, orgID string) string {
 	m := strings.ToLower(msg)
 	switch {
 	case strings.Contains(m, "where") && (strings.Contains(m, "deploy") || strings.Contains(m, "run") || strings.Contains(m, "place")):
-		scores := a.Store.PlaceWorkload(types.PlacementRequest{})
+		scores := a.Store.PlaceWorkload(types.PlacementRequest{OrgID: orgID})
 		if len(scores) == 0 || !scores[0].Viable {
 			return "No viable node right now — check the Alerts page."
 		}
@@ -230,7 +236,9 @@ func (a *API) builtinAssistant(msg string) string {
 		a.Store.View(func() {
 			var ns []*types.Node
 			for _, n := range a.Store.Nodes {
-				ns = append(ns, n)
+				if n.OrgID == orgID {
+					ns = append(ns, n)
+				}
 			}
 			sort.Slice(ns, func(i, j int) bool { return ns[i].Metrics.TempC > ns[j].Metrics.TempC })
 			for _, n := range ns {
@@ -251,7 +259,7 @@ func (a *API) builtinAssistant(msg string) string {
 		var failed []string
 		a.Store.View(func() {
 			for _, s := range a.Store.Services {
-				if s.Status == types.StatusFailed {
+				if a.serviceInOrg(s, orgID) && s.Status == types.StatusFailed {
 					failed = append(failed, s.Name+" (id "+s.ID+")")
 				}
 			}
@@ -265,6 +273,9 @@ func (a *API) builtinAssistant(msg string) string {
 		b.WriteString("Storage state:\n")
 		a.Store.View(func() {
 			for _, n := range a.Store.Nodes {
+				if n.OrgID != orgID {
+					continue
+				}
 				for _, d := range n.Hardware.Drives {
 					pct := 0.0
 					if d.SizeGB > 0 {
@@ -280,20 +291,22 @@ func (a *API) builtinAssistant(msg string) string {
 		a.Store.View(func() {
 			online, total := 0, 0
 			for _, n := range a.Store.Nodes {
-				total++
-				if n.Status == types.NodeOnline {
-					online++
+				if n.OrgID == orgID {
+					total++
+					if n.Status == types.NodeOnline {
+						online++
+					}
 				}
 			}
 			up := 0
 			for _, s := range a.Store.Services {
-				if s.Status == types.StatusRunning {
+				if a.serviceInOrg(s, orgID) && s.Status == types.StatusRunning {
 					up++
 				}
 			}
 			openAlerts := 0
 			for _, al := range a.Store.Alerts {
-				if !al.Resolved {
+				if !al.Resolved && a.alertInOrg(al, orgID) {
 					openAlerts++
 				}
 			}

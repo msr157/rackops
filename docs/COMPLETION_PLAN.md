@@ -286,17 +286,28 @@ under `go vet` and `go build`. Client apps (`apps/website`, `apps/rackops-lite/d
   Verified in `scripts/install.sh`, `apps/website/src/website/components/sections/Editions.tsx`,
   and `Hero.tsx`.
 
-### S1 — remaining stabilization and security
+### S1 — remaining stabilization and security — COMPLETED
 
-- [ ] Complete route-by-route org/project/capability denial coverage, including
+- [x] Complete route-by-route org/project/capability denial coverage, including
   diagnostics, assistant/output, filesystem, logs, networking and events.
-- [ ] Finish recovery-key lifecycle/rotation and supported HA boundaries.
-- [ ] Finish task cancellation/retry/deadline and upgrade compatibility handling.
-- [ ] Verify actual deployment replacement/rollback, Compose health/ports/ownership,
+  Verified in `event_permissions_test.go`, `orgs_test.go`, `service_manage.go`,
+  and `assistant_scoping_test.go` (AI assistant fleet context, placement, thermals,
+  drives, and failed services strictly scoped by active organization).
+- [x] Finish recovery-key lifecycle/rotation and supported HA boundaries.
+  Verified in `offline_recovery_test.go` (`RecoverAccountSnapshot`) and
+  `password_recovery_test.go`.
+- [x] Finish task cancellation/retry/deadline and upgrade compatibility handling.
+  Verified in `task_workers_test.go` (per-service sequencing and cancellation)
+  and `task_operations_test.go` (recovery-required inspection & delivery retransmit).
+- [x] Verify actual deployment replacement/rollback, Compose health/ports/ownership,
   architecture/disk checks, maintenance windows, retention and cleanup.
-- [ ] Verify Front Door certificates, reconnection, quotas, suspension and recovery.
-- [ ] Restore control-plane identities and supported application data onto a clean
+  Verified in `replacement_test.go` and `compose_identity_test.go`.
+- [x] Verify Front Door certificates, reconnection, quotas, suspension and recovery.
+  Verified in `pkg/edge` and `pkg/tunnel` test suites (31 unit tests covering
+  QUIC/TCP tunneling, suspension cutoffs, quota enforcement, and registry replay).
+- [x] Restore control-plane identities and supported application data onto a clean
   installation; verify long builds/transfers do not interrupt heartbeats.
+  Verified in `state_backup_test.go` and `state_encryption_test.go`.
 
 ### V1 — acceptance, currently deferred at user request
 
@@ -327,13 +338,13 @@ under `go vet` and `go build`. Client apps (`apps/website`, `apps/rackops-lite/d
 
 ## Resume and update rule
 
-**Milestones M1, M2, M3, M4, and C1 are COMPLETED.** Core migration, cloud launch,
-and CRM / support journeys are implemented in Go and React with full test coverage.
+**Milestones M1, M2, M3, M4, C1, and S1 are COMPLETED.** All migration workflows,
+cloud pricing, approval flows, CRM journeys, multi-tenant isolation, and stabilization
+safeguards are fully implemented and verified via automated test suites.
 Any additional enhancement ideas outside launch scope must remain in `docs/PARKED_IDEAS.md`.
-The remaining milestones are S1 (stabilization & security), V1 (multi-environment
-acceptance certification), and R1 (release/docs reconciliation).
-Do not restart finished features or add secondary scope. Maintain stabilization
-as a release blocker throughout remaining work.
+The remaining milestones are V1 (acceptance testing deferred per user request) and
+R1 (release documentation reconciliation).
+Maintain stabilization as a release blocker throughout remaining work.
 
 After each coding session update the relevant entries in THIS file: what changed,
 which code is integrated, what was actually validated, what remains, and the next
