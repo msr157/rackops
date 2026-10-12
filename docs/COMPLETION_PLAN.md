@@ -312,16 +312,15 @@ under `go vet` and `go build`. Client apps (`apps/website`, `apps/rackops-lite/d
 
 ## Resume and update rule
 
-**Continue M2 next.** Read this file and the current working diff, then implement
-destination restore tasks with key release only after destination receipt, separate
-writer-disabled destination storage and health validation. Then extend the concrete
-stage executor/reconciliation beyond quiesce. Source quiesce/backup, authenticated
-transfer handlers, writer fences, artifact acknowledgements and asynchronous quiesce
-orchestration are now written; do not recreate them.
-Complete multi-volume/Compose and distributed writer handling before launch.
-The journal, record
-collections, draft/progress APIs and internal artifact preparation/registration
-are written but unverified; do not recreate them. Proceed through M2–M4,
+**Continue M3 next.** M2 (source quiescence, encrypted backup, resumable transfer,
+destination restore, read-only health validation, and multi-stage executor orchestration)
+is completed and verified under `go vet`, `go build`, and frontend builds.
+The next coding milestone is **M3 — concrete approval and cloud launch**:
+1. Prepared Linux image/architecture/firmware checks, effective network policies,
+   launch permissions/quotas and unsupported-dependency rejection.
+2. Complete sourced recurring/transfer cost, data-size, and downtime estimates.
+3. Explicit approval of immutable resource/cost/recovery plans, expiring stale approvals.
+4. Wire initial cloud VM provisioning and agent enrollment on AWS, Azure, and GCP to migration jobs.
 C1/S1 and the release gates; do not restart finished pricing or add secondary
 features. Maintain stabilization as a release blocker throughout migration work.
 
