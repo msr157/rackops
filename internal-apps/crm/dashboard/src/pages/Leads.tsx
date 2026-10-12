@@ -25,18 +25,29 @@ export function LeadsPage() {
     } catch { setError('Could not save status. Please try again.'); }
     finally { setSaving(false); }
   }
+  async function redact(lead: Lead) {
+    if (!window.confirm(`Permanently remove contact details and notes for ${lead.email}? This cannot be undone in Admin. The submission ID is retained to prevent retries restoring the details.`)) return;
+    setSaving(true); setError('');
+    try {
+      await api.redactLead(lead);
+      setLeads(current => current.map(item => item.id === lead.id && item.installId === lead.installId ? { ...item, name: '', email: '', industry: '', notes: '', status: 'redacted' } : item));
+    } catch { setError('Lead changed or removal failed. Refresh the list before trying again.'); }
+    finally { setSaving(false); }
+  }
   return <div className="page">
     <div className="page-title">Enterprise leads</div>
     <p className="page-sub">Enterprise enquiries submitted through RackOps. Contact details are unverified. Changing status does not send an email.</p>
+    <p>Mark unwanted enquiries as spam. For closed or spam leads, remove contact details when your retention policy permits. No automatic deletion is scheduled.</p>
     {error && <p role="alert">{error}</p>}
     {loading ? <p>Loading leads…</p> : !error && leads.length === 0 ? <p>No leads on this page.</p> : <div className="card">
       {leads.map(lead => <article key={`${lead.installId}:${lead.id}`} style={{ padding: 16, borderBottom: '1px solid var(--border)' }}>
-        <strong>{lead.name}</strong> · {lead.email}
+        <strong>{lead.status === 'redacted' ? 'Contact details removed' : lead.name}</strong> · {lead.email}
         <p>{lead.industry} · Received {new Date(lead.receivedAt).toLocaleString()}</p>
         <p style={{ whiteSpace: 'pre-wrap' }}>{lead.notes}</p>
-        <label>Status <select aria-label={`Status for ${lead.email}`} value={lead.status} disabled={saving} onChange={event => void update(lead, event.target.value)}>
-          {['new', 'contacted', 'qualified', 'closed'].map(status => <option key={status} value={status}>{status}</option>)}
+        <label>Status <select aria-label={`Status for ${lead.email || lead.id}`} value={lead.status} disabled={saving || lead.status === 'redacted'} onChange={event => void update(lead, event.target.value)}>
+          {['new', 'contacted', 'qualified', 'closed', 'spam', ...(lead.status === 'redacted' ? ['redacted'] : [])].map(status => <option key={status} value={status}>{status}</option>)}
         </select></label>
+        {(lead.status === 'closed' || lead.status === 'spam') && <button className="btn" disabled={saving} onClick={() => void redact(lead)}>Remove contact details</button>}
       </article>)}
     </div>}
     <div className="row" style={{ marginTop: 16, gap: 12 }}>

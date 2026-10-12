@@ -5,6 +5,8 @@ import { useConfirm } from './confirm';
 import { AWSMachinePreflight } from './AWSMachinePreflight';
 import { GCPMachinePreflight } from './GCPMachinePreflight';
 import { AzureMachinePreflight } from './AzureMachinePreflight';
+import { SavedCloudPlans } from './SavedCloudPlans';
+import { CloudRecovery } from './CloudRecovery';
 
 export function CloudConnections() {
   const [connections, setConnections] = useState<CloudConnection[]>([]);
@@ -73,5 +75,7 @@ export function CloudConnections() {
       {connection.provider === 'gcp' && <GCPMachinePreflight connection={connection} />}
       {connection.provider === 'azure' && <AzureMachinePreflight connection={connection} />}
     </article>)}
+    <SavedCloudPlans />
+    <CloudRecovery />
   </section>;
 }

@@ -278,6 +278,7 @@ func runServer(args []string) {
 	go api.RunDomainVerifier()
 	// Support sync: retries CRM forwards, polls for support-agent replies.
 	go api.RunSupportSync()
+	go api.RunCloudRecovery()
 
 	log.Printf("rackops server v%s listening on %s", version, *listen)
 	log.Printf("join token: %s", token)

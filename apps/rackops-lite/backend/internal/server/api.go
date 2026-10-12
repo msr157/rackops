@@ -21,16 +21,26 @@ import (
 
 // API is the control plane HTTP server.
 type API struct {
-	nodeEnrollmentMu   sync.Mutex
-	cloudIdentityCheck func(context.Context, string, string, json.RawMessage) (cloud.Identity, error)
-	cloudOperationMu   sync.Mutex
-	awsIdentityCheck   func(context.Context, string, cloud.AWSCredentials) (cloud.Identity, error)
-	awsMachineCheck    func(context.Context, string, cloud.AWSCredentials, cloud.AWSMachineSpec, string) (cloud.MachineInspection, error)
-	cloudMachineCheck  func(context.Context, string, string, json.RawMessage, cloud.MachineSpec, string) (cloud.MachineInspection, error)
-	deliveryMu         sync.Mutex
-	resetDeliveryMu    sync.Mutex
-	Store              *Store
-	Hub                *Hub
+	azureComputeQuote     func(context.Context, string, string) (cloud.ComputeQuote, error)
+	awsComputeQuote       func(context.Context, string, string, cloud.AWSCredentials) (cloud.ComputeQuote, error)
+	gcpComputeQuote       func(context.Context, string, string, cloud.GCPCredentials, cloud.MachineInspection) (cloud.ComputeQuote, error)
+	nodeEnrollmentMu      sync.Mutex
+	cloudIdentityCheck    func(context.Context, string, string, json.RawMessage) (cloud.Identity, error)
+	cloudOperationMu      sync.Mutex
+	migrationMu           sync.Mutex
+	migrationTransferMu   sync.Mutex
+	cloudRecoveryMu       sync.Mutex
+	cloudRecoveryProvider func(context.Context, string, string, json.RawMessage) (cloud.Provider, error)
+	awsIdentityCheck      func(context.Context, string, cloud.AWSCredentials) (cloud.Identity, error)
+	awsMachineCheck       func(context.Context, string, cloud.AWSCredentials, cloud.AWSMachineSpec, string) (cloud.MachineInspection, error)
+	cloudMachineCheck     func(context.Context, string, string, json.RawMessage, cloud.MachineSpec, string) (cloud.MachineInspection, error)
+	awsDiskQuote          func(context.Context, string, int64, cloud.AWSCredentials) (cloud.DiskQuote, error)
+	azureDiskQuote        func(context.Context, string, int64) (cloud.DiskQuote, error)
+	gcpDiskQuote          func(context.Context, string, int64, cloud.GCPCredentials) (cloud.DiskQuote, error)
+	deliveryMu            sync.Mutex
+	resetDeliveryMu       sync.Mutex
+	Store                 *Store
+	Hub                   *Hub
 	// History records downsampled metric rings for charts and deltas
 	// (nil = endpoints answer with empty series; ingest skips recording).
 	History *History

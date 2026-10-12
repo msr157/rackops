@@ -6,6 +6,8 @@ import (
 	"crypto/subtle"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -86,29 +88,40 @@ func (s *Store) CheckPollSecret(id, installID, secret string) (bool, bool, error
 }
 
 // UpsertTicket creates or updates a forwarded ticket and merges its
-// messages by id. On first create it returns the newly minted poll secret;
+// messages by id. On first create it preserves a validated client credential
+// or mints one for legacy clients. Authorization is checked in the transaction;
 // on update it returns "" (the instance already holds it).
 //
 // Behavior on update: subject/category/severity/email refresh from the
 // instance, but status is only forced back to "open" when the forward adds a
 // new customer message — resolving/pending are agent-side decisions.
-func (s *Store) UpsertTicket(t *Ticket, now time.Time) (pollSecret string, created bool, err error) {
-	existingHash, err := s.ticketPollHash(t.ID, t.InstallID)
-	if err != nil {
-		return "", false, err
-	}
-	created = existingHash == ""
+var errTicketCredential = errors.New("invalid ticket credential")
 
+func (s *Store) UpsertTicket(t *Ticket, now time.Time, presentedSecret string) (pollSecret string, created bool, err error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return "", false, err
 	}
 	defer tx.Rollback()
+	var existingHash string
+	err = tx.QueryRow(`SELECT poll_secret_hash FROM tickets WHERE id = ? AND install_id = ?`, t.ID, t.InstallID).Scan(&existingHash)
+	if err != nil && err != sql.ErrNoRows {
+		return "", false, err
+	}
+	created = err == sql.ErrNoRows
+	if !created && subtle.ConstantTimeCompare([]byte(existingHash), []byte(hashSecret(presentedSecret))) != 1 {
+		return "", false, errTicketCredential
+	}
 
 	if created {
-		pollSecret, err = newPollSecret()
-		if err != nil {
-			return "", false, err
+		pollSecret = presentedSecret
+		if pollSecret == "" {
+			pollSecret, err = newPollSecret()
+			if err != nil {
+				return "", false, err
+			}
+		} else if !clientPollSecret.MatchString(pollSecret) {
+			return "", false, errTicketCredential
 		}
 		status := t.Status
 		if !validStatuses[status] || status == "" {
@@ -222,6 +235,59 @@ func (s *Store) AgentRepliesSince(ticketID, installID string, since time.Time) (
 		return "", nil, err
 	}
 	return status, msgs, nil
+}
+
+// AgentRepliesPage uses persisted insertion sequence, never message timestamps.
+var errReplyTooLarge = errors.New("historical reply exceeds delivery limit")
+
+// Late/backdated replies are therefore visible and internal notes stay private.
+func (s *Store) AgentRepliesPage(ticketID, installID string, after int64) (string, []TicketMessage, int64, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return "", nil, after, err
+	}
+	defer tx.Rollback()
+	var status string
+	if err := tx.QueryRow(`SELECT status FROM tickets WHERE id = ? AND install_id = ?`, ticketID, installID).Scan(&status); err != nil {
+		return "", nil, after, err
+	}
+	rows, err := tx.Query(`SELECT d.sequence, m.id, m.author, m.name, m.body, m.at
+ FROM ticket_message_delivery d JOIN ticket_messages m
+ ON m.id = d.message_id AND m.ticket_id = d.ticket_id AND m.install_id = d.install_id
+ WHERE d.ticket_id = ? AND d.install_id = ? AND d.sequence > ? AND m.author = 'agent'
+ ORDER BY d.sequence LIMIT 100`, ticketID, installID, after)
+	if err != nil {
+		return "", nil, after, err
+	}
+	defer rows.Close()
+	messages := []TicketMessage{}
+	encodedSize := 0
+	for rows.Next() {
+		var m TicketMessage
+		var sequence int64
+		if err := rows.Scan(&sequence, &m.ID, &m.Author, &m.Name, &m.Body, &m.At); err != nil {
+			return "", nil, after, err
+		}
+		// Including author makes this conservative relative to the public wire
+		// representation. Leave ample room for the response envelope.
+		raw, err := json.Marshal(m)
+		if err != nil {
+			return "", nil, after, err
+		}
+		if encodedSize+len(raw)+1 > 6<<20 {
+			if len(messages) == 0 {
+				return "", nil, after, errReplyTooLarge
+			}
+			break
+		}
+		encodedSize += len(raw) + 1
+		after = sequence
+		messages = append(messages, m)
+	}
+	if err := rows.Err(); err != nil {
+		return "", nil, after, err
+	}
+	return status, messages, after, nil
 }
 
 // AddMessage appends an agent reply or internal note from the dashboard.

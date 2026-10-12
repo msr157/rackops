@@ -71,6 +71,7 @@ func (a *API) handleResolveServiceOperation(w http.ResponseWriter, r *http.Reque
 // retransmission always carries the same ID; the agent journals execution.
 // Terminal records are tombstones and deliberately retain no task payload.
 type TaskOperation struct {
+	Outcome      string          `json:"outcome,omitempty"`
 	Task         types.AgentTask `json:"task"`
 	NodeID       string          `json:"nodeId"`
 	State        string          `json:"state"`
@@ -119,10 +120,12 @@ func (s *Store) deliverTasks(nodeID string, slots int, now time.Time) ([]types.A
 // forged service ID. Caller serializes result processing with deliveryMu.
 func (a *API) acceptTaskResult(nodeID string, result types.TaskResult) bool {
 	var found, done bool
+	var assigned types.AgentTask
 	a.Store.View(func() {
 		op := a.Store.TaskOperations[result.TaskID]
 		if op != nil && op.NodeID == nodeID && op.Task.ServiceID == result.ServiceID {
 			found, done = true, op.State == "completed" || op.State == "recovery_required"
+			assigned = op.Task
 		}
 	})
 	if !found {
@@ -131,13 +134,46 @@ func (a *API) acceptTaskResult(nodeID string, result types.TaskResult) bool {
 	if done {
 		return true
 	}
+	if assigned.Kind == types.TaskMigrationBackup && result.OK && !result.Uncertain {
+		var expected types.MigrationTaskPayload
+		artifact := result.MigrationArtifact
+		if json.Unmarshal([]byte(assigned.Payload), &expected) != nil || artifact == nil || artifact.JobID != expected.JobID || artifact.ArtifactID != expected.ArtifactID {
+			return false
+		}
+		if err := a.registerMigrationArtifactResult(nodeID, assigned.ServiceID, artifact); err != nil {
+			return false
+		}
+	}
+	if (assigned.Kind == types.TaskMigrationTransferSource || assigned.Kind == types.TaskMigrationTransferDestination) && result.OK && !result.Uncertain {
+		transfer := result.MigrationTransfer
+		if transfer == nil || transfer.JobID == "" || transfer.ArtifactID == "" || a.registerMigrationTransferResult(nodeID, assigned, transfer) != nil {
+			return false
+		}
+	}
+	if assigned.Kind == types.TaskMigrationRestore && result.OK && !result.Uncertain {
+		var payload types.MigrationTaskPayload
+		if json.Unmarshal([]byte(assigned.Payload), &payload) != nil || payload.JobID == "" || payload.ArtifactID == "" || a.registerMigrationRestoreResult(nodeID, payload.JobID, payload.ArtifactID) != nil {
+			return false
+		}
+	}
+	if assigned.Kind == types.TaskMigrationValidate && result.OK && !result.Uncertain {
+		var payload types.MigrationTaskPayload
+		if json.Unmarshal([]byte(assigned.Payload), &payload) != nil || payload.JobID == "" || payload.ArtifactID == "" || a.registerMigrationValidateResult(nodeID, payload.JobID, payload.ArtifactID) != nil {
+			return false
+		}
+	}
 	a.applyTaskResult(nodeID, result)
 	var changed *types.Service
 	a.Store.Mutate(func() {
 		op := a.Store.TaskOperations[result.TaskID]
 		op.State = "completed"
+		op.Outcome = "failed"
+		if result.OK {
+			op.Outcome = "succeeded"
+		}
 		if result.Uncertain {
 			op.State = "recovery_required"
+			op.Outcome = "uncertain"
 		}
 		op.Task.Payload = ""
 		// Compose containers do not yet supply per-service inventory labels.
@@ -169,6 +205,18 @@ func (a *API) acceptTaskResult(nodeID string, result types.TaskResult) bool {
 // Caller holds the store lock. Automated reconciliation must not issue a new
 // operation while the prior one is running or needs human reconciliation.
 func (s *Store) taskBlocksHealing(nodeID, serviceID string) bool {
+	for _, record := range s.MigrationJobs {
+		if record.Job.Status == "completed" {
+			continue
+		}
+		if plan := s.MigrationPlans[record.Job.PlanID]; plan != nil {
+			for _, source := range plan.Workloads {
+				if source.ID == serviceID && source.NodeID == nodeID {
+					return true
+				}
+			}
+		}
+	}
 	for _, op := range s.TaskOperations {
 		if op.NodeID == nodeID && op.Task.ServiceID == serviceID && (op.State == "delivered" || op.State == "recovery_required") {
 			return true

@@ -109,7 +109,15 @@ func (w *taskWorkers) run(ctx context.Context) {
 			}
 		}
 		w.signal() // allow the other worker to dispatch a different service
-		jobCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+		deadline := 30 * time.Minute
+		// Backup/transfer actions run in a dedicated worker and remain subject to
+		// per-service ordering, while reporting continues on the agent loop.
+		// A short deadline would turn a healthy multi-hour transfer into an
+		// uncertain write after its source has already been quiesced.
+		if task.Kind == types.TaskMigrationBackup || task.Kind == types.TaskMigrationTransferSource || task.Kind == types.TaskMigrationTransferDestination || task.Kind == types.TaskMigrationRestore || task.Kind == types.TaskMigrationValidate {
+			deadline = 24 * time.Hour
+		}
+		jobCtx, cancel := context.WithTimeout(ctx, deadline)
 		var result *types.TaskResult
 		if task.Kind == types.TaskLogsFollow {
 			// A log follow outlives its dispatch task and belongs to the agent.

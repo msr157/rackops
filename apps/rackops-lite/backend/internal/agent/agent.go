@@ -317,6 +317,13 @@ func (a *Agent) push(rep types.AgentReport) (*types.AgentResponse, error) {
 func (a *Agent) execute(ctx context.Context, task types.AgentTask) *types.TaskResult {
 	log.Printf("agent: executing task %s (%s) for service %s", task.ID, task.Kind, task.ServiceID)
 	res := types.TaskResult{TaskID: task.ID, ServiceID: task.ServiceID}
+	if task.Kind == types.TaskDeploy || task.Kind == types.TaskStart || task.Kind == types.TaskRestart || task.Kind == types.TaskRemove {
+		if a.migrationFenced(task.ServiceID) {
+			res.Log = "service is fenced for migration; explicit migration recovery is required"
+			res.Uncertain = true
+			return &res
+		}
+	}
 	var p DeployPayload
 	if task.Payload != "" {
 		if err := json.Unmarshal([]byte(task.Payload), &p); err != nil {
@@ -333,6 +340,8 @@ func (a *Agent) execute(ctx context.Context, task types.AgentTask) *types.TaskRe
 	case types.TaskLogsStop:
 		a.stopFollow(p.ServiceID, p.StreamID)
 		return nil
+	case types.TaskMigrationTransferSource, types.TaskMigrationTransferDestination:
+		return a.executeMigrationTransferTask(ctx, task)
 	}
 
 	if a.runtime == nil {
@@ -341,6 +350,9 @@ func (a *Agent) execute(ctx context.Context, task types.AgentTask) *types.TaskRe
 	}
 	runtime := *a.runtime
 	runtime.ctx = ctx
+	if task.Kind == types.TaskMigrationQuiesce || task.Kind == types.TaskMigrationBackup || task.Kind == types.TaskMigrationRestore || task.Kind == types.TaskMigrationValidate {
+		return a.executeMigrationTask(ctx, &runtime, task)
+	}
 	if p.ComposeYML != "" && (task.Kind == types.TaskStart || task.Kind == types.TaskStop || task.Kind == types.TaskRestart) {
 		out, err := runtime.composeAction(p, string(task.Kind))
 		res.Log, res.OK = out, err == nil

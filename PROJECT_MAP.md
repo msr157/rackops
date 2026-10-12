@@ -1,7 +1,7 @@
 # RackOps — Project Map
 
-> Historical reference. Use [product context](docs/PRODUCT_CONTEXT.md) and
-> [the delivery ledger](docs/STABILIZATION.md) for current scope and verification.
+> Historical reference. Use [the single completion plan](docs/COMPLETION_PLAN.md)
+> for current scope, implementation status and remaining work.
 > Production's tree was imported into main in 1b7306a; 9f14a6f links the histories.
 
 > Complete codebase knowledge dump, generated from a full-repo deep read on 2026-07-15

@@ -52,6 +52,8 @@ func main() {
 		runServe(os.Args[2:])
 	case "version":
 		fmt.Println("rackops-admin", version)
+	case "export-reply":
+		runExportReply(os.Args[2:])
 	default:
 		usage()
 		os.Exit(1)
@@ -64,6 +66,8 @@ func usage() {
 Usage:
   rackops-admin serve [flags]    Run the console (and the tunnel edge)
   rackops-admin version          Print version
+  rackops-admin export-reply --data-dir PATH --install ID --ticket ID --message ID --output FILE
+                                Export one agent reply locally without changing delivery
 
 Console flags:
   --listen :8091                 Console + ingest API address
@@ -94,6 +98,23 @@ func defaultDataDir() string {
 		return ".rackops-admin"
 	}
 	return filepath.Join(home, ".rackops-admin")
+}
+
+func runExportReply(args []string) {
+	fs := flag.NewFlagSet("export-reply", flag.ExitOnError)
+	dir := fs.String("data-dir", defaultDataDir(), "existing Admin state directory")
+	install := fs.String("install", "", "exact install ID")
+	ticket := fs.String("ticket", "", "exact ticket ID")
+	message := fs.String("message", "", "exact agent reply ID")
+	output := fs.String("output", "", "new private output file; refuses overwrite")
+	_ = fs.Parse(args)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	digest, err := server.ExportAgentReply(ctx, *dir, *install, *ticket, *message, *output)
+	if err != nil {
+		log.Fatalf("reply export: %v", err)
+	}
+	fmt.Printf("Reply body exported. SHA-256: %s\nOriginal and delivery state unchanged.\n", digest)
 }
 
 func runServe(args []string) {

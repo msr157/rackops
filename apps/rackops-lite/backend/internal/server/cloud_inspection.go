@@ -22,6 +22,10 @@ func (a *API) inspectAWSMachine(ctx context.Context, region string, credentials 
 }
 
 func (a *API) handleCloudMachinePreflight(w http.ResponseWriter, r *http.Request) {
+	a.handleCloudMachineReview(w, r, false)
+}
+
+func (a *API) handleCloudMachineReview(w http.ResponseWriter, r *http.Request, save bool) {
 	org := a.cloudOrg(w, r)
 	if org == nil {
 		return
@@ -90,6 +94,44 @@ func (a *API) handleCloudMachinePreflight(w http.ResponseWriter, r *http.Request
 		return
 	}
 	review.CanLaunch = false
+	if save {
+		a.cloudOperationMu.Lock()
+		defer a.cloudOperationMu.Unlock()
+		now := time.Now().UTC()
+		review.MonthlyCostEstimate = nil
+		plan := CloudReviewPlan{ID: req.Spec.ID(), OrgID: org.ID, ConnectionID: connection.ID, Provider: connection.Provider, AccountID: connection.AccountID, Region: connection.Region, Architecture: req.Architecture, Spec: req.Spec, Inspection: review, CreatedAt: now, ExpiresAt: now.Add(30 * time.Minute), Status: "blocked", Blockers: []string{"Verified recurring and transfer costs are unavailable.", "Prepared-image, network reachability and launch acceptance checks remain incomplete.", "Approval and initial provisioning are not enabled."}}
+		conflict := false
+		a.Store.Mutate(func() {
+			c := a.Store.CloudConnections[connection.ID]
+			if c == nil || c.OrgID != org.ID || c.AccountID != connection.AccountID || c.Principal != connection.Principal {
+				conflict = true
+				return
+			}
+			if old := a.Store.CloudReviewPlans[plan.ID]; old != nil {
+				if old.OrgID != plan.OrgID || old.ConnectionID != plan.ConnectionID || old.Spec.Fingerprint() != plan.Spec.Fingerprint() || old.Architecture != plan.Architecture {
+					conflict = true
+					return
+				}
+				plan = *old
+				return
+			}
+			if a.Store.CloudReviewPlans == nil {
+				a.Store.CloudReviewPlans = map[string]*CloudReviewPlan{}
+			}
+			a.Store.CloudReviewPlans[plan.ID] = &plan
+		})
+		if conflict {
+			http.Error(w, "plan identity changed or connection unavailable; create a new review", 409)
+			return
+		}
+		if err := a.Store.persistOnce(); err != nil {
+			http.Error(w, "could not persist review; retry with the same operation ID", 503)
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		writeJSON(w, plan)
+		return
+	}
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, review)
 }

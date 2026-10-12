@@ -119,6 +119,7 @@ func (a *API) handleTicketNote(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) addTicketMessage(w http.ResponseWriter, r *http.Request, author, name string) {
+	r.Body = http.MaxBytesReader(w, r.Body, 128<<10)
 	t := a.adminTicket(w, r)
 	if t == nil {
 		return
@@ -131,6 +132,10 @@ func (a *API) addTicketMessage(w http.ResponseWriter, r *http.Request, author, n
 	}
 	if strings.TrimSpace(req.Body) == "" {
 		writeError(w, http.StatusBadRequest, "body is required")
+		return
+	}
+	if len(req.Body) > 16<<10 {
+		writeError(w, http.StatusBadRequest, "message must be at most 16 KiB")
 		return
 	}
 	msg := TicketMessage{ID: newID(), Author: author, Name: name, Body: req.Body, At: time.Now()}

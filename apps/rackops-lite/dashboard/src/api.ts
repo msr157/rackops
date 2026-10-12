@@ -1,4 +1,10 @@
 // Shared API types mirrored from the Go backend.
+export interface CloudOperation {
+  id: string; provider: string; region: string; state: string;
+  resourceId?: string; operationId?: string; message: string;
+  recoveryState?: string; recoveryMessage?: string; recoveryTotalAttempts: number;
+}
+
 export interface AWSMachineSpec {
   operationId: string; imageId: string; instanceType: string; subnetId: string;
   securityGroupId: string; rootDevice: string; diskGb: number;
@@ -12,6 +18,8 @@ export interface AzureMachineSpec {
   imageId: string; networkInterfaceId: string; sshPublicKey: string; diskGb: number;
 }
 export interface MachineInspection {
+  savedPlanId?: string;
+  expiresAt?: string;
   provider: string; region: string; specFingerprint: string; checkedAt: string;
   architecture: string; vcpus: number; memoryMb: number; zone: string; minimumDiskGb: number;
   resourceCompatible: boolean; canLaunch: boolean; monthlyCostEstimate: number | null;
@@ -20,6 +28,29 @@ export interface MachineInspection {
 export interface CloudConnection {
   id: string; orgId: string; name: string; provider: string; region: string;
   accountId: string; principal: string; validatedAt: string;
+}
+
+export interface CloudReviewPlan {
+  computeQuote?: ComputeQuote;
+  diskQuote?: DiskQuote;
+  id: string; connectionId: string; provider: string; region: string; accountId: string;
+  architecture: string; createdAt: string; expiresAt: string; status: string;
+  canApprove: boolean; monthlyCost: number | null; transferCost: number | null;
+  downtimeSeconds: number | null; blockers: string[];
+  inspection: MachineInspection;
+  spec: { aws?: AWSMachineSpec; azure?: AzureMachineSpec; gcp?: GCPMachineSpec };
+}
+
+export interface DiskQuote {
+  provider: string; region: string; diskType: string; diskGb: number;
+  currency: string; monthly: number; perGbMonth: number; meterId: string;
+  source: string; retrievedAt: string; expiresAt: string; exclusions: string[];
+}
+
+export interface ComputeQuote {
+  currency: string; hourly: number; monthly: number; hoursPerMonth: number;
+  source: string; meterId: string; retrievedAt: string; effectiveAt: string;
+  expiresAt: string; exclusions: string[];
 }
 export interface MigrationReview {
   serviceId: string; provider: string; region: string; architecture: string;
@@ -156,6 +187,10 @@ export interface Invitation {
 }
 export interface TicketMessage { id: string; author: 'user' | 'agent'; name: string; body: string; at: string }
 export interface SupportTicket {
+  forwardPending?: boolean;
+  deliveryError?: string;
+  resolutionPending?: boolean;
+  replySyncError?: string;
   id: string; subject: string; category: string; severity: string;
   status: 'open' | 'pending' | 'resolved'; email: string; createdBy: string;
   createdAt: string; updatedAt: string; messages: TicketMessage[];
@@ -214,11 +249,16 @@ export interface MetricsHistory {
 }
 
 export const api = {
+  cloudReviewPlans: () => req<CloudReviewPlan[]>('/api/cloud-plans'),
+  quoteCloudCompute: (id: string) => req<ComputeQuote>(`/api/cloud-plans/${encodeURIComponent(id)}/compute-estimate`, { method: 'POST' }),
+  quoteCloudDisk: (id: string) => req<DiskQuote>(`/api/cloud-plans/${encodeURIComponent(id)}/disk-estimate`, { method: 'POST' }),
   createCloudConnection: (name: string, provider: string, region: string, credentials: Record<string, string>) => req<CloudConnection>('/api/cloud-connections', { method: 'POST', body: JSON.stringify({ name, provider, region, credentials }) }),
+  cloudOperations: () => req<CloudOperation[]>('/api/cloud-operations'),
+  controlCloudRecovery: (id: string, action: 'pause' | 'resume') => req<CloudOperation>(`/api/cloud-operations/${encodeURIComponent(id)}/recovery`, { method: 'POST', body: JSON.stringify({ action }) }),
   cloudConnections: () => req<CloudConnection[]>('/api/cloud-connections'),
-  inspectAWSMachine: (id: string, spec: AWSMachineSpec, architecture: string) => req<MachineInspection>(`/api/cloud-connections/${encodeURIComponent(id)}/machine-preflight`, { method: 'POST', body: JSON.stringify({ spec: { aws: spec }, architecture }) }),
-  inspectGCPMachine: (id: string, spec: GCPMachineSpec, architecture: string) => req<MachineInspection>(`/api/cloud-connections/${encodeURIComponent(id)}/machine-preflight`, { method: 'POST', body: JSON.stringify({ spec: { gcp: spec }, architecture }) }),
-  inspectAzureMachine: (id: string, spec: AzureMachineSpec, architecture: string) => req<MachineInspection>(`/api/cloud-connections/${encodeURIComponent(id)}/machine-preflight`, { method: 'POST', body: JSON.stringify({ spec: { azure: spec }, architecture }) }),
+  inspectAWSMachine: (id: string, spec: AWSMachineSpec, architecture: string) => req<{ id: string; expiresAt: string; inspection: MachineInspection }>(`/api/cloud-connections/${encodeURIComponent(id)}/plans`, { method: 'POST', body: JSON.stringify({ spec: { aws: spec }, architecture }) }).then(plan => ({ ...plan.inspection, savedPlanId: plan.id, expiresAt: plan.expiresAt })),
+  inspectGCPMachine: (id: string, spec: GCPMachineSpec, architecture: string) => req<{ id: string; expiresAt: string; inspection: MachineInspection }>(`/api/cloud-connections/${encodeURIComponent(id)}/plans`, { method: 'POST', body: JSON.stringify({ spec: { gcp: spec }, architecture }) }).then(plan => ({ ...plan.inspection, savedPlanId: plan.id, expiresAt: plan.expiresAt })),
+  inspectAzureMachine: (id: string, spec: AzureMachineSpec, architecture: string) => req<{ id: string; expiresAt: string; inspection: MachineInspection }>(`/api/cloud-connections/${encodeURIComponent(id)}/plans`, { method: 'POST', body: JSON.stringify({ spec: { azure: spec }, architecture }) }).then(plan => ({ ...plan.inspection, savedPlanId: plan.id, expiresAt: plan.expiresAt })),
   createAWSConnection: (name: string, region: string, credentials: { accessKeyId: string; secretAccessKey: string; sessionToken: string }) => req<CloudConnection>('/api/cloud-connections', { method: 'POST', body: JSON.stringify({ name, provider: 'aws', region, credentials }) }),
   validateCloudConnection: (id: string) => req<CloudConnection>(`/api/cloud-connections/${encodeURIComponent(id)}/validate`, { method: 'POST' }),
   deleteCloudConnection: (id: string) => req<void>(`/api/cloud-connections/${encodeURIComponent(id)}`, { method: 'DELETE' }),

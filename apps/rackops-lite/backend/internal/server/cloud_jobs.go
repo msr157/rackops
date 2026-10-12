@@ -11,20 +11,26 @@ import (
 // Internal until enrollment and the concrete resource/cost confirmation flow
 // are available. Provider-ready never means the application passed validation.
 type CloudProvisioning struct {
-	BootstrapConfig *cloud.BootstrapConfig `json:"bootstrapConfig,omitempty"`
-	SealedBootstrap []byte                 `json:"sealedBootstrap,omitempty"`
-	EnrollmentHash  string                 `json:"enrollmentHash,omitempty"`
-	ID              string                 `json:"id"`
-	OrgID           string                 `json:"orgId"`
-	ConnectionID    string                 `json:"connectionId"`
-	Provider        string                 `json:"provider"`
-	Region          string                 `json:"region"`
-	AccountID       string                 `json:"accountId"`
-	Spec            cloud.MachineSpec      `json:"spec"`
-	State           string                 `json:"state"`
-	Receipt         cloud.Receipt          `json:"receipt"`
-	CreatedAt       time.Time              `json:"createdAt"`
-	UpdatedAt       time.Time              `json:"updatedAt"`
+	BootstrapConfig          *cloud.BootstrapConfig `json:"bootstrapConfig,omitempty"`
+	SealedBootstrap          []byte                 `json:"sealedBootstrap,omitempty"`
+	EnrollmentHash           string                 `json:"enrollmentHash,omitempty"`
+	ID                       string                 `json:"id"`
+	OrgID                    string                 `json:"orgId"`
+	ConnectionID             string                 `json:"connectionId"`
+	Provider                 string                 `json:"provider"`
+	Region                   string                 `json:"region"`
+	AccountID                string                 `json:"accountId"`
+	Spec                     cloud.MachineSpec      `json:"spec"`
+	State                    string                 `json:"state"`
+	Receipt                  cloud.Receipt          `json:"receipt"`
+	CreatedAt                time.Time              `json:"createdAt"`
+	UpdatedAt                time.Time              `json:"updatedAt"`
+	RecoveryAttempts         int                    `json:"recoveryAttempts,omitempty"`
+	RecoveryWindowStartedAt  time.Time              `json:"recoveryWindowStartedAt,omitempty"`
+	RecoveryPreviousAttempts int                    `json:"recoveryPreviousAttempts,omitempty"`
+	RecoveryNextAt           time.Time              `json:"recoveryNextAt,omitempty"`
+	RecoveryState            string                 `json:"recoveryState,omitempty"`
+	RecoveryMessage          string                 `json:"recoveryMessage,omitempty"`
 }
 
 func (a *API) saveCloudProvisioning(job CloudProvisioning) error {
@@ -62,6 +68,12 @@ func (a *API) saveCloudProvisioning(job CloudProvisioning) error {
 		job.SealedBootstrap = nil
 		job.EnrollmentHash = ""
 		job.Receipt = cloud.Receipt{}
+		job.RecoveryAttempts = 0
+		job.RecoveryWindowStartedAt = time.Time{}
+		job.RecoveryPreviousAttempts = 0
+		job.RecoveryNextAt = time.Time{}
+		job.RecoveryState = ""
+		job.RecoveryMessage = ""
 		job.CreatedAt = time.Now().UTC()
 		job.UpdatedAt = job.CreatedAt
 		if a.Store.CloudProvisioning == nil {
@@ -78,6 +90,11 @@ func (a *API) saveCloudProvisioning(job CloudProvisioning) error {
 func (a *API) runCloudProvisioning(ctx context.Context, orgID, id string, p cloud.Provider) error {
 	a.cloudOperationMu.Lock()
 	defer a.cloudOperationMu.Unlock()
+	return a.runCloudProvisioningLocked(ctx, orgID, id, p)
+}
+
+// Caller holds cloudOperationMu across connection selection and execution.
+func (a *API) runCloudProvisioningLocked(ctx context.Context, orgID, id string, p cloud.Provider) error {
 	if a.Cluster != nil {
 		return errors.New("cloud provisioning requires a single server")
 	}

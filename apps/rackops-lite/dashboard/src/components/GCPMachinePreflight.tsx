@@ -30,11 +30,12 @@ export function GCPMachinePreflight({ connection }: { connection: CloudConnectio
         <label>Subnet name<input className="input" required value={subnet} onChange={e => { setSubnet(e.target.value); changed(); }} /></label>
         <label>Architecture<select className="input" value={architecture} onChange={e => { setArchitecture(e.target.value); changed(); }}><option value="amd64">amd64 (x86-64)</option><option value="arm64">arm64</option></select></label>
         <label>Root disk size (GB)<input className="input" required type="number" min={10} max={65536} step={1} value={disk || ''} onChange={e => { setDisk(Number(e.target.value)); changed(); }} /></label>
-        <button className="btn" type="submit">{busy ? 'Inspecting resources…' : 'Check selected resources'}</button>
+        <button className="btn" type="submit">{busy ? 'Inspecting resources…' : 'Check and save resource review'}</button>
       </fieldset>
     </form>
     {error && <p role="alert">{error}</p>}
     {review && <div aria-live="polite">
+      <p>Saved review {review.savedPlanId}. Expires {review.expiresAt ? new Date(review.expiresAt).toLocaleString() : 'unknown'}. This is not launch approval.</p>
       <p><strong>{review.resourceCompatible ? 'Selected metadata checks passed' : 'Resource compatibility issues found'}</strong></p>
       <p>{review.vcpus || 'Unknown'} vCPUs · {review.memoryMb || 'Unknown'} MB RAM · {review.zone} · {review.architecture}</p>
       {!!review.blockers.length && <ul>{review.blockers.map(item => <li key={item.code}>{item.message}</li>)}</ul>}

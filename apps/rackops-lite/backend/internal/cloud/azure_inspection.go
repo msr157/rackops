@@ -38,35 +38,41 @@ func (p *Azure) InspectMachine(ctx context.Context, s AzureMachineSpec, architec
 		"Obtain recurring and transfer cost estimates and approve the final resource plan before launch.",
 	}}
 	add := func(code, message string) { out.Blockers = append(out.Blockers, InspectionFinding{code, message}) }
-	imageParts := strings.Split(s.ImageID, "/")
-	img, err := p.images.Get(ctx, imageParts[4], imageParts[8], nil)
-	if err != nil {
-		return MachineInspection{}, err
-	}
-	if !strings.EqualFold(azureValue(img.ID), s.ImageID) || !strings.EqualFold(azureValue(img.Location), p.region) || img.Properties == nil {
-		return MachineInspection{}, errors.New("Azure image identity or location does not match the selection")
-	}
-	if azureValue(img.Properties.ProvisioningState) != "Succeeded" {
-		add("image_unavailable", "The selected image has not finished provisioning.")
-	}
-	// The managed-image model does not carry a CPU architecture assertion. Do
-	// not infer architecture from image names, tags or a mutable source VM.
-	add("image_architecture_unverified", "The managed image's CPU architecture must be verified before this plan can launch.")
-	storage := img.Properties.StorageProfile
-	if storage == nil || storage.OSDisk == nil {
-		add("image_storage", "Image OS disk metadata is missing.")
+	if validAzureGalleryVersion(s.ImageID, s.SubscriptionID) {
+		if err := p.inspectGalleryImage(ctx, s, architecture, &out); err != nil {
+			return MachineInspection{}, err
+		}
 	} else {
-		if azureValue(storage.OSDisk.OSType) != "Linux" || azureValue(storage.OSDisk.OSState) != "Generalized" {
-			add("image_os", "Select a generalized Linux image.")
+		imageParts := strings.Split(s.ImageID, "/")
+		img, err := p.images.Get(ctx, imageParts[4], imageParts[8], nil)
+		if err != nil {
+			return MachineInspection{}, err
 		}
-		if len(storage.DataDisks) > 0 {
-			add("image_storage", "Additional image disks require an explicit storage plan.")
+		if !strings.EqualFold(azureValue(img.ID), s.ImageID) || !strings.EqualFold(azureValue(img.Location), p.region) || img.Properties == nil {
+			return MachineInspection{}, errors.New("Azure image identity or location does not match the selection")
 		}
-		if storage.OSDisk.DiskSizeGB != nil {
-			out.MinimumDiskGB = *storage.OSDisk.DiskSizeGB
+		if azureValue(img.Properties.ProvisioningState) != "Succeeded" {
+			add("image_unavailable", "The selected image has not finished provisioning.")
 		}
-		if out.MinimumDiskGB <= 0 || s.DiskGB < out.MinimumDiskGB {
-			add("disk_size", "The requested root disk is smaller than the image or its minimum size is unknown.")
+		// The managed-image model does not carry a CPU architecture assertion. Do
+		// not infer architecture from image names, tags or a mutable source VM.
+		add("image_architecture_unverified", "The managed image's CPU architecture must be verified before this plan can launch.")
+		storage := img.Properties.StorageProfile
+		if storage == nil || storage.OSDisk == nil {
+			add("image_storage", "Image OS disk metadata is missing.")
+		} else {
+			if azureValue(storage.OSDisk.OSType) != "Linux" || azureValue(storage.OSDisk.OSState) != "Generalized" {
+				add("image_os", "Select a generalized Linux image.")
+			}
+			if len(storage.DataDisks) > 0 {
+				add("image_storage", "Additional image disks require an explicit storage plan.")
+			}
+			if storage.OSDisk.DiskSizeGB != nil {
+				out.MinimumDiskGB = *storage.OSDisk.DiskSizeGB
+			}
+			if out.MinimumDiskGB <= 0 || s.DiskGB < out.MinimumDiskGB {
+				add("disk_size", "The requested root disk is smaller than the image or its minimum size is unknown.")
+			}
 		}
 	}
 	var selected *armcompute.ResourceSKU

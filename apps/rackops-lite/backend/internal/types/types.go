@@ -581,18 +581,44 @@ type SupportTicket struct {
 	CreatedAt time.Time       `json:"createdAt"`
 	UpdatedAt time.Time       `json:"updatedAt"`
 	Messages  []TicketMessage `json:"messages"`
-	// PollSecret is issued by the CRM at first forward (SHA-256 stored there);
+	// PollSecret is persisted before first forward (SHA-256 stored in CRM);
 	// it authenticates this install's reply polls for this ticket.
 	PollSecret string `json:"pollSecret,omitempty"`
 	// ForwardPending marks a forward that failed and awaits the retry loop.
-	ForwardPending bool `json:"forwardPending,omitempty"`
+	ForwardPending    bool              `json:"forwardPending,omitempty"`
+	ReplyCursor       int64             `json:"replyCursor,omitempty"`
+	DeliveredMessages map[string]bool   `json:"deliveredMessages,omitempty"`
+	CRMRevision       *int64            `json:"crmRevision,omitempty"`
+	Resolution        *TicketResolution `json:"resolution,omitempty"`
+	ResolutionPending bool              `json:"resolutionPending,omitempty"`
+	ReplySyncError    string            `json:"replySyncError,omitempty"`
+	ReplyAssembly     *ReplyAssembly    `json:"replyAssembly,omitempty"`
+	DeliveryError     string            `json:"deliveryError,omitempty"`
 }
 
 // Sanitized returns a copy safe for API clients (no poll secret).
 func (t *SupportTicket) Sanitized() *SupportTicket {
 	c := *t
 	c.PollSecret = ""
+	c.ReplyCursor = 0
+	c.DeliveredMessages = nil
+	c.CRMRevision = nil
+	c.Resolution = nil
+	c.ReplyAssembly = nil
+	c.Messages = append([]TicketMessage(nil), t.Messages...)
 	return &c
+}
+
+type TicketResolution struct {
+	ID       string `json:"id"`
+	Revision int64  `json:"revision"`
+}
+
+type ReplyAssembly struct {
+	Sequence int64  `json:"sequence"`
+	Total    int    `json:"total"`
+	SHA256   string `json:"sha256"`
+	Data     []byte `json:"data"`
 }
 
 // ---- Front Door ----
@@ -792,15 +818,23 @@ type ContainerStatus struct {
 type TaskKind string
 
 const (
-	TaskDeploy  TaskKind = "deploy"
-	TaskStop    TaskKind = "stop"
-	TaskStart   TaskKind = "start"
-	TaskRestart TaskKind = "restart"
-	TaskRemove  TaskKind = "remove"
-	TaskLogs    TaskKind = "logs"
-	TaskListDir TaskKind = "listdir"
-	TaskBuild   TaskKind = "build"
-	TaskBackup  TaskKind = "backup"
+	TaskDeploy                       TaskKind = "deploy"
+	TaskStop                         TaskKind = "stop"
+	TaskStart                        TaskKind = "start"
+	TaskRestart                      TaskKind = "restart"
+	TaskRemove                       TaskKind = "remove"
+	TaskLogs                         TaskKind = "logs"
+	TaskListDir                      TaskKind = "listdir"
+	TaskBuild                        TaskKind = "build"
+	TaskBackup                       TaskKind = "backup"
+	TaskMigrationQuiesce             TaskKind = "migration-quiesce"
+	TaskMigrationBackup              TaskKind = "migration-backup"
+	TaskMigrationTransferSource      TaskKind = "migration-transfer-source"
+	TaskMigrationTransferDestination TaskKind = "migration-transfer-destination"
+	TaskMigrationRestore             TaskKind = "migration-restore"
+	TaskMigrationValidate            TaskKind = "migration-validate"
+	TaskMigrationCutover             TaskKind = "migration-cutover"
+	TaskMigrationEnableWrites        TaskKind = "migration-enable-writes"
 	// Log streaming: follow a service's runtime logs (docker logs -f) and push
 	// them to the control plane out-of-band until told to stop.
 	TaskLogsFollow TaskKind = "logs-follow"
@@ -822,13 +856,54 @@ type AgentTask struct {
 
 // TaskResult reports the outcome of an executed AgentTask.
 type TaskResult struct {
-	Uncertain   bool   `json:"uncertain,omitempty"`
-	TaskID      string `json:"taskId"`
-	ServiceID   string `json:"serviceId,omitempty"` // echoes the task's service (correlates non-deploy results)
-	OK          bool   `json:"ok"`
-	Log         string `json:"log"`
-	ContainerID string `json:"containerId,omitempty"`
-	HostPort    int    `json:"hostPort,omitempty"` // actual host port the container was published on
+	MigrationArtifact *MigrationArtifactResult `json:"migrationArtifact,omitempty"`
+	MigrationTransfer *MigrationTransferResult `json:"migrationTransfer,omitempty"`
+	Uncertain         bool                     `json:"uncertain,omitempty"`
+	TaskID            string                   `json:"taskId"`
+	ServiceID         string                   `json:"serviceId,omitempty"` // echoes the task's service (correlates non-deploy results)
+	OK                bool                     `json:"ok"`
+	Log               string                   `json:"log"`
+	ContainerID       string                   `json:"containerId,omitempty"`
+	HostPort          int                      `json:"hostPort,omitempty"` // actual host port the container was published on
+}
+
+type MigrationTransferResult struct {
+	JobID      string `json:"jobId"`
+	ArtifactID string `json:"artifactId"`
+	Phase      string `json:"phase"` // source_uploaded | destination_received
+}
+
+type MigrationArtifactResult struct {
+	JobID           string `json:"jobId"`
+	ArtifactID      string `json:"artifactId"`
+	PlaintextBytes  int64  `json:"plaintextBytes"`
+	PlaintextSHA256 string `json:"plaintextSha256"`
+	EncryptedBytes  int64  `json:"encryptedBytes"`
+	EncryptedSHA256 string `json:"encryptedSha256"`
+}
+
+// Migration task payloads travel only through authenticated agent delivery.
+// BackupKey must never be copied into task results, logs or browser responses.
+type MigrationTaskPayload struct {
+	JobID            string            `json:"jobId"`
+	ServiceID        string            `json:"serviceId"`
+	ContainerID      string            `json:"containerId"`
+	ArtifactID       string            `json:"artifactId,omitempty"`
+	Kind             string            `json:"kind,omitempty"`
+	MountDestination string            `json:"mountDestination,omitempty"`
+	BackupKey        []byte            `json:"backupKey,omitempty"`
+	TransferBytes    int64             `json:"transferBytes,omitempty"`
+	TransferSHA256   string            `json:"transferSha256,omitempty"`
+	Writers          []MigrationWriter `json:"writers,omitempty"`
+	PlaintextBytes   int64             `json:"plaintextBytes,omitempty"`
+	PlaintextSHA256  string            `json:"plaintextSha256,omitempty"`
+	DatabaseName     string            `json:"databaseName,omitempty"`
+	TargetVolume     string            `json:"targetVolume,omitempty"`
+}
+
+type MigrationWriter struct {
+	ServiceID   string `json:"serviceId"`
+	ContainerID string `json:"containerId"`
 }
 
 // AgentResponse is the control plane's reply to an AgentReport push.

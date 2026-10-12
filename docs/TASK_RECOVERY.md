@@ -1,7 +1,7 @@
 # Agent task delivery and recovery
 
 Implementation status: local development, not release-certified. See
-[the delivery ledger](STABILIZATION.md) for outstanding verification.
+[the single completion plan](COMPLETION_PLAN.md) for outstanding verification.
 
 ## Delivery protocol
 

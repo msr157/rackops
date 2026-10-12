@@ -93,8 +93,12 @@ func (a *API) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var user types.User
-	a.Store.View(func() { if current := a.Store.Users[claims.Sub]; current != nil { user = *current } })
-	if user.ID == "" {
+	a.Store.View(func() {
+		if current := a.Store.Users[claims.Sub]; current != nil {
+			user = *current
+		}
+	})
+	if user.ID == "" || user.SessionVersion != claims.Version {
 		http.Error(w, "account no longer exists", http.StatusUnauthorized)
 		return
 	}
@@ -112,16 +116,25 @@ func (a *API) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		current := a.Store.Users[claims.Sub]
 		// Password verification ran outside the lock; refuse to overwrite a
 		// concurrent recovery or password change with that stale verification.
-		if current == nil || current.PasswordHash != user.PasswordHash || current.SessionVersion != user.SessionVersion { return }
+		if current == nil || current.PasswordHash != user.PasswordHash || current.SessionVersion != user.SessionVersion {
+			return
+		}
 		current.PasswordHash = string(hash)
 		current.SessionVersion++
 		current.ResetTokenHash = ""
 		current.ResetExpires = time.Time{}
 		delete(a.Store.ResetEmails, current.ID)
-		for id, key := range a.Store.Tokens { if key.UserID == current.ID { delete(a.Store.Tokens, id) } }
+		for id, key := range a.Store.Tokens {
+			if key.UserID == current.ID {
+				delete(a.Store.Tokens, id)
+			}
+		}
 		changed = true
 	})
-	if !changed { http.Error(w, "account changed while checking the password; sign in again", http.StatusConflict); return }
+	if !changed {
+		http.Error(w, "account changed while checking the password; sign in again", http.StatusConflict)
+		return
+	}
 	if err := a.Store.persistOnce(); err != nil {
 		http.Error(w, "password change could not be saved; contact your installation administrator", http.StatusServiceUnavailable)
 		return

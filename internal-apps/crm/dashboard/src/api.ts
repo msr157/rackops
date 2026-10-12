@@ -122,6 +122,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   leads: (offset = 0) => req<Lead[]>(`/api/leads?offset=${offset}`),
   leadStatus: (lead: Lead, status: string) => req<void>(`/api/leads/${encodeURIComponent(lead.id)}/status`, { method: 'POST', body: JSON.stringify({ installId: lead.installId, status }) }),
+  redactLead: (lead: Lead) => req<void>(`/api/leads/${encodeURIComponent(lead.id)}/redact`, { method: 'POST', body: JSON.stringify({ installId: lead.installId, expectedStatus: lead.status, receivedAt: lead.receivedAt }) }),
   login: (email: string, password: string) =>
     req<{ token: string }>('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
   overview: () => req<Overview>('/api/overview'),

@@ -123,6 +123,42 @@ CREATE TABLE IF NOT EXISTS ticket_messages (
 	PRIMARY KEY (id, ticket_id, install_id)
 );
 CREATE INDEX IF NOT EXISTS idx_messages_ticket ON ticket_messages(ticket_id, install_id, at);
+CREATE TABLE IF NOT EXISTS ticket_revisions (
+ ticket_id TEXT NOT NULL, install_id TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 0,
+ PRIMARY KEY(ticket_id, install_id)
+);
+CREATE TABLE IF NOT EXISTS ticket_resolutions (
+ ticket_id TEXT NOT NULL, install_id TEXT NOT NULL, action_id TEXT NOT NULL,
+ expected_revision INTEGER NOT NULL, applied INTEGER NOT NULL,
+ PRIMARY KEY(ticket_id, install_id, action_id)
+);
+CREATE TRIGGER IF NOT EXISTS ticket_revision_message AFTER INSERT ON ticket_messages
+WHEN NEW.author != 'note'
+BEGIN
+ INSERT INTO ticket_revisions(ticket_id, install_id, revision) VALUES(NEW.ticket_id, NEW.install_id, 1)
+ ON CONFLICT(ticket_id, install_id) DO UPDATE SET revision = revision + 1;
+END;
+CREATE TRIGGER IF NOT EXISTS ticket_revision_status AFTER UPDATE OF status ON tickets
+WHEN OLD.status != NEW.status
+BEGIN
+ INSERT INTO ticket_revisions(ticket_id, install_id, revision) VALUES(NEW.id, NEW.install_id, 1)
+ ON CONFLICT(ticket_id, install_id) DO UPDATE SET revision = revision + 1;
+END;
+CREATE TABLE IF NOT EXISTS ticket_message_delivery (
+ sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+ message_id TEXT NOT NULL,
+ ticket_id TEXT NOT NULL,
+ install_id TEXT NOT NULL,
+ UNIQUE(message_id, ticket_id, install_id)
+);
+CREATE INDEX IF NOT EXISTS idx_message_delivery_ticket ON ticket_message_delivery(ticket_id, install_id, sequence);
+INSERT OR IGNORE INTO ticket_message_delivery(message_id, ticket_id, install_id)
+ SELECT id, ticket_id, install_id FROM ticket_messages ORDER BY rowid;
+CREATE TRIGGER IF NOT EXISTS ticket_message_delivery_insert AFTER INSERT ON ticket_messages
+BEGIN
+ INSERT INTO ticket_message_delivery(message_id, ticket_id, install_id)
+ VALUES (NEW.id, NEW.ticket_id, NEW.install_id);
+END;
 CREATE TABLE IF NOT EXISTS reset_emails (
 	id            INTEGER PRIMARY KEY AUTOINCREMENT,
 	install_id    TEXT NOT NULL,

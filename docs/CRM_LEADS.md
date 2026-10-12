@@ -24,3 +24,24 @@ delivery, preservation of operator changes, and Lite retry after restart using
 a local relay. Production routing, retention policies, spam handling and a live
 website-to-Admin acceptance run remain outstanding. CRM support and mail delivery
 still have separate release gates; a lead inbox does not complete all CRM work.
+
+## Spam and retention operations
+
+Admin can mark an enquiry as spam without contacting the sender. All leads still
+have the existing ingest body/field limits and per-IP throttling; contact details
+are unverified. Spam classification is operator-driven, not an automatic filter.
+
+When the company's retention policy permits, an administrator can remove contact
+details from a closed or spam record. The dashboard confirms the exact enquiry.
+Removal clears name, email, industry and notes in the active record and retains
+only the install/submission IDs, received date and redacted status. Retries of that
+same submission are acknowledged without recreating its private fields. Redacted
+records cannot be reopened through the status API. A changed lead requires refresh.
+
+No retention duration or automatic deletion schedule is enabled by default: the
+operator must apply the company's chosen policy. This is logical redaction of the
+active CRM record, not secure erasure of SQLite free pages, WAL, snapshots, source
+website/Lite records or backups. Apply matching access and expiry policies to those
+copies. Restoring an older backup may restore private fields; reapply the recorded
+redactions before reopening ingestion. Keep retention decisions in a restricted
+operator record keyed by submission IDs, without duplicating removed contact data.

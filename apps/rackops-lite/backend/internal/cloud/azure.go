@@ -26,15 +26,17 @@ type AzureCredentials struct {
 }
 
 type Azure struct {
-	bootstrap     string
-	region        string
-	credentials   AzureCredentials
-	subscriptions *armsubscriptions.Client
-	machines      *armcompute.VirtualMachinesClient
-	images        *armcompute.ImagesClient
-	skus          *armcompute.ResourceSKUsClient
-	nics          *armnetwork.InterfacesClient
-	subnets       *armnetwork.SubnetsClient
+	bootstrap       string
+	region          string
+	credentials     AzureCredentials
+	subscriptions   *armsubscriptions.Client
+	machines        *armcompute.VirtualMachinesClient
+	images          *armcompute.ImagesClient
+	galleryImages   *armcompute.GalleryImagesClient
+	galleryVersions *armcompute.GalleryImageVersionsClient
+	skus            *armcompute.ResourceSKUsClient
+	nics            *armnetwork.InterfacesClient
+	subnets         *armnetwork.SubnetsClient
 }
 
 var uuidID = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
@@ -58,6 +60,14 @@ func NewAzure(region string, c AzureCredentials) (*Azure, error) {
 		return nil, err
 	}
 	options := &arm.ClientOptions{DisableRPRegistration: true}
+	galleryImages, err := armcompute.NewGalleryImagesClient(c.SubscriptionID, credential, options)
+	if err != nil {
+		return nil, err
+	}
+	galleryVersions, err := armcompute.NewGalleryImageVersionsClient(c.SubscriptionID, credential, options)
+	if err != nil {
+		return nil, err
+	}
 	images, err := armcompute.NewImagesClient(c.SubscriptionID, credential, options)
 	if err != nil {
 		return nil, err
@@ -74,7 +84,7 @@ func NewAzure(region string, c AzureCredentials) (*Azure, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Azure{region: region, credentials: c, subscriptions: subscriptions, machines: machines, images: images, skus: skus, nics: nics, subnets: subnets}, nil
+	return &Azure{region: region, credentials: c, subscriptions: subscriptions, machines: machines, images: images, skus: skus, nics: nics, subnets: subnets, galleryImages: galleryImages, galleryVersions: galleryVersions}, nil
 }
 func (p *Azure) Name() string   { return "azure" }
 func (p *Azure) Region() string { return p.region }
@@ -108,6 +118,9 @@ func (s AzureMachineSpec) Validate() error {
 	for _, item := range []struct{ value, kind string }{{s.ImageID, "microsoft.compute/images"}, {s.NetworkInterfaceID, "microsoft.network/networkinterfaces"}} {
 		value := strings.ToLower(item.value)
 		parts := strings.Split(value, "/")
+		if item.kind == "microsoft.compute/images" && validAzureGalleryVersion(s.ImageID, s.SubscriptionID) {
+			continue
+		}
 		if !strings.HasPrefix(value, prefix) || len(parts) != 9 || parts[5] != "providers" || parts[6]+"/"+parts[7] != item.kind || !azureGroup.MatchString(parts[4]) || !azureGroup.MatchString(parts[8]) {
 			return errors.New("Azure image and NIC must be explicit resources in the target subscription")
 		}

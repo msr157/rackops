@@ -53,12 +53,18 @@ func (a *API) Handler() http.Handler {
 
 	// Public ingest API — called by customer RackOps Lite instances.
 	mux.HandleFunc("POST /ingest/v1/tickets", a.handleIngestTicket)
+	mux.HandleFunc("POST /ingest/v1/tickets/{ticketId}/resolve", a.handleIngestResolution)
+	mux.HandleFunc("GET /ingest/v1/capabilities", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		writeJSON(w, map[string]bool{"ticketClientCredentials": true})
+	})
 	mux.HandleFunc("GET /ingest/v1/tickets/{ticketId}/replies", a.handleIngestReplies)
 	mux.HandleFunc("POST /ingest/v1/reset-email", a.handleIngestResetEmail)
 	mux.HandleFunc("POST /ingest/v1/snapshots", a.handleIngestSnapshot)
 	mux.HandleFunc("POST /ingest/v1/leads", a.handleIngestLead)
 	mux.HandleFunc("GET /api/leads", a.handleListLeads)
 	mux.HandleFunc("POST /api/leads/{id}/status", a.handleLeadStatus)
+	mux.HandleFunc("POST /api/leads/{id}/redact", a.handleRedactLead)
 
 	// Admin API — JWT bearer.
 	mux.HandleFunc("POST /api/auth/login", a.handleLogin)

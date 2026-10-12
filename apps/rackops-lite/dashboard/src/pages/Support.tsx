@@ -322,6 +322,10 @@ function Thread({ ticket, onBack, onChanged, onDirty }: {
         <div className="row" style={{ minWidth: 0 }}>
           <button className="btn sm ghost" onClick={onBack} aria-label="Back to all tickets"><ArrowLeft size={14} /></button>
           <strong style={{ fontSize: 14.5 }}>{ticket.subject}</strong>
+          {ticket.forwardPending && <span className="tag">Delivery queued</span>}
+          {ticket.resolutionPending && <span className="tag">Resolution queued</span>}
+          {ticket.deliveryError && <p role="alert">{ticket.deliveryError}</p>}
+          {ticket.replySyncError && <p role="alert">{ticket.replySyncError}</p>}
           <span className="tag">{ticket.category}</span>
           <SeverityTag severity={ticket.severity} />
         </div>

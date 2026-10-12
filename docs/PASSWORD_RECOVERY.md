@@ -1,5 +1,22 @@
 # Password recovery status
 
+## Ordinary password changes
+
+An authenticated password change now invalidates all of that user's existing
+sessions, API keys, pending reset links and queued reset emails. Other users'
+access remains valid. The dashboard signs the changing user out after a
+successful response and explains the effect before submission. API clients
+still receive HTTP 204 on success and must authenticate again.
+
+The current password is verified outside the store lock against a snapshot;
+the write is accepted only if the password and session version still match.
+This prevents a concurrent change or recovery from being overwritten by stale
+verification. Persistence must succeed before returning success. New passwords
+must contain 8–72 bytes, matching the bcrypt storage limit. Tests cover concurrent
+changes, old session/API-key/SSE denial, reset invalidation and restart recovery.
+
+## Reset links
+
 Reset links are emailed through the Admin relay. They are no longer written
 to logs, API responses or the fleet event feed. The public request response
 is identical for existing and unknown accounts and does not promise successful

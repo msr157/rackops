@@ -83,6 +83,10 @@ func (j *taskJournal) save(path string, receipt taskReceipt) error {
 	if err != nil {
 		return err
 	}
+	return j.saveSealed(path, plain)
+}
+
+func (j *taskJournal) saveSealed(path string, plain []byte) error {
 	sealed := j.cipher.Seal(nil, nil, plain, []byte(filepath.Base(path)))
 	f, err := os.CreateTemp(j.dir, ".receipt-*")
 	if err != nil {

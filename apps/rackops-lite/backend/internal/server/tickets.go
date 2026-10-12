@@ -1,8 +1,11 @@
 package server
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"runtime"
@@ -16,7 +19,7 @@ import (
 
 // Support tickets live locally and are forwarded (outbound-only) to the
 // RackOps CRM, which support agents answer from. Replies come back via
-// polling — a per-ticket secret issued by the CRM at first forward
+// polling — a per-ticket secret saved before first forward
 // authenticates every later exchange. Instances behind NAT need nothing
 // but outbound HTTPS.
 
@@ -62,12 +65,17 @@ func (a *API) handleCreateTicket(w http.ResponseWriter, r *http.Request) {
 		Body     string `json:"body"`
 		Email    string `json:"email"`
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 128<<10)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	req.Subject = strings.TrimSpace(req.Subject)
 	req.Body = strings.TrimSpace(req.Body)
+	if len(req.Subject) > 512 || len(req.Body) > 16<<10 {
+		http.Error(w, "subject must be at most 512 bytes and message at most 16 KiB", 400)
+		return
+	}
 	if req.Subject == "" || req.Body == "" {
 		http.Error(w, "subject and message are required", http.StatusBadRequest)
 		return
@@ -96,12 +104,18 @@ func (a *API) handleCreateTicket(w http.ResponseWriter, r *http.Request) {
 	if e := strings.TrimSpace(req.Email); e != "" {
 		authorEmail = e
 	}
+	at := strings.Index(authorEmail, "@")
+	if len(authorEmail) < 3 || len(authorEmail) > 254 || at <= 0 || at == len(authorEmail)-1 || strings.ContainsAny(authorEmail, " \t\r\n") {
+		http.Error(w, "valid reply email required", 400)
+		return
+	}
 
 	now := time.Now()
 	t := &types.SupportTicket{
 		ID: NewID(), Subject: req.Subject, Category: req.Category, Severity: req.Severity,
 		Status: types.TicketOpen, Email: authorEmail, CreatedBy: claims.Sub,
-		CreatedAt: now, UpdatedAt: now,
+		ForwardPending: true,
+		CreatedAt:      now, UpdatedAt: now,
 		Messages: []types.TicketMessage{{
 			ID: NewID(), Author: "user", Name: authorName, Body: req.Body, At: now,
 		}},
@@ -112,9 +126,14 @@ func (a *API) handleCreateTicket(w http.ResponseWriter, r *http.Request) {
 		}
 		a.Store.Tickets[t.ID] = t
 	})
-	a.Store.AddEvent("support", "Support ticket opened: "+t.Subject, "", "")
+	if err := a.Store.persistOnce(); err != nil {
+		http.Error(w, "could not save ticket; inspect your ticket list before retrying", 503)
+		return
+	}
+	var response *types.SupportTicket
+	a.Store.View(func() { response = t.Sanitized() })
 	go a.forwardTicket(t.ID)
-	writeJSON(w, t.Sanitized())
+	writeJSON(w, response)
 }
 
 // ticketForUser loads {id} enforcing visibility (own, or admin).
@@ -136,7 +155,9 @@ func (a *API) ticketForUser(w http.ResponseWriter, r *http.Request) *types.Suppo
 
 func (a *API) handleGetTicket(w http.ResponseWriter, r *http.Request) {
 	if t := a.ticketForUser(w, r); t != nil {
-		writeJSON(w, t.Sanitized())
+		var response *types.SupportTicket
+		a.Store.View(func() { response = t.Sanitized() })
+		writeJSON(w, response)
 	}
 }
 
@@ -148,8 +169,9 @@ func (a *API) handleReplyTicket(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Body string `json:"body"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Body) == "" {
-		http.Error(w, "message required", http.StatusBadRequest)
+	r.Body = http.MaxBytesReader(w, r.Body, 128<<10)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Body) == "" || len(req.Body) > 16<<10 {
+		http.Error(w, "message required (at most 16 KiB)", http.StatusBadRequest)
 		return
 	}
 	claims := claimsFrom(r)
@@ -167,10 +189,20 @@ func (a *API) handleReplyTicket(w http.ResponseWriter, r *http.Request) {
 			ID: NewID(), Author: "user", Name: name, Body: strings.TrimSpace(req.Body), At: time.Now(),
 		})
 		t.Status = types.TicketOpen // a customer message reopens the thread
+		t.Resolution = nil
+		t.ResolutionPending = false
+		t.CRMRevision = nil
 		t.UpdatedAt = time.Now()
+		t.ForwardPending = true
 	})
+	if err := a.Store.persistOnce(); err != nil {
+		http.Error(w, "could not save reply; inspect the ticket before retrying", 503)
+		return
+	}
+	var response *types.SupportTicket
+	a.Store.View(func() { response = t.Sanitized() })
 	go a.forwardTicket(t.ID)
-	writeJSON(w, t.Sanitized())
+	writeJSON(w, response)
 }
 
 func (a *API) handleResolveTicket(w http.ResponseWriter, r *http.Request) {
@@ -178,12 +210,81 @@ func (a *API) handleResolveTicket(w http.ResponseWriter, r *http.Request) {
 	if t == nil {
 		return
 	}
+	ready := false
 	a.Store.Mutate(func() {
-		t.Status = types.TicketResolved
+		if t.Resolution != nil {
+			ready = true
+			return
+		}
+		if t.ForwardPending || t.CRMRevision == nil {
+			return
+		}
+		t.Resolution = &types.TicketResolution{ID: NewID(), Revision: *t.CRMRevision}
+		t.ResolutionPending = true
+		t.DeliveryError = ""
+		t.UpdatedAt = time.Now()
+		ready = true
+	})
+	if !ready {
+		http.Error(w, "Wait for support synchronization before resolving this ticket. Admin may need an update.", 409)
+		return
+	}
+	if err := a.Store.persistOnce(); err != nil {
+		http.Error(w, "could not save ticket status", 503)
+		return
+	}
+	var response *types.SupportTicket
+	a.Store.View(func() { response = t.Sanitized() })
+	go a.resolveTicket(t.ID)
+	writeJSON(w, response)
+}
+
+func (a *API) resolveTicket(id string) {
+	// Share serialization with customer-message delivery. If a new message
+	// arrives during the request it is forwarded afterwards and reopens Admin.
+	muAny, _ := forwardMu.LoadOrStore(id, &sync.Mutex{})
+	mu := muAny.(*sync.Mutex)
+	mu.Lock()
+	defer mu.Unlock()
+	var action types.TicketResolution
+	var secret string
+	a.Store.View(func() {
+		if t := a.Store.Tickets[id]; t != nil && t.Resolution != nil {
+			action = *t.Resolution
+			secret = t.PollSecret
+		}
+	})
+	if action.ID == "" || secret == "" {
+		return
+	}
+	if err := a.Store.persistOnce(); err != nil {
+		return
+	}
+	var result struct {
+		OK       bool   `json:"ok"`
+		ActionID string `json:"actionId"`
+		Applied  bool   `json:"applied"`
+	}
+	err := crmPost("/ingest/v1/tickets/"+id+"/resolve", map[string]any{"installId": a.InstallID, "pollSecret": secret, "actionId": action.ID, "expectedRevision": action.Revision}, &result)
+	if err != nil || !result.OK || result.ActionID != action.ID {
+		return
+	}
+	a.Store.Mutate(func() {
+		t := a.Store.Tickets[id]
+		if t == nil || t.Resolution == nil || t.Resolution.ID != action.ID || t.PollSecret != secret {
+			return
+		}
+		t.Resolution = nil
+		t.ResolutionPending = false
+		t.CRMRevision = nil
+		if result.Applied {
+			t.Status = types.TicketResolved
+		} else {
+			t.DeliveryError = "Support activity changed before resolution. Review the latest replies and resolve again."
+		}
 		t.UpdatedAt = time.Now()
 	})
-	go a.forwardTicket(t.ID) // tell the CRM it's resolved
-	writeJSON(w, t.Sanitized())
+	a.Store.persistOnce()
 }
 
 // ---- Usage snapshot (disclosed in the UI, sent with each forward) ----
@@ -262,19 +363,52 @@ func (a *API) forwardTicket(ticketID string) {
 	mu := muAny.(*sync.Mutex)
 	mu.Lock()
 	defer mu.Unlock()
+	// Persist the credential before the first network request. Admin stores its
+	// hash, so a lost response can be retried without losing polling access.
+	var prepareErr error
+	a.Store.Mutate(func() {
+		t := a.Store.Tickets[ticketID]
+		if t == nil {
+			return
+		}
+		t.ForwardPending = true
+		if t.PollSecret == "" {
+			raw := make([]byte, 32)
+			if _, err := rand.Read(raw); err != nil {
+				prepareErr = err
+				return
+			}
+			t.PollSecret = hex.EncodeToString(raw)
+		}
+	})
+	if prepareErr != nil {
+		log.Print("support: could not prepare ticket credential")
+		return
+	}
+	if err := a.Store.persistOnce(); err != nil {
+		log.Print("support: could not persist ticket before forwarding")
+		return
+	}
 
 	var payload map[string]any
 	var instanceName string
+	var sentAt time.Time
+	var sentSecret string
+	var sentIDs []string
+	var batchError string
+	usage := a.buildUsageSnapshot()
 	a.Store.View(func() {
 		t := a.Store.Tickets[ticketID]
 		if t == nil {
 			return
 		}
 		instanceName = a.Store.InstanceName
+		sentAt = t.UpdatedAt
+		sentSecret = t.PollSecret
 		// Only author=user messages go up; the CRM merges by message ID.
 		msgs := make([]map[string]any, 0, len(t.Messages))
 		for _, m := range t.Messages {
-			if m.Author != "user" {
+			if m.Author != "user" || t.DeliveredMessages[m.ID] {
 				continue
 			}
 			msgs = append(msgs, map[string]any{
@@ -283,6 +417,7 @@ func (a *API) forwardTicket(ticketID string) {
 			})
 		}
 		payload = map[string]any{
+			"usage":       usage,
 			"installId":   a.InstallID,
 			"installName": instanceName,
 			"version":     ServerVersion,
@@ -294,17 +429,69 @@ func (a *API) forwardTicket(ticketID string) {
 			},
 		}
 	})
+	if payload != nil {
+		ticket := payload["ticket"].(map[string]any)
+		messages := ticket["messages"].([]map[string]any)
+		batch := make([]map[string]any, 0)
+		ticket["messages"] = batch
+		encoded, err := json.Marshal(payload)
+		if err != nil || len(encoded) > 192<<10 {
+			batchError = "Ticket metadata exceeds delivery limits; contact support to recover this thread."
+		} else {
+			for _, message := range messages {
+				candidate := append(batch, message)
+				ticket["messages"] = candidate
+				encoded, err := json.Marshal(payload)
+				if err != nil || len(encoded) > 192<<10 {
+					if len(batch) == 0 {
+						batchError = "An existing message exceeds delivery limits; contact support to recover this thread. No messages were discarded."
+					}
+					break
+				}
+				batch = candidate
+				sentIDs = append(sentIDs, message["id"].(string))
+			}
+		}
+		ticket["messages"] = batch
+	}
+	if batchError != "" {
+		a.Store.Mutate(func() {
+			if t := a.Store.Tickets[ticketID]; t != nil {
+				t.DeliveryError = batchError
+			}
+		})
+		a.Store.persistOnce()
+		return
+	}
 	if payload == nil {
 		return
 	}
-	payload["usage"] = a.buildUsageSnapshot()
+	if len(sentSecret) == 64 {
+		// Older Admin versions ignore the proposed first credential and issue a
+		// different one. Check support before POST so rollout cannot orphan a
+		// newly-created ticket if that incompatible response is lost.
+		response, err := crmClient.Get(crmURL() + "/ingest/v1/capabilities")
+		if err != nil {
+			log.Print("support: Admin capability check unavailable; delivery remains queued")
+			return
+		}
+		var capabilities struct {
+			TicketClientCredentials bool `json:"ticketClientCredentials"`
+		}
+		decodeErr := json.NewDecoder(http.MaxBytesReader(nil, response.Body, 4096)).Decode(&capabilities)
+		_ = response.Body.Close()
+		if response.StatusCode != http.StatusOK || decodeErr != nil || !capabilities.TicketClientCredentials {
+			log.Print("support: update Admin before delivering tickets with durable client credentials")
+			return
+		}
+	}
 
 	var resp struct {
 		OK         bool   `json:"ok"`
 		PollSecret string `json:"pollSecret"`
 	}
-	if err := crmPost("/ingest/v1/tickets", payload, &resp); err != nil {
-		log.Printf("support: ticket forward failed (will retry): %v", err)
+	if err := crmPost("/ingest/v1/tickets", payload, &resp); err != nil || !resp.OK || resp.PollSecret != sentSecret {
+		log.Print("support: ticket forward not acknowledged; will retry (check Admin version and connectivity)")
 		a.Store.Mutate(func() {
 			if t := a.Store.Tickets[ticketID]; t != nil {
 				t.ForwardPending = true
@@ -317,13 +504,31 @@ func (a *API) forwardTicket(ticketID string) {
 		if t == nil {
 			return
 		}
-		t.ForwardPending = false
-		// The pollSecret from the FIRST forward must be persisted — losing it
-		// means never reading replies for this ticket again.
-		if t.PollSecret == "" && resp.PollSecret != "" {
-			t.PollSecret = resp.PollSecret
+		// An older acknowledgement must not clear a newer local reply/status.
+		if t.PollSecret != sentSecret {
+			return
+		}
+		if t.DeliveredMessages == nil {
+			t.DeliveredMessages = map[string]bool{}
+		}
+		for _, id := range sentIDs {
+			t.DeliveredMessages[id] = true
+		}
+		t.DeliveryError = ""
+		remaining := false
+		for _, m := range t.Messages {
+			if m.Author == "user" && !t.DeliveredMessages[m.ID] {
+				remaining = true
+				break
+			}
+		}
+		if t.UpdatedAt.Equal(sentAt) && !remaining {
+			t.ForwardPending = false
 		}
 	})
+	if err := a.Store.persistOnce(); err != nil {
+		log.Print("support: could not persist ticket acknowledgement; retry may repeat the same messages")
+	}
 }
 
 // RunSupportSync is the background loop: retries failed forwards and polls
@@ -340,19 +545,25 @@ func (a *API) RunSupportSync() {
 			continue
 		}
 		a.retryResetEmails(time.Now())
-		var retry, poll []string
+		var retry, poll, resolve []string
 		a.Store.View(func() {
 			for id, t := range a.Store.Tickets {
+				if t.Resolution != nil {
+					resolve = append(resolve, id)
+				}
 				if t.ForwardPending {
 					retry = append(retry, id)
 				}
-				if t.PollSecret != "" && t.Status != types.TicketResolved {
+				if t.PollSecret != "" {
 					poll = append(poll, id)
 				}
 			}
 		})
 		for _, id := range retry {
 			a.forwardTicket(id)
+		}
+		for _, id := range resolve {
+			a.resolveTicket(id)
 		}
 		for _, id := range poll {
 			a.pollTicketReplies(id)
@@ -363,27 +574,25 @@ func (a *API) RunSupportSync() {
 
 // pollTicketReplies fetches agent replies newer than what we have.
 func (a *API) pollTicketReplies(ticketID string) {
-	var since, secret string
+	var secret string
+	var cursor int64
+	assembling := false
 	a.Store.View(func() {
-		t := a.Store.Tickets[ticketID]
-		if t == nil {
-			return
+		if t := a.Store.Tickets[ticketID]; t != nil {
+			secret, cursor = t.PollSecret, t.ReplyCursor
+			assembling = t.ReplyAssembly != nil
 		}
-		secret = t.PollSecret
-		last := t.CreatedAt
-		for _, m := range t.Messages {
-			if m.Author == "agent" && m.At.After(last) {
-				last = m.At
-			}
-		}
-		since = last.Format(time.RFC3339Nano)
 	})
 	if secret == "" {
 		return
 	}
-
-	url := fmt.Sprintf("%s/ingest/v1/tickets/%s/replies?installId=%s&since=%s",
-		crmURL(), ticketID, a.InstallID, since)
+	if assembling {
+		a.pollReplyChunk(ticketID, secret, cursor)
+		return
+	}
+	// Old Admin ignores cursor and returns the whole thread. Deduplication keeps
+	// that fallback safe without dropping timestamp ties or backdated messages.
+	url := fmt.Sprintf("%s/ingest/v1/tickets/%s/replies?installId=%s&cursor=%d", crmURL(), ticketID, a.InstallID, cursor)
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return
@@ -394,26 +603,39 @@ func (a *API) pollTicketReplies(ticketID string) {
 		return // offline is fine; next tick retries
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusUnprocessableEntity {
+		a.Store.Mutate(func() {
+			if t := a.Store.Tickets[ticketID]; t != nil && t.PollSecret == secret && t.ReplyCursor == cursor {
+				t.ReplySyncError = "A historical support reply could not be synchronized. Contact support to recover the retained message."
+				t.CRMRevision = nil
+			}
+		})
+		a.Store.persistOnce()
+		a.pollReplyChunk(ticketID, secret, cursor)
+		return
+	}
 	if resp.StatusCode != http.StatusOK {
 		return
 	}
 	var out struct {
-		Status  string `json:"status"`
-		Replies []struct {
+		Revision   *int64 `json:"revision"`
+		NextCursor *int64 `json:"nextCursor"`
+		Status     string `json:"status"`
+		Replies    []struct {
 			ID   string    `json:"id"`
 			Name string    `json:"name"`
 			Body string    `json:"body"`
 			At   time.Time `json:"at"`
 		} `json:"replies"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&out); err != nil {
 		return
 	}
 
 	var updated *types.SupportTicket
 	a.Store.Mutate(func() {
 		t := a.Store.Tickets[ticketID]
-		if t == nil {
+		if t == nil || t.PollSecret != secret || t.ReplyCursor != cursor {
 			return
 		}
 		have := map[string]bool{}
@@ -421,6 +643,17 @@ func (a *API) pollTicketReplies(ticketID string) {
 			have[m.ID] = true
 		}
 		changed := false
+		if t.ReplySyncError != "" {
+			t.ReplySyncError = ""
+			changed = true
+		}
+		if out.NextCursor != nil {
+			if *out.NextCursor < cursor || (len(out.Replies) == 0 && *out.NextCursor != cursor) {
+				return
+			}
+			t.ReplyCursor = *out.NextCursor
+		}
+		t.CRMRevision = out.Revision
 		for _, r := range out.Replies {
 			if have[r.ID] {
 				continue
@@ -428,21 +661,23 @@ func (a *API) pollTicketReplies(ticketID string) {
 			t.Messages = append(t.Messages, types.TicketMessage{
 				ID: r.ID, Author: "agent", Name: r.Name, Body: r.Body, At: r.At,
 			})
+			have[r.ID] = true
 			changed = true
 		}
 		switch out.Status {
 		case "pending", "resolved", "open":
-			if string(t.Status) != out.Status {
+			if !t.ForwardPending && !t.ResolutionPending && string(t.Status) != out.Status {
 				t.Status = types.TicketStatus(out.Status)
 				changed = true
 			}
 		}
 		if changed {
 			t.UpdatedAt = time.Now()
-			updated = t
+			updated = t.Sanitized()
 		}
 	})
+	a.Store.persistOnce()
 	if updated != nil {
-		a.Hub.Broadcast("ticket_update", updated.Sanitized())
+		a.Hub.Broadcast("ticket_update", updated)
 	}
 }

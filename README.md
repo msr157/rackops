@@ -1,7 +1,6 @@
 # RackOps Monorepo
 
-Current product direction: [Product context](docs/PRODUCT_CONTEXT.md).
-Delivery status and remaining release gates: [Stabilization ledger](docs/STABILIZATION.md).
+Product direction, implementation status and remaining work: [Single completion plan](docs/COMPLETION_PLAN.md).
 Front Door upgrade: [Tenant enrollment](docs/FRONT_DOOR_ENROLLMENT.md).
 
 **The Infrastructure Operating System** — one control plane for every machine in your fleet.

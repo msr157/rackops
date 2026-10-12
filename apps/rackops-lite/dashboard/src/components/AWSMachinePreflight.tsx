@@ -28,11 +28,12 @@ export function AWSMachinePreflight({ connection }: { connection: CloudConnectio
         <label>Architecture<select className="input" value={architecture} onChange={event => { setArchitecture(event.target.value); setReview(null); setError(''); }}><option value="amd64">amd64 (x86-64)</option><option value="arm64">arm64</option></select></label>
         <label>Image root device<select className="input" value={spec.rootDevice} onChange={event => change({ rootDevice: event.target.value })}><option value="/dev/sda1">/dev/sda1</option><option value="/dev/xvda">/dev/xvda</option></select></label>
         <label>Root disk size (GiB)<input className="input" required type="number" min={8} max={16384} step={1} value={spec.diskGb || ''} onChange={event => change({ diskGb: Number(event.target.value) })} /></label>
-        <button className="btn" type="submit">{busy ? 'Inspecting AWS resources…' : 'Check selected resources'}</button>
+        <button className="btn" type="submit">{busy ? 'Inspecting AWS resources…' : 'Check and save resource review'}</button>
       </fieldset>
     </form>
     {error && <p role="alert">{error}</p>}
     {review && <div aria-live="polite">
+      <p>Saved review {review.savedPlanId}. Expires {review.expiresAt ? new Date(review.expiresAt).toLocaleString() : 'unknown'}. This is not launch approval.</p>
       <p><strong>{review.resourceCompatible ? 'Selected metadata checks passed' : 'Resource compatibility issues found'}</strong></p>
       <p>{review.vcpus || 'Unknown'} vCPUs · {review.memoryMb ? `${review.memoryMb} MiB RAM` : 'Memory unknown'} · {review.zone || 'Zone unknown'} · {review.architecture}</p>
       <p>Image minimum disk: {review.minimumDiskGb ? `${review.minimumDiskGb} GiB` : 'unknown'}. Checked {new Date(review.checkedAt).toLocaleString()}.</p>

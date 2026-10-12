@@ -1,8 +1,10 @@
 package server
 
 import (
+	"errors"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -12,6 +14,7 @@ var installIDRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]
 
 // idRe covers instance-minted ticket/message ids: short, URL-safe tokens.
 var idRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+var clientPollSecret = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 func validEmail(s string) bool {
 	at := strings.Index(s, "@")
@@ -49,7 +52,7 @@ type ingestTicketReq struct {
 }
 
 // handleIngestTicket is the upsert-forward endpoint. First forward of a
-// (ticketId, installId) pair creates the ticket and issues its poll secret;
+// (ticketId, installId) pair creates the ticket and binds its poll secret;
 // later forwards must present that secret. Messages merge by id.
 func (a *API) handleIngestTicket(w http.ResponseWriter, r *http.Request) {
 	var req ingestTicketReq
@@ -124,8 +127,12 @@ func (a *API) handleIngestTicket(w http.ResponseWriter, r *http.Request) {
 		ID: t.ID, InstallID: req.InstallID, Subject: t.Subject, Category: t.Category,
 		Severity: t.Severity, Status: t.Status, Email: t.Email, CreatedAt: t.CreatedAt,
 		Messages: msgs,
-	}, now)
+	}, now, req.PollSecret)
 	if err != nil {
+		if errors.Is(err, errTicketCredential) {
+			writeError(w, http.StatusForbidden, "invalid poll secret")
+			return
+		}
 		serverError(w, "upsert ticket", err)
 		return
 	}
@@ -166,8 +173,37 @@ func (a *API) handleIngestReplies(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "invalid poll secret")
 		return
 	}
-	status, msgs, err := a.Store.AgentRepliesSince(ticketID, installID, since)
+	if r.URL.Query().Get("chunk") == "1" {
+		a.writeReplyChunk(w, r, ticketID, installID)
+		return
+	}
+	var status string
+	// Read before the thread: concurrent activity can only make this version
+	// stale (and reject resolution), never authorize unseen newer activity.
+	var revision int64
+	if err := a.Store.db.QueryRow(`SELECT COALESCE((SELECT revision FROM ticket_revisions WHERE ticket_id=? AND install_id=?),0)`, ticketID, installID).Scan(&revision); err != nil {
+		serverError(w, "read ticket revision", err)
+		return
+	}
+	var msgs []TicketMessage
+	var nextCursor *int64
+	if r.URL.Query().Has("cursor") {
+		cursor, parseErr := strconv.ParseInt(r.URL.Query().Get("cursor"), 10, 64)
+		if parseErr != nil || cursor < 0 {
+			writeError(w, http.StatusBadRequest, "invalid reply cursor")
+			return
+		}
+		var next int64
+		status, msgs, next, err = a.Store.AgentRepliesPage(ticketID, installID, cursor)
+		nextCursor = &next
+	} else {
+		status, msgs, err = a.Store.AgentRepliesSince(ticketID, installID, since)
+	}
 	if err != nil {
+		if errors.Is(err, errReplyTooLarge) {
+			writeError(w, 422, "A historical reply exceeds delivery limits. Contact support to recover it; the reply has been retained.")
+			return
+		}
 		serverError(w, "load replies", err)
 		return
 	}
@@ -181,7 +217,19 @@ func (a *API) handleIngestReplies(w http.ResponseWriter, r *http.Request) {
 	for _, m := range msgs {
 		replies = append(replies, reply{ID: m.ID, Name: m.Name, Body: m.Body, At: m.At})
 	}
-	writeJSON(w, map[string]any{"status": status, "replies": replies})
+	// Do not offer a resolution revision until the complete reply backlog is read.
+	var publicRevision *int64
+	if nextCursor != nil {
+		var latest int64
+		if err := a.Store.db.QueryRow(`SELECT COALESCE(MAX(d.sequence),0) FROM ticket_message_delivery d JOIN ticket_messages m ON m.id=d.message_id AND m.ticket_id=d.ticket_id AND m.install_id=d.install_id WHERE d.ticket_id=? AND d.install_id=? AND m.author='agent'`, ticketID, installID).Scan(&latest); err != nil {
+			serverError(w, "check reply backlog", err)
+			return
+		}
+		if *nextCursor >= latest {
+			publicRevision = &revision
+		}
+	}
+	writeJSON(w, map[string]any{"status": status, "replies": replies, "nextCursor": nextCursor, "revision": publicRevision})
 }
 
 // ---- POST /ingest/v1/reset-email ----

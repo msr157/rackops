@@ -65,12 +65,16 @@ type Store struct {
 	// deploys/actions survive a control-plane restart; it is NOT applied from
 	// replicated snapshots — each leader owns task delivery to the agents it
 	// serves (see ImportJSON).
-	TaskQueue         map[string][]types.AgentTask  `json:"taskQueue,omitempty"`
-	TaskOperations    map[string]*TaskOperation     `json:"taskOperations,omitempty"`
-	ResetEmails       map[string]*ResetEmail        `json:"resetEmails,omitempty"`
-	CloudConnections  map[string]*CloudConnection   `json:"cloudConnections,omitempty"`
-	AWSProvisioning   map[string]*AWSProvisioning   `json:"awsProvisioning,omitempty"`
-	CloudProvisioning map[string]*CloudProvisioning `json:"cloudProvisioning,omitempty"`
+	TaskQueue         map[string][]types.AgentTask   `json:"taskQueue,omitempty"`
+	TaskOperations    map[string]*TaskOperation      `json:"taskOperations,omitempty"`
+	ResetEmails       map[string]*ResetEmail         `json:"resetEmails,omitempty"`
+	CloudConnections  map[string]*CloudConnection    `json:"cloudConnections,omitempty"`
+	AWSProvisioning   map[string]*AWSProvisioning    `json:"awsProvisioning,omitempty"`
+	CloudProvisioning map[string]*CloudProvisioning  `json:"cloudProvisioning,omitempty"`
+	CloudReviewPlans  map[string]*CloudReviewPlan    `json:"cloudReviewPlans,omitempty"`
+	MigrationPlans    map[string]*MigrationPlan      `json:"migrationPlans,omitempty"`
+	MigrationJobs     map[string]*MigrationJobRecord `json:"migrationJobs,omitempty"`
+	BackupArtifacts   map[string]*BackupArtifact     `json:"backupArtifacts,omitempty"`
 
 	// JWTSecret signs user session tokens. A random per-cluster secret,
 	// generated once and then persisted and replicated so every HA peer agrees
@@ -315,6 +319,10 @@ func (s *Store) ImportJSON(data []byte) error {
 	ensureStateMap(&in.CloudConnections)
 	ensureStateMap(&in.AWSProvisioning)
 	ensureStateMap(&in.CloudProvisioning)
+	ensureStateMap(&in.CloudReviewPlans)
+	ensureStateMap(&in.MigrationPlans)
+	ensureStateMap(&in.MigrationJobs)
+	ensureStateMap(&in.BackupArtifacts)
 	ensureStateMap(&in.NodeEnrollments)
 	ensureStateMap(&in.NodeCredentials)
 	s.mu.Lock()
@@ -336,6 +344,10 @@ func (s *Store) ImportJSON(data []byte) error {
 	s.CloudConnections = in.CloudConnections
 	s.AWSProvisioning = in.AWSProvisioning
 	s.CloudProvisioning = in.CloudProvisioning
+	s.CloudReviewPlans = in.CloudReviewPlans
+	s.MigrationPlans = in.MigrationPlans
+	s.MigrationJobs = in.MigrationJobs
+	s.BackupArtifacts = in.BackupArtifacts
 	s.NodeEnrollments = in.NodeEnrollments
 	s.NodeCredentials = in.NodeCredentials
 	s.EarlyAccess = in.EarlyAccess

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/rackops/rackops/internal/types"
@@ -89,12 +90,27 @@ func (a *API) handleMigrationPreflight(w http.ResponseWriter, r *http.Request) {
 		}
 		if current.ComposeYML != "" || current.Kind == types.KindCompose {
 			add("compose_review", "Compose dependencies, privileges and storage require a validated migration adapter.")
+			add("compose_dependencies", "Multi-container Compose services require per-service dependency ordering and network mapping.")
 		}
 		if current.Kind == types.KindDatabase {
 			add("database_backup", "A tested database-specific backup and restore is required before this database can move.")
+			imgLower := strings.ToLower(current.Image)
+			if !strings.Contains(imgLower, "postgres") && !strings.Contains(imgLower, "mysql") && !strings.Contains(imgLower, "mariadb") {
+				add("unsupported_database_engine", "Automated migration currently supports PostgreSQL and MySQL engines only.")
+			}
 		}
 		if len(current.Mounts) > 0 || len(current.Volumes) > 0 || current.PinnedPath != "" {
 			add("storage_backup", "Attached storage requires a consistent backup, integrity verification and a tested destination restore.")
+			hasBind := false
+			for _, m := range current.Mounts {
+				if m.Type == "bind" || strings.HasPrefix(m.Source, "/") || strings.HasPrefix(m.Source, "\\") {
+					hasBind = true
+					break
+				}
+			}
+			if hasBind || current.PinnedPath != "" {
+				add("unsupported_volume_entry", "Host bind mounts cannot be migrated across machines; convert to named Docker volumes.")
+			}
 		}
 		if current.Image == "" && current.GitRepo == "" && current.ComposeYML == "" {
 			add("deployment_source", "A reproducible deployment source is missing.")
