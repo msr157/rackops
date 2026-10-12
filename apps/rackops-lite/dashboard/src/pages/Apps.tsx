@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Boxes, Play, Rocket, RotateCw, ScrollText, Search, Square } from 'lucide-react';
+import { Boxes, Cloud, Play, Rocket, RotateCw, ScrollText, Search, Square } from 'lucide-react';
 import { api } from '../api';
 import type { Service } from '../api';
 import { useData } from '../data';
@@ -12,6 +12,7 @@ import {
   Crumbs, EmptyState, Led, Pill, RowMenu, Seg, SkeletonRows, UrlChip, ledClass, publicUrls,
 } from '../components/ui';
 import type { RowMenuItem } from '../components/ui';
+import { MigrationWizard } from '../components/MigrationWizard';
 
 // AppsPage: the fleet's comparison surface. Every workload in one sortable
 // table — status, machine, live resource use, and where it's reachable —
@@ -54,6 +55,8 @@ export function AppsPage() {
   const confirm = useConfirm();
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<StatusFilter>('all');
+  const [showMigrationWizard, setShowMigrationWizard] = useState(false);
+  const [selectedMigrationApp, setSelectedMigrationApp] = useState<string | undefined>();
 
   const query = search.trim().toLowerCase();
   const visible = services.filter((s) =>
@@ -96,6 +99,14 @@ export function AppsPage() {
       items.push({ label: 'Restart', icon: <RotateCw size={13} aria-hidden />, onSelect: () => { void act(s, 'restart'); } });
     }
     items.push({ label: 'Logs', icon: <ScrollText size={13} aria-hidden />, onSelect: () => navigate(`/apps/${s.id}/logs`) });
+    items.push({
+      label: 'Migrate to Cloud',
+      icon: <Cloud size={13} aria-hidden />,
+      onSelect: () => {
+        setSelectedMigrationApp(s.id);
+        setShowMigrationWizard(true);
+      },
+    });
     return items;
   };
 
@@ -192,6 +203,9 @@ export function AppsPage() {
           <RotateCw size={14} />
         </button>
         <span className="grow" />
+        <button className="btn" onClick={() => { setSelectedMigrationApp(undefined); setShowMigrationWizard(true); }}>
+          <Cloud size={14} aria-hidden /> Move to Cloud
+        </button>
         <button className="btn primary" onClick={() => navigate('/apps/new')}>
           <Rocket size={14} aria-hidden /> Deploy app
         </button>
@@ -234,6 +248,12 @@ export function AppsPage() {
             Clear filters
           </button>
         </div>
+      )}
+      {showMigrationWizard && (
+        <MigrationWizard
+          preselectedServiceId={selectedMigrationApp}
+          onClose={() => setShowMigrationWizard(false)}
+        />
       )}
     </div>
   );

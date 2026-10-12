@@ -117,6 +117,7 @@ func (a *API) handleCloudDiskQuote(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		p.DiskQuote = &quote
+		a.recalculatePlanCosts(p)
 		saved = true
 	})
 	if !saved {

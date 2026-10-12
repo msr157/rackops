@@ -17,14 +17,15 @@ import (
 // MigrationPlan freezes the application configuration inside encrypted state.
 // Never serialize this type directly into API responses: workloads contain secrets.
 type MigrationPlan struct {
-	ID            string          `json:"id"`
-	OrgID         string          `json:"orgId"`
-	CloudReviewID string          `json:"cloudReviewId"`
-	Workloads     []types.Service `json:"workloads"`
-	CreatedAt     time.Time       `json:"createdAt"`
-	ExpiresAt     time.Time       `json:"expiresAt"`
-	ApprovedAt    time.Time       `json:"approvedAt"`
-	ApprovedBy    string          `json:"approvedBy"`
+	ID                string          `json:"id"`
+	OrgID             string          `json:"orgId"`
+	CloudReviewID     string          `json:"cloudReviewId"`
+	DestinationNodeID string          `json:"destinationNodeId,omitempty"`
+	Workloads         []types.Service `json:"workloads"`
+	CreatedAt         time.Time       `json:"createdAt"`
+	ExpiresAt         time.Time       `json:"expiresAt"`
+	ApprovedAt        time.Time       `json:"approvedAt"`
+	ApprovedBy        string          `json:"approvedBy"`
 }
 
 type MigrationJobRecord struct {
@@ -64,6 +65,10 @@ func cloneMigrationJob(job migration.Job) migration.Job {
 func (a *API) createMigrationJob(ctx context.Context, orgID, id, planID string) (migration.Job, error) {
 	a.cloudOperationMu.Lock()
 	defer a.cloudOperationMu.Unlock()
+	return a.createMigrationJobLocked(ctx, orgID, id, planID)
+}
+
+func (a *API) createMigrationJobLocked(ctx context.Context, orgID, id, planID string) (migration.Job, error) {
 	if err := ctx.Err(); err != nil {
 		return migration.Job{}, err
 	}
@@ -463,4 +468,198 @@ func (a *API) handleMigrationJobs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, items)
+}
+
+func (a *API) handleApproveMigrationPlan(w http.ResponseWriter, r *http.Request) {
+	org, member := a.requireOrg(w, r)
+	if org == nil || !requireServiceControl(w, member) {
+		return
+	}
+	if !orgCan(member, func(p types.OrgPermissions) bool { return p.ManageMachines }) {
+		http.Error(w, "machine management permission is required", http.StatusForbidden)
+		return
+	}
+	if a.Cluster != nil {
+		http.Error(w, "migration requires a single-server control plane", http.StatusConflict)
+		return
+	}
+	planID := r.PathValue("id")
+	if planID == "" {
+		http.Error(w, "plan ID is required", http.StatusBadRequest)
+		return
+	}
+
+	a.cloudOperationMu.Lock()
+	defer a.cloudOperationMu.Unlock()
+
+	var plan *MigrationPlan
+	var review *CloudReviewPlan
+	var failure string
+	statusCode := http.StatusConflict
+
+	a.Store.View(func() {
+		plan = a.Store.MigrationPlans[planID]
+		if plan == nil || plan.OrgID != org.ID {
+			failure = "migration plan not found"
+			statusCode = http.StatusNotFound
+			return
+		}
+		if !plan.ApprovedAt.IsZero() {
+			failure = "migration plan is already approved"
+			return
+		}
+		if time.Now().After(plan.ExpiresAt) {
+			failure = "migration plan expired; create a new plan"
+			return
+		}
+		review = a.Store.CloudReviewPlans[plan.CloudReviewID]
+		if review == nil || review.OrgID != org.ID {
+			failure = "associated cloud review plan unavailable"
+			return
+		}
+		if time.Now().After(review.ExpiresAt) {
+			failure = "associated cloud review expired; generate fresh quotes"
+			return
+		}
+		if !review.CanApprove || review.MonthlyCost == nil {
+			failure = "plan is not ready for approval; all cost estimates and launch checks must complete"
+			return
+		}
+		// Verify source workloads haven't changed since draft creation
+		for _, snapshot := range plan.Workloads {
+			service := a.Store.Services[snapshot.ID]
+			if service == nil || service.NodeID != snapshot.NodeID || !service.UpdatedAt.Equal(snapshot.UpdatedAt) {
+				failure = "source workload configuration changed since draft creation; create a new draft"
+				return
+			}
+			node := a.Store.Nodes[service.NodeID]
+			if node == nil || node.OrgID != org.ID || node.Status != types.NodeOnline {
+				failure = "source node is unavailable or offline"
+				return
+			}
+		}
+	})
+	if failure != "" {
+		http.Error(w, failure, statusCode)
+		return
+	}
+
+	user := a.userEmail(r)
+	now := time.Now().UTC()
+	a.Store.Mutate(func() {
+		p := a.Store.MigrationPlans[planID]
+		if p != nil {
+			p.ApprovedAt = now
+			p.ApprovedBy = user
+		}
+	})
+	if err := a.Store.persistOnce(); err != nil {
+		http.Error(w, "could not persist plan approval", http.StatusServiceUnavailable)
+		return
+	}
+
+	jobID := "mig-" + planID
+	// createMigrationJob requires cloudOperationMu which is currently held,
+	// but createMigrationJob also acquires cloudOperationMu.
+	// To avoid self-deadlock, we call createMigrationJobLocked.
+	job, err := a.createMigrationJobLocked(r.Context(), org.ID, jobID, planID)
+	if err != nil {
+		http.Error(w, "could not create migration job: "+err.Error(), http.StatusConflict)
+		return
+	}
+
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusCreated)
+	writeJSON(w, map[string]any{
+		"jobId":      job.ID,
+		"planId":     plan.ID,
+		"stage":      job.Stage,
+		"status":     job.Status,
+		"approvedAt": now,
+		"approvedBy": user,
+		"message":    "Migration plan approved; initial provisioning job created",
+	})
+}
+
+func (a *API) handleAdvanceMigration(w http.ResponseWriter, r *http.Request) {
+	org, member := a.requireOrg(w, r)
+	if org == nil || !requireServiceControl(w, member) {
+		return
+	}
+	if !orgCan(member, func(p types.OrgPermissions) bool { return p.ManageMachines }) {
+		http.Error(w, "machine management permission is required", http.StatusForbidden)
+		return
+	}
+	if a.Cluster != nil {
+		http.Error(w, "migration requires a single-server control plane", http.StatusConflict)
+		return
+	}
+	id := r.PathValue("id")
+	if id == "" {
+		http.Error(w, "migration ID is required", http.StatusBadRequest)
+		return
+	}
+	if err := a.advanceMigrationWithAgentExecutor(r.Context(), org.ID, id); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	var jobRecord *MigrationJobRecord
+	a.Store.View(func() {
+		jobRecord = a.Store.MigrationJobs[id]
+	})
+	if jobRecord == nil {
+		http.Error(w, "migration job not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, map[string]any{
+		"id":                        jobRecord.Job.ID,
+		"stage":                     jobRecord.Job.Stage,
+		"status":                    jobRecord.Job.Status,
+		"updatedAt":                 jobRecord.Job.UpdatedAt,
+		"destinationWritesPossible": jobRecord.Job.DestinationWritesPossible,
+		"receipts":                  jobRecord.Job.Receipts,
+	})
+}
+
+func (a *API) handleRecoverMigration(w http.ResponseWriter, r *http.Request) {
+	org, member := a.requireOrg(w, r)
+	if org == nil || !requireServiceControl(w, member) {
+		return
+	}
+	if !orgCan(member, func(p types.OrgPermissions) bool { return p.ManageMachines }) {
+		http.Error(w, "machine management permission is required", http.StatusForbidden)
+		return
+	}
+	id := r.PathValue("id")
+	if id == "" {
+		http.Error(w, "migration ID is required", http.StatusBadRequest)
+		return
+	}
+	a.migrationMu.Lock()
+	defer a.migrationMu.Unlock()
+	var record *MigrationJobRecord
+	a.Store.View(func() {
+		if j := a.Store.MigrationJobs[id]; j != nil && j.Job.OrgID == org.ID {
+			record = j
+		}
+	})
+	if record == nil {
+		http.Error(w, "migration job not found", http.StatusNotFound)
+		return
+	}
+	journal := &migrationJournal{api: a, orgID: org.ID, jobID: id, version: record.Version}
+	updated, err := migration.RequestRecovery(r.Context(), journal, record.Job)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, map[string]any{
+		"id":                        updated.ID,
+		"stage":                     updated.Stage,
+		"status":                    updated.Status,
+		"updatedAt":                 updated.UpdatedAt,
+		"destinationWritesPossible": updated.DestinationWritesPossible,
+	})
 }

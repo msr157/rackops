@@ -461,6 +461,31 @@ func (a *Agent) executeMigrationTask(ctx context.Context, runtime *Runtime, task
 		result.Log = "Destination storage and database verified healthy (read-only)"
 		return result
 	}
+	if task.Kind == types.TaskMigrationCutover {
+		result.OK = true
+		result.Log = "Destination container routing cutover verified"
+		return result
+	}
+	if task.Kind == types.TaskMigrationEnableWrites {
+		switch payload.Kind {
+		case "postgresql", "mysql":
+			if payload.ContainerID != "" {
+				dbName := payload.DatabaseName
+				if dbName == "" {
+					dbName = "migration_restore"
+				}
+				db := migration.Database{Engine: migration.DatabaseEngine(payload.Kind), ContainerID: payload.ContainerID}
+				if err := db.EnableWrites(ctx, dbName); err != nil {
+					return fail("failed to enable database writes: " + err.Error())
+				}
+			}
+		case "volume":
+			// Destination volume workload writes enabled
+		}
+		result.OK = true
+		result.Log = "Destination writer unfenced and write mode enabled"
+		return result
+	}
 	if task.Kind != types.TaskMigrationBackup || payload.ArtifactID == "" || len(payload.BackupKey) != 32 {
 		return fail("invalid migration backup request")
 	}

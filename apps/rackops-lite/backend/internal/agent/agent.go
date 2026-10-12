@@ -350,7 +350,7 @@ func (a *Agent) execute(ctx context.Context, task types.AgentTask) *types.TaskRe
 	}
 	runtime := *a.runtime
 	runtime.ctx = ctx
-	if task.Kind == types.TaskMigrationQuiesce || task.Kind == types.TaskMigrationBackup || task.Kind == types.TaskMigrationRestore || task.Kind == types.TaskMigrationValidate {
+	if task.Kind == types.TaskMigrationQuiesce || task.Kind == types.TaskMigrationBackup || task.Kind == types.TaskMigrationRestore || task.Kind == types.TaskMigrationValidate || task.Kind == types.TaskMigrationCutover || task.Kind == types.TaskMigrationEnableWrites {
 		return a.executeMigrationTask(ctx, &runtime, task)
 	}
 	if p.ComposeYML != "" && (task.Kind == types.TaskStart || task.Kind == types.TaskStop || task.Kind == types.TaskRestart) {

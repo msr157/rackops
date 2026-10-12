@@ -120,6 +120,24 @@ func (d Database) Validate(ctx context.Context, name string) error {
 	return d.run(ctx, script, nil, io.Discard, name)
 }
 
+// EnableWrites removes read-only restrictions and restores normal write access.
+func (d Database) EnableWrites(ctx context.Context, name string) error {
+	if !databaseName.MatchString(name) {
+		return errors.New("invalid destination database name")
+	}
+	script, err := d.script()
+	if err != nil {
+		return err
+	}
+	switch d.Engine {
+	case PostgreSQL:
+		script += `exec psql --host=/var/run/postgresql --username="$POSTGRES_USER" --dbname="$1" -c "ALTER DATABASE \"$1\" SET default_transaction_read_only = off;"`
+	case MySQL:
+		script += `mysql --protocol=socket --user=root --execute="SET GLOBAL read_only = OFF; SET GLOBAL super_read_only = OFF; SET GLOBAL event_scheduler = ON;" "$1"`
+	}
+	return d.run(ctx, script, nil, io.Discard, name)
+}
+
 func (d Database) run(ctx context.Context, script string, input io.Reader, output io.Writer, args ...string) error {
 	if err := ctx.Err(); err != nil {
 		return err

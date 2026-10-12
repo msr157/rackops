@@ -33,10 +33,11 @@ export interface CloudConnection {
 export interface CloudReviewPlan {
   computeQuote?: ComputeQuote;
   diskQuote?: DiskQuote;
+  transferQuote?: TransferQuote;
   id: string; connectionId: string; provider: string; region: string; accountId: string;
   architecture: string; createdAt: string; expiresAt: string; status: string;
   canApprove: boolean; monthlyCost: number | null; transferCost: number | null;
-  downtimeSeconds: number | null; blockers: string[];
+  dataSizeBytes?: number | null; downtimeSeconds: number | null; blockers: string[];
   inspection: MachineInspection;
   spec: { aws?: AWSMachineSpec; azure?: AzureMachineSpec; gcp?: GCPMachineSpec };
 }
@@ -52,6 +53,27 @@ export interface ComputeQuote {
   source: string; meterId: string; retrievedAt: string; effectiveAt: string;
   expiresAt: string; exclusions: string[];
 }
+
+export interface TransferQuote {
+  provider: string; region: string; transferGb: number; tier: string;
+  currency: string; monthly: number; perGbMonth: number; meterId: string;
+  source: string; retrievedAt: string; expiresAt: string; exclusions: string[];
+}
+
+export interface MigrationPlanSummary {
+  id: string; cloudReviewId: string; serviceIds: string[];
+  createdAt: string; expiresAt: string; canStart: boolean;
+}
+
+export interface MigrationJobProgress {
+  id: string;
+  stage: 'provision' | 'quiesce' | 'backup' | 'transfer' | 'restore' | 'validate' | 'cutover' | 'enable_writes' | 'complete';
+  status: string;
+  updatedAt: string;
+  destinationWritesPossible: boolean;
+  receipts?: Record<string, string>;
+}
+
 export interface MigrationReview {
   serviceId: string; provider: string; region: string; architecture: string;
   canStart: boolean; checkedAt: string;
@@ -252,6 +274,15 @@ export const api = {
   cloudReviewPlans: () => req<CloudReviewPlan[]>('/api/cloud-plans'),
   quoteCloudCompute: (id: string) => req<ComputeQuote>(`/api/cloud-plans/${encodeURIComponent(id)}/compute-estimate`, { method: 'POST' }),
   quoteCloudDisk: (id: string) => req<DiskQuote>(`/api/cloud-plans/${encodeURIComponent(id)}/disk-estimate`, { method: 'POST' }),
+  quoteCloudTransfer: (id: string, transferGb?: number, dataSizeBytes?: number) => req<TransferQuote>(`/api/cloud-plans/${encodeURIComponent(id)}/transfer-estimate`, { method: 'POST', body: JSON.stringify({ transferGb, dataSizeBytes }) }),
+  createMigrationDraft: (draft: { id: string; cloudReviewId: string; serviceIds: string[] }) => req<{ id: string; status: string; canStart: boolean; message: string }>('/api/migration-plans', { method: 'POST', body: JSON.stringify(draft) }),
+  migrationPlans: () => req<MigrationPlanSummary[]>('/api/migration-plans'),
+  migrationPlan: (id: string) => req<MigrationPlanSummary>(`/api/migration-plans/${encodeURIComponent(id)}`),
+  approveMigrationPlan: (id: string) => req<{ jobId: string; planId: string; stage: string; status: string; message: string }>(`/api/migration-plans/${encodeURIComponent(id)}/approve`, { method: 'POST' }),
+  migrations: () => req<MigrationJobProgress[]>('/api/migrations'),
+  migration: (id: string) => req<MigrationJobProgress>(`/api/migrations/${encodeURIComponent(id)}`),
+  advanceMigration: (id: string) => req<MigrationJobProgress>(`/api/migrations/${encodeURIComponent(id)}/advance`, { method: 'POST' }),
+  recoverMigration: (id: string) => req<MigrationJobProgress>(`/api/migrations/${encodeURIComponent(id)}/recover`, { method: 'POST' }),
   createCloudConnection: (name: string, provider: string, region: string, credentials: Record<string, string>) => req<CloudConnection>('/api/cloud-connections', { method: 'POST', body: JSON.stringify({ name, provider, region, credentials }) }),
   cloudOperations: () => req<CloudOperation[]>('/api/cloud-operations'),
   controlCloudRecovery: (id: string, action: 'pause' | 'resume') => req<CloudOperation>(`/api/cloud-operations/${encodeURIComponent(id)}/recovery`, { method: 'POST', body: JSON.stringify({ action }) }),

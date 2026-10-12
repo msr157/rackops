@@ -27,7 +27,9 @@ type CloudReviewPlan struct {
 	MonthlyCost     *float64                `json:"monthlyCost"`
 	ComputeQuote    *cloud.ComputeQuote     `json:"computeQuote,omitempty"`
 	DiskQuote       *cloud.DiskQuote        `json:"diskQuote,omitempty"`
+	TransferQuote   *cloud.TransferQuote    `json:"transferQuote,omitempty"`
 	TransferCost    *float64                `json:"transferCost"`
+	DataSizeBytes   *int64                  `json:"dataSizeBytes,omitempty"`
 	DowntimeSeconds *int64                  `json:"downtimeSeconds"`
 	Blockers        []string                `json:"blockers"`
 }
@@ -48,13 +50,14 @@ func (a *API) handleCloudPlans(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			copy := *p
-			copy.CanApprove = false
 			if time.Now().After(copy.ExpiresAt) {
 				copy.Status = "expired"
+				copy.CanApprove = false
 			}
 			c := a.Store.CloudConnections[p.ConnectionID]
 			if c == nil || c.OrgID != p.OrgID || c.AccountID != p.AccountID || c.Provider != p.Provider || c.Region != p.Region {
 				copy.Status = "connection_unavailable"
+				copy.CanApprove = false
 			}
 			plans = append(plans, copy)
 		}

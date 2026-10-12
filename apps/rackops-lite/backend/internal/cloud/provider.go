@@ -19,6 +19,7 @@ type MachineSpec struct {
 type Receipt struct {
 	ResourceID  string `json:"resourceId,omitempty"`
 	OperationID string `json:"operationId,omitempty"`
+	ResumeToken string `json:"resumeToken,omitempty"`
 	State       string `json:"state"`
 }
 

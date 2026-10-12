@@ -17,7 +17,7 @@ func (a *API) queueMigrationTask(orgID string, kind types.TaskKind, payload type
 	defer a.deliveryMu.Unlock()
 	a.cloudOperationMu.Lock()
 	defer a.cloudOperationMu.Unlock()
-	if a.Cluster != nil || (kind != types.TaskMigrationQuiesce && kind != types.TaskMigrationBackup && kind != types.TaskMigrationRestore && kind != types.TaskMigrationValidate) {
+	if a.Cluster != nil || (kind != types.TaskMigrationQuiesce && kind != types.TaskMigrationBackup && kind != types.TaskMigrationRestore && kind != types.TaskMigrationValidate && kind != types.TaskMigrationCutover && kind != types.TaskMigrationEnableWrites) {
 		return "", errors.New("unsupported migration task")
 	}
 	var nodeID string
@@ -39,6 +39,10 @@ func (a *API) queueMigrationTask(orgID string, kind types.TaskKind, payload type
 			expected = migration.Restore
 		} else if kind == types.TaskMigrationValidate {
 			expected = migration.Validate
+		} else if kind == types.TaskMigrationCutover {
+			expected = migration.Cutover
+		} else if kind == types.TaskMigrationEnableWrites {
+			expected = migration.EnableWrites
 		}
 		if record.Job.Stage != expected {
 			failure = errors.New("migration task does not match the active step")
@@ -47,6 +51,19 @@ func (a *API) queueMigrationTask(orgID string, kind types.TaskKind, payload type
 		plan := a.Store.MigrationPlans[record.Job.PlanID]
 		if plan == nil || plan.OrgID != orgID || plan.ApprovedAt.IsZero() {
 			failure = errors.New("approved migration plan unavailable")
+			return
+		}
+		if kind == types.TaskMigrationCutover || kind == types.TaskMigrationEnableWrites {
+			if plan.DestinationNodeID == "" {
+				failure = errors.New("destination node identity unavailable")
+				return
+			}
+			destNode := a.Store.Nodes[plan.DestinationNodeID]
+			if destNode == nil || destNode.OrgID != orgID {
+				failure = errors.New("destination node ownership changed")
+				return
+			}
+			nodeID = plan.DestinationNodeID
 			return
 		}
 		if kind == types.TaskMigrationRestore || kind == types.TaskMigrationValidate {

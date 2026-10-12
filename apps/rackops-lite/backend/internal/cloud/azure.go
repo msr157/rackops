@@ -156,12 +156,11 @@ func (p *Azure) Start(ctx context.Context, s MachineSpec) (Receipt, error) {
 	if err != nil {
 		return Receipt{}, err
 	}
-	// Resource identity is known even if the long-running operation is pending.
-	_ = poller
+	resumeToken, _ := poller.ResumeToken()
 	id := "/subscriptions/" + spec.SubscriptionID + "/resourceGroups/" + spec.ResourceGroup + "/providers/Microsoft.Compute/virtualMachines/" + name
-	return Receipt{ResourceID: id, OperationID: name, State: "submitted"}, nil
+	return Receipt{ResourceID: id, OperationID: name, ResumeToken: resumeToken, State: "submitted"}, nil
 }
-func (p *Azure) Reconcile(ctx context.Context, s MachineSpec, _ Receipt) (Receipt, error) {
+func (p *Azure) Reconcile(ctx context.Context, s MachineSpec, receipt Receipt) (Receipt, error) {
 	if err := s.Validate(p.Name()); err != nil {
 		return Receipt{}, err
 	}
@@ -180,5 +179,5 @@ func (p *Azure) Reconcile(ctx context.Context, s MachineSpec, _ Receipt) (Receip
 	if result.Properties != nil && result.Properties.ProvisioningState != nil {
 		state = *result.Properties.ProvisioningState
 	}
-	return Receipt{ResourceID: *result.ID, OperationID: "rackops-" + spec.OperationID, State: state}, nil
+	return Receipt{ResourceID: *result.ID, OperationID: "rackops-" + spec.OperationID, ResumeToken: receipt.ResumeToken, State: state}, nil
 }

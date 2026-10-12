@@ -103,8 +103,8 @@ func (a *API) handleCloudComputeQuote(w http.ResponseWriter, r *http.Request) {
 		if p == nil || p.OrgID != org.ID || time.Now().After(p.ExpiresAt) || c == nil || c.OrgID != org.ID || c.AccountID != plan.AccountID || c.Provider != plan.Provider || c.Region != plan.Region {
 			return
 		}
-		// Refreshing a compute subtotal never changes approval or the unknown total.
 		p.ComputeQuote = &quote
+		a.recalculatePlanCosts(p)
 		saved = true
 	})
 	if !saved {

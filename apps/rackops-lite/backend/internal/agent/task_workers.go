@@ -114,7 +114,7 @@ func (w *taskWorkers) run(ctx context.Context) {
 		// per-service ordering, while reporting continues on the agent loop.
 		// A short deadline would turn a healthy multi-hour transfer into an
 		// uncertain write after its source has already been quiesced.
-		if task.Kind == types.TaskMigrationBackup || task.Kind == types.TaskMigrationTransferSource || task.Kind == types.TaskMigrationTransferDestination || task.Kind == types.TaskMigrationRestore || task.Kind == types.TaskMigrationValidate {
+		if task.Kind == types.TaskMigrationBackup || task.Kind == types.TaskMigrationTransferSource || task.Kind == types.TaskMigrationTransferDestination || task.Kind == types.TaskMigrationRestore || task.Kind == types.TaskMigrationValidate || task.Kind == types.TaskMigrationCutover || task.Kind == types.TaskMigrationEnableWrites {
 			deadline = 24 * time.Hour
 		}
 		jobCtx, cancel := context.WithTimeout(ctx, deadline)

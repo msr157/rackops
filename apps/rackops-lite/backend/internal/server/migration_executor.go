@@ -5,7 +5,9 @@ import (
 	"errors"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/rackops/rackops/internal/cloud"
 	"github.com/rackops/rackops/internal/migration"
 	"github.com/rackops/rackops/internal/types"
 )
@@ -73,8 +75,74 @@ func (e *agentMigrationExecutor) getArtifacts() ([]*BackupArtifact, error) {
 	return artifacts, nil
 }
 
-func (e *agentMigrationExecutor) Execute(_ context.Context, stage migration.Stage, operationID string) (string, bool, error) {
+func (e *agentMigrationExecutor) Execute(ctx context.Context, stage migration.Stage, operationID string) (string, bool, error) {
 	switch stage {
+	case migration.Provision:
+		var plan *MigrationPlan
+		var review *CloudReviewPlan
+		e.api.Store.View(func() {
+			job := e.api.Store.MigrationJobs[e.jobID]
+			if job != nil {
+				plan = e.api.Store.MigrationPlans[job.Job.PlanID]
+				if plan != nil && plan.CloudReviewID != "" {
+					review = e.api.Store.CloudReviewPlans[plan.CloudReviewID]
+				}
+			}
+		})
+		if plan == nil {
+			return "", false, errors.New("migration plan unavailable")
+		}
+		if plan.DestinationNodeID != "" {
+			var nodeOnline bool
+			e.api.Store.View(func() {
+				if n := e.api.Store.Nodes[plan.DestinationNodeID]; n != nil && n.Status == types.NodeOnline {
+					nodeOnline = true
+				}
+			})
+			if nodeOnline {
+				return operationID, true, nil
+			}
+		}
+		if review == nil {
+			return "", false, errors.New("cloud review plan unavailable for provisioning")
+		}
+		provID := review.Spec.ID()
+		var existingProv *CloudProvisioning
+		e.api.Store.View(func() {
+			existingProv = e.api.Store.CloudProvisioning[provID]
+		})
+		if existingProv == nil {
+			prov := CloudProvisioning{
+				ID:           provID,
+				OrgID:        e.orgID,
+				ConnectionID: review.ConnectionID,
+				Provider:     review.Provider,
+				Region:       review.Region,
+				AccountID:    review.AccountID,
+				Spec:         review.Spec,
+			}
+			if err := e.api.saveCloudProvisioning(prov); err != nil {
+				return "", false, err
+			}
+		}
+		var provJob *CloudProvisioning
+		e.api.Store.View(func() {
+			provJob = e.api.Store.CloudProvisioning[provID]
+		})
+		if provJob != nil && provJob.BootstrapConfig == nil {
+			config := cloud.BootstrapConfig{
+				ServerURL:    "https://controlplane.rackops.local",
+				OrgID:        e.orgID,
+				Architecture: review.Architecture,
+				BinaryURL:    "https://github.com/msr157/rackops/releases/download/v1.0.0/rackops-linux-" + review.Architecture,
+				SHA256:       "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+			}
+			if err := e.api.prepareCloudBootstrap(e.orgID, provID, config); err != nil {
+				return "", false, err
+			}
+		}
+		return operationID, false, nil
+
 	case migration.Quiesce:
 		services, err := e.getWorkloadServices(stage)
 		if err != nil {
@@ -197,11 +265,73 @@ func (e *agentMigrationExecutor) Execute(_ context.Context, stage migration.Stag
 		return operationID, false, nil
 
 	case migration.Cutover:
-		// Routing cutover
+		services, err := e.getWorkloadServices(stage)
+		if err != nil {
+			return "", false, err
+		}
+		var destNodeID string
+		e.api.Store.View(func() {
+			job := e.api.Store.MigrationJobs[e.jobID]
+			if job != nil {
+				plan := e.api.Store.MigrationPlans[job.Job.PlanID]
+				if plan != nil {
+					destNodeID = plan.DestinationNodeID
+				}
+			}
+		})
+		if destNodeID == "" {
+			return "", false, errors.New("destination node identity unavailable for cutover")
+		}
+		for _, serviceID := range services {
+			payload := types.MigrationTaskPayload{
+				JobID:     e.jobID,
+				ServiceID: serviceID,
+			}
+			if _, err := e.api.queueMigrationTask(e.orgID, types.TaskMigrationCutover, payload); err != nil {
+				return "", false, err
+			}
+		}
+		e.api.Store.Mutate(func() {
+			for _, serviceID := range services {
+				svc := e.api.Store.Services[serviceID]
+				if svc != nil {
+					svc.NodeID = destNodeID
+					svc.UpdatedAt = time.Now().UTC()
+				}
+			}
+		})
+		_ = e.api.Store.persistOnce()
 		return operationID, false, nil
 
 	case migration.EnableWrites:
-		// Enable destination writes
+		services, err := e.getWorkloadServices(stage)
+		if err != nil {
+			return "", false, err
+		}
+		for _, serviceID := range services {
+			var kind string
+			e.api.Store.View(func() {
+				svc := e.api.Store.Services[serviceID]
+				if svc != nil {
+					if svc.Kind == types.KindDatabase {
+						kind = "postgresql"
+						if strings.Contains(strings.ToLower(svc.Image), "mysql") {
+							kind = "mysql"
+						}
+					} else {
+						kind = "volume"
+					}
+				}
+			})
+			payload := types.MigrationTaskPayload{
+				JobID:     e.jobID,
+				ServiceID: serviceID,
+				Kind:      kind,
+			}
+			if _, err := e.api.queueMigrationTask(e.orgID, types.TaskMigrationEnableWrites, payload); err != nil {
+				return "", false, err
+			}
+		}
 		return operationID, false, nil
 
 	case migration.Complete:
@@ -214,6 +344,64 @@ func (e *agentMigrationExecutor) Execute(_ context.Context, stage migration.Stag
 
 func (e *agentMigrationExecutor) Reconcile(_ context.Context, stage migration.Stage, operationID string) (string, bool, error) {
 	switch stage {
+	case migration.Provision:
+		var plan *MigrationPlan
+		var provJob *CloudProvisioning
+		e.api.Store.View(func() {
+			job := e.api.Store.MigrationJobs[e.jobID]
+			if job != nil {
+				plan = e.api.Store.MigrationPlans[job.Job.PlanID]
+				if plan != nil && plan.CloudReviewID != "" {
+					provJob = e.api.Store.CloudProvisioning[plan.CloudReviewID]
+				}
+			}
+		})
+		if plan == nil {
+			return "", false, errors.New("migration plan unavailable")
+		}
+		if plan.DestinationNodeID != "" {
+			var nodeOnline bool
+			e.api.Store.View(func() {
+				if n := e.api.Store.Nodes[plan.DestinationNodeID]; n != nil && n.Status == types.NodeOnline {
+					nodeOnline = true
+				}
+			})
+			if nodeOnline {
+				return operationID, true, nil
+			}
+		}
+		if provJob == nil {
+			return "", false, errors.New("cloud provisioning job not found")
+		}
+		if provJob.EnrollmentHash != "" {
+			var enrolledNodeID string
+			e.api.Store.View(func() {
+				grant := e.api.Store.NodeEnrollments[provJob.EnrollmentHash]
+				if grant != nil && grant.NodeID != "" {
+					node := e.api.Store.Nodes[grant.NodeID]
+					if node != nil && node.Status == types.NodeOnline {
+						enrolledNodeID = node.ID
+					}
+				}
+			})
+			if enrolledNodeID != "" {
+				e.api.Store.Mutate(func() {
+					p := e.api.Store.MigrationPlans[plan.ID]
+					if p != nil {
+						p.DestinationNodeID = enrolledNodeID
+					}
+					for _, art := range e.api.Store.BackupArtifacts {
+						if art.JobID == e.jobID && art.OrgID == e.orgID {
+							art.DestinationNodeID = enrolledNodeID
+						}
+					}
+				})
+				_ = e.api.Store.persistOnce()
+				return operationID, true, nil
+			}
+		}
+		return "", false, nil
+
 	case migration.Quiesce:
 		services, err := e.getWorkloadServices(stage)
 		if err != nil {
@@ -376,9 +564,59 @@ func (e *agentMigrationExecutor) Reconcile(_ context.Context, stage migration.St
 		return operationID, true, nil
 
 	case migration.Cutover:
+		services, err := e.getWorkloadServices(stage)
+		if err != nil {
+			return "", false, err
+		}
+		done := true
+		var failure bool
+		e.api.Store.View(func() {
+			for _, serviceID := range services {
+				taskID := e.jobID + ":" + string(types.TaskMigrationCutover) + ":" + serviceID + ":"
+				op := e.api.Store.TaskOperations[taskID]
+				if op == nil || op.State == "delivered" {
+					done = false
+					continue
+				}
+				if op.State != "completed" || op.Outcome != "succeeded" {
+					failure = true
+				}
+			}
+		})
+		if failure {
+			return "", false, errors.New("cutover routing failed on destination node")
+		}
+		if !done {
+			return "", false, nil
+		}
 		return operationID, true, nil
 
 	case migration.EnableWrites:
+		services, err := e.getWorkloadServices(stage)
+		if err != nil {
+			return "", false, err
+		}
+		done := true
+		var failure bool
+		e.api.Store.View(func() {
+			for _, serviceID := range services {
+				taskID := e.jobID + ":" + string(types.TaskMigrationEnableWrites) + ":" + serviceID + ":"
+				op := e.api.Store.TaskOperations[taskID]
+				if op == nil || op.State == "delivered" {
+					done = false
+					continue
+				}
+				if op.State != "completed" || op.Outcome != "succeeded" {
+					failure = true
+				}
+			}
+		})
+		if failure {
+			return "", false, errors.New("enable writes failed on destination node")
+		}
+		if !done {
+			return "", false, nil
+		}
 		return operationID, true, nil
 
 	case migration.Complete:
