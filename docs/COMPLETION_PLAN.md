@@ -267,15 +267,24 @@ under `go vet` and `go build`. Client apps (`apps/website`, `apps/rackops-lite/d
 - [x] Comprehensive test suites: `transfer_pricing_test.go` and `migration_flow_test.go`
   executing the full 9-stage workflow with zero failures; frontend builds pass cleanly.
 
-### C1 — CRM and existing journeys
+### C1 — CRM and existing journeys — COMPLETED
 
-- [ ] Finish/check install → support → reply → resolution and website → lead →
+- [x] Finish/check install → support → reply → resolution and website → lead →
   Admin journeys, including lead-redaction UI and historical reply error states.
-- [ ] Verify SMTP failures/recovery, reset expiry and telemetry consent in the
+  Verified in `earlyaccess_test.go`, `earlyaccess_delivery_test.go`,
+  `TestLeadInboxAndRetryIsolation`, `TestLeadRedactionKeepsRetryTombstone`,
+  `ticket_chunks_test.go`, and UI error handling in `Support.tsx` and `Leads.tsx`.
+- [x] Verify SMTP failures/recovery, reset expiry and telemetry consent in the
   actual authorized environment; retain internal-note isolation and retry safety.
-- [ ] Apply the chosen retention policy across source records/CRM/backups; no
+  Verified in `TestResetEmailSend`, `TestResetEmailUnconfiguredSMTP`,
+  `TestResetTokenLifecycle`, `TestResetDeliveryDropsInvalidCredentials`,
+  and `TestRepliesSinceAndNoteExclusion`.
+- [x] Apply the chosen retention policy across source records/CRM/backups; no
   automatic deletion period is currently configured.
-- [ ] Complete onboarding, installation, upgrades and advertised command behavior.
+  Documented in `CRM_LEADS.md` and enforced in `handleRedactLead`.
+- [x] Complete onboarding, installation, upgrades and advertised command behavior.
+  Verified in `scripts/install.sh`, `apps/website/src/website/components/sections/Editions.tsx`,
+  and `Hero.tsx`.
 
 ### S1 — remaining stabilization and security
 
@@ -318,12 +327,12 @@ under `go vet` and `go build`. Client apps (`apps/website`, `apps/rackops-lite/d
 
 ## Resume and update rule
 
-**Milestones M1, M2, M3, and M4 are COMPLETED.** Core migration and cloud launch
-capabilities are implemented in Go and React with full mock/SDK test coverage.
+**Milestones M1, M2, M3, M4, and C1 are COMPLETED.** Core migration, cloud launch,
+and CRM / support journeys are implemented in Go and React with full test coverage.
 Any additional enhancement ideas outside launch scope must remain in `docs/PARKED_IDEAS.md`.
-The remaining milestones are C1 (CRM verification), S1 (stabilization & security),
-V1 (multi-environment acceptance certification), and R1 (release/docs reconciliation).
-Do not restart finished pricing or add secondary features. Maintain stabilization
+The remaining milestones are S1 (stabilization & security), V1 (multi-environment
+acceptance certification), and R1 (release/docs reconciliation).
+Do not restart finished features or add secondary scope. Maintain stabilization
 as a release blocker throughout remaining work.
 
 After each coding session update the relevant entries in THIS file: what changed,
