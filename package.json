@@ -6,6 +6,8 @@
     "dev": "turbo run dev",
     "build": "turbo run build",
     "lint": "turbo run lint",
+    "test": "turbo run test",
+    "test:all": "turbo run test && pnpm run go:test",
     "go:build": "go -C apps/rackops-lite/backend build ./...",
     "go:test": "go -C apps/rackops-lite/backend test ./...",
     "go:vet": "go -C apps/rackops-lite/backend vet ./...",

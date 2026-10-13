@@ -474,7 +474,7 @@ export function uid(): string {
 
 // dnsLabel mirrors the backend sanitizer: DNS-safe app names.
 export function dnsLabel(s: string): string {
-  const out = s.toLowerCase().replace(/[ ._]/g, '-').replace(/[^a-z0-9-]/g, '').replace(/^-+|-+$/g, '');
+  const out = s.toLowerCase().replace(/[ ._]/g, '-').replace(/[^a-z0-9-]/g, '').replace(/-+/g, '-').replace(/^-+|-+$/g, '');
   return out || 'app';
 }
 
