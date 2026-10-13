@@ -5,6 +5,7 @@ node_modules/
 .turbo/
 bin/
 dist/
+dist-release/
 *.exe
 apps/website/dist/
 apps/rackops-lite/backend/rackops

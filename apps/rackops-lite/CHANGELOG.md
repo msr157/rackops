@@ -2,6 +2,26 @@
 
 Notable user-visible changes to RackOps Lite are recorded here.
 
+## v0.7.0 - 2026-10-13
+
+### Multi-Cloud Migration Engine
+
+- **Launch workloads on AWS, Azure, and Google Cloud**: Choose target VM sizes (e.g. AWS c6i, Azure Standard_D4s_v5, GCP c2-standard-4) and disk types with live pricing calculations across compute, storage, and outbound transfer egress.
+- **9-stage zero-loss migration workflow**: Deterministic state machine orchestrating preflight inspection, source database quiescence, authenticated AES-GCM 256 encryption, snapshot extraction, encrypted transport, destination restore, boot verification, health checks, and zero-stale traffic cutover.
+- **Downtime & egress estimation**: Real-time migration timing estimates based on volume size and active dirty-page rates, ensuring cutovers happen within agreed maintenance windows.
+- **Guided 5-step React migration wizard**: Interactive in-dashboard wizard with real-time SSE progress streaming and automated rollback safeguards if target health verification fails.
+
+### RackOps Front Door (Self-Hosted Edge Tunnels)
+
+- **Dedicated edge ingress tunnels**: Expose internal workloads and dashboards across NAT and CGNAT without public IP addresses or router port forwarding.
+- **Multiplexed TCP/QUIC transport**: Low-latency, high-throughput encrypted edge tunnels with automatic Let's Encrypt TLS certificate issuance.
+
+### Hardened Security & Tenant Isolation
+
+- **AI Co-Pilot organization scoping**: Strict tenant memory and context isolation ensuring AI assistant diagnostics never cross organization boundaries.
+- **Offline recovery & command sandboxing**: Resilient fallback operational modes when remote LLM APIs are unreachable, with strict sandboxing preventing runaway executions.
+- **Encrypted volume snapshots**: Authenticated AES-256-GCM backups with direct offload support to AWS S3, Azure Blob, Google Cloud Storage, and MinIO.
+
 ## v0.6.0 - 2026-08-06
 
 ### Adding machines is one paste now

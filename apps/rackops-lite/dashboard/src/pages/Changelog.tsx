@@ -17,6 +17,17 @@ interface Release { version: string; date: string; title: string; changes: Relea
 
 const releases: Release[] = [
   {
+    version: 'v0.7.0', date: 'October 13, 2026', title: 'Multi-cloud migration, Front Door tunnels, and hardened tenant isolation',
+    changes: [
+      { lead: 'Multi-Cloud Migration', text: ' — launch and cut over workloads directly to AWS, Azure, or GCP with live VM and storage pricing quotes, and real-time downtime calculation.' },
+      { lead: '9-Stage Zero-Loss Engine', text: ' — deterministic cutover pipeline: quiesce, encrypt, snapshot, transfer, restore, boot, validate, and atomically cut over traffic with automatic rollback protection.' },
+      { lead: 'Migration Wizard', text: ' — interactive 5-step React wizard with live SSE progress tracking and phase status visualization.' },
+      { lead: 'Front Door edge tunnels', text: ' — self-hosted multiplexed TCP/QUIC edge ingress service exposing internal dashboards and apps through CGNAT with automated Let’s Encrypt TLS.' },
+      { lead: 'AI Tenant Isolation', text: ' — strict organizational context boundaries in the AI Co-Pilot, offline fallback heuristics, and sandbox execution constraints.' },
+      { lead: 'AES-GCM 256 Backups', text: ' — authenticated local and cloud volume snapshot replication targeting AWS S3, Azure Blob, Google Cloud Storage, or MinIO.' },
+    ],
+  },
+  {
     version: 'v0.6.0', date: 'August 6, 2026', title: 'One-paste machines and remote access',
     changes: [
       { lead: 'One-paste Add machine', text: ' — the join dialog now hands you a single installer command that sets up Docker, installs RackOps, and joins the machine to your rack as a boot-time service (Linux, macOS, WSL2).' },
