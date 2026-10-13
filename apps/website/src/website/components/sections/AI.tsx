@@ -55,7 +55,7 @@ export default function AI() {
   return (
     <section className="section ai-section" id="ai" ref={sectionRef}>
       <div className="container">
-        <SectionRule index="05" name="Intelligence" />
+        <SectionRule index="06" name="Intelligence" />
         <div className="ai-grid">
           <div className="ai-content">
             <h2 className="reveal">Ops that explain themselves.</h2>

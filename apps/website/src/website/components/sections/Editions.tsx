@@ -169,6 +169,168 @@ function CommandBlock({ command, id }: { command: Command; id: string }) {
   );
 }
 
+interface FeatureCategory {
+  title: string;
+  features: {
+    name: string;
+    description: string;
+    status: string;
+  }[];
+}
+
+const PLATFORM_CAPABILITIES: FeatureCategory[] = [
+  {
+    title: 'Multi-Cloud Migration & Sizing',
+    features: [
+      {
+        name: 'Live Multi-Cloud Pricing',
+        description: 'Real-time instance, disk, and outbound egress cost quotes across AWS, Azure, and Google Cloud.',
+        status: 'Shipped',
+      },
+      {
+        name: '9-Stage Zero-Loss Engine',
+        description: 'Deterministic state machine orchestrating quiescence, encryption, transfer, restore, and cutover.',
+        status: 'Shipped',
+      },
+      {
+        name: 'Downtime & Egress Estimation',
+        description: 'Predictive transfer timing based on volume footprint, dirty page rate, and destination network bandwidth.',
+        status: 'Shipped',
+      },
+      {
+        name: 'Source Quiescence & Safe Rollback',
+        description: 'Guaranteed source data preservation with instantaneous rollback if target validation fails.',
+        status: 'Shipped',
+      },
+    ],
+  },
+  {
+    title: 'Workloads & Container Orchestration',
+    features: [
+      {
+        name: 'Docker & Compose Native',
+        description: 'Deploy standalone containers and complex multi-service compose stacks with native lifecycle controls.',
+        status: 'Shipped',
+      },
+      {
+        name: 'Zero-Downtime Rolling Deploys',
+        description: 'Healthcheck-gated canary and rolling updates with automatic regression rollbacks.',
+        status: 'Shipped',
+      },
+      {
+        name: 'Resource Governance',
+        description: 'Cgroup v2 enforced CPU quotas, memory limits, and OOM killer protection policies.',
+        status: 'Shipped',
+      },
+      {
+        name: 'Live Shell & Streaming Logs',
+        description: 'Interactive container exec terminals and multiplexed log streaming directly in the browser.',
+        status: 'Shipped',
+      },
+    ],
+  },
+  {
+    title: 'Private Mesh & Front Door Ingress',
+    features: [
+      {
+        name: 'WireGuard Mesh Network',
+        description: 'Kernel-level P2P encrypted mesh connecting heterogeneous nodes across any cloud or bare metal.',
+        status: 'Shipped',
+      },
+      {
+        name: 'Edge Front Door Tunnels',
+        description: 'Secure multiplexed QUIC/HTTP2 tunnels exposing internal services without opening public firewall ports.',
+        status: 'Shipped',
+      },
+      {
+        name: 'Automatic TLS Certificates',
+        description: 'Integrated Let\'s Encrypt ACME automated issuance and wildcard renewals with zero config.',
+        status: 'Shipped',
+      },
+      {
+        name: 'Zero-Stale Ingress Cutover',
+        description: 'Atomic traffic routing switchover that guarantees zero in-flight connection drops during migrations.',
+        status: 'Shipped',
+      },
+    ],
+  },
+  {
+    title: 'Host Telemetry & Smart Placement',
+    features: [
+      {
+        name: 'Real-Time Host Telemetry',
+        description: 'Sub-second metrics for CPU, RAM, disk I/O, and network interfaces with embedded historical retention.',
+        status: 'Shipped',
+      },
+      {
+        name: 'Smart Placement Engine',
+        description: 'Heuristic and resource-aware scheduler balancing workloads across available nodes automatically.',
+        status: 'Shipped',
+      },
+      {
+        name: 'Node Heartbeats & Watchdog',
+        description: 'Continuous health verification with automatic failover triggers and evacuation policies.',
+        status: 'Shipped',
+      },
+      {
+        name: 'Heterogeneous Node Support',
+        description: 'Seamlessly join bare metal, cloud VMs, edge devices, and local workstations into one cluster.',
+        status: 'Shipped',
+      },
+    ],
+  },
+  {
+    title: 'Encrypted Backups & Disaster Recovery',
+    features: [
+      {
+        name: 'AES-GCM 256 Volume Backups',
+        description: 'Military-grade authenticated encryption before data leaves host storage.',
+        status: 'Shipped',
+      },
+      {
+        name: 'Multi-Target Blob Offload',
+        description: 'Direct snapshot replication to AWS S3, Azure Blob, Google Cloud Storage, or MinIO.',
+        status: 'Shipped',
+      },
+      {
+        name: 'Point-in-Time State Recovery',
+        description: 'One-click disaster recovery restoring container states and persistent volumes with verifiable hashes.',
+        status: 'Shipped',
+      },
+      {
+        name: 'Read-Only Integrity Probes',
+        description: 'Pre-flight data consistency verification ensuring restore validity prior to traffic activation.',
+        status: 'Shipped',
+      },
+    ],
+  },
+  {
+    title: 'Security, Multi-Tenancy & AI Co-Pilot',
+    features: [
+      {
+        name: 'Multi-Tenant Workspaces',
+        description: 'Strict workspace isolation, org-scoped API tokens, and granular permission boundaries.',
+        status: 'Shipped',
+      },
+      {
+        name: 'Embedded AI Co-Pilot',
+        description: 'Infrastructure assistant for deployment diagnostics, log analysis, and architectural recommendations.',
+        status: 'Shipped',
+      },
+      {
+        name: 'Tenant AI Isolation',
+        description: 'Strict memory and context boundaries ensuring AI assistance never crosses tenant or organization lines.',
+        status: 'Shipped',
+      },
+      {
+        name: 'Zero External Control Plane',
+        description: 'Fully self-contained Go binary with embedded SQLite WAL storage — your infrastructure stays yours.',
+        status: 'Shipped',
+      },
+    ],
+  },
+];
+
 export default function Editions() {
   const sectionRef = useScrollReveal<HTMLElement>(0.08);
   const tabsRef = useRef<HTMLDivElement>(null);
@@ -199,7 +361,7 @@ export default function Editions() {
   return (
     <section className="section editions" id="editions" ref={sectionRef}>
       <div className="container">
-        <SectionRule index="07" name="Editions" />
+        <SectionRule index="08" name="Editions" />
         <h2 className="reveal">RackOps Lite is live.</h2>
         <p className="section-body reveal">
           Install the self-hosted control plane on Linux, macOS, or Windows through WSL2.
@@ -303,6 +465,38 @@ export default function Editions() {
               Join enterprise early access
             </a>
           </aside>
+        </div>
+
+        <div className="editions-matrix reveal">
+          <header className="editions-matrix-header">
+            <div>
+              <span className="mono-label signal">Comprehensive Scope</span>
+              <h3>Full Platform Capabilities</h3>
+              <p>
+                Everything built and shipped in the RackOps ecosystem. From bare-metal runtime to multi-cloud migration and private mesh networking.
+              </p>
+            </div>
+            <span className="mono-label">{PLATFORM_CAPABILITIES.reduce((acc, cat) => acc + cat.features.length, 0)} Features Shipped</span>
+          </header>
+
+          <div className="matrix-grid">
+            {PLATFORM_CAPABILITIES.map((category) => (
+              <div key={category.title} className="matrix-category">
+                <div className="matrix-category-title mono-label">
+                  {category.title}
+                </div>
+                <div className="matrix-feature-list">
+                  {category.features.map((feature) => (
+                    <div key={feature.name} className="matrix-feature-card">
+                      <strong>{feature.name}</strong>
+                      <p>{feature.description}</p>
+                      <span className="matrix-status-pill mono-label">{feature.status}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </section>

@@ -1,0 +1,241 @@
+.migration-section {
+  padding-top: clamp(80px, 10vw, 140px);
+  padding-bottom: clamp(80px, 10vw, 140px);
+  background: var(--bg-0);
+  border-bottom: 1px solid var(--rule);
+}
+
+.migration-showcase {
+  margin-top: 56px;
+  background: var(--surface);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.migration-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  background: var(--bg-1);
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.migration-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  background: transparent;
+  color: var(--ink-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all var(--transition);
+  font-size: 13px;
+}
+
+.migration-tab:hover {
+  color: var(--ink);
+  background: var(--surface);
+}
+
+.migration-tab.active {
+  color: var(--ink);
+  background: var(--surface);
+  border-color: var(--rule-strong);
+}
+
+.migration-tab-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ink-3);
+  transition: background var(--transition);
+}
+
+.migration-tab.active .migration-tab-dot {
+  background: var(--signal);
+  box-shadow: 0 0 8px var(--signal-glow);
+}
+
+.migration-card {
+  padding: clamp(24px, 4vw, 44px);
+}
+
+.migration-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 24px;
+  padding-bottom: 32px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.migration-badge {
+  display: inline-block;
+  margin-bottom: 8px;
+  padding: 3px 8px;
+  background: var(--signal-glow);
+  border: 1px solid var(--signal-dim);
+  border-radius: var(--radius);
+  font-size: 11px;
+}
+
+.migration-shape-title {
+  font-size: clamp(22px, 2.5vw, 32px);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  margin-bottom: 6px;
+}
+
+.migration-specs {
+  color: var(--ink-2);
+  font-size: 13px;
+}
+
+.migration-quote-total {
+  text-align: right;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.migration-total-label {
+  font-size: 11px;
+  color: var(--ink-3);
+}
+
+.migration-total-amount {
+  font-size: clamp(32px, 3.5vw, 48px);
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  color: var(--signal);
+  line-height: 1;
+}
+
+.migration-downtime {
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.migration-breakdown {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 20px;
+  padding: 24px 0 32px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.breakdown-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.breakdown-item strong {
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.faint {
+  color: var(--ink-3);
+  font-size: 12px;
+}
+
+.migration-pipeline-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 28px;
+  margin-bottom: 18px;
+  font-size: 12px;
+}
+
+.migration-pipeline {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px;
+}
+
+.pipeline-step {
+  background: var(--bg-1);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  transition: border-color var(--transition);
+}
+
+.pipeline-step:hover {
+  border-color: var(--rule-strong);
+}
+
+.pipeline-step-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.pipeline-num {
+  color: var(--signal);
+  font-size: 11px;
+}
+
+.pipeline-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.pipeline-desc {
+  font-size: 12px;
+  color: var(--ink-2);
+  line-height: 1.4;
+}
+
+.migration-guarantees {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 24px;
+  margin-top: 48px;
+}
+
+.guarantee-card {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 28px 24px;
+  transition: border-color var(--transition);
+}
+
+.guarantee-card:hover {
+  border-color: var(--rule-strong);
+}
+
+.guarantee-card span {
+  display: inline-block;
+  margin-bottom: 12px;
+  font-size: 11px;
+}
+
+.guarantee-card h3 {
+  font-size: 18px;
+  font-weight: 500;
+  margin-bottom: 10px;
+  letter-spacing: -0.01em;
+}
+
+.guarantee-card p {
+  color: var(--ink-2);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+@media (max-width: 768px) {
+  .migration-quote-total {
+    text-align: left;
+  }
+}

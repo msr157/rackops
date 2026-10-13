@@ -41,7 +41,7 @@ export default function Audience() {
   return (
     <section className="section audience" id="audience" ref={sectionRef}>
       <div className="container">
-        <SectionRule index="06" name="Operators" />
+        <SectionRule index="07" name="Operators" />
         <h2 className="reveal">Built for people who own their machines.</h2>
 
         <div className="audience-grid">

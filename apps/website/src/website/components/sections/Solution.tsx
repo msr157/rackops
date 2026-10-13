@@ -13,13 +13,18 @@ const PILLARS = [
   },
   {
     index: 'CONNECT / 02',
-    name: 'Private Mesh',
-    body: 'Every machine linked over an encrypted mesh — across racks, buildings, and continents. Works behind CGNAT. No port forwarding, no VPN config.',
+    name: 'Private Mesh & Front Door',
+    body: 'Every machine linked over an encrypted WireGuard mesh and high-performance Front Door tunnels. Works behind CGNAT with automated TLS certificates. No port forwarding needed.',
   },
   {
     index: 'RUN / 03',
-    name: 'Control Plane',
-    body: "One view of the whole fleet. It doesn't just show where workloads are running — it decides where they should run.",
+    name: 'Control Plane & Smart Placement',
+    body: "One view of the whole fleet. It doesn't just show where workloads are running — it scores thermal curves and memory headroom to place Docker and Compose apps optimally.",
+  },
+  {
+    index: 'MIGRATE / 04',
+    name: 'Multi-Cloud Migration',
+    body: 'Move applications and quiesced databases straight to AWS, Azure, or GCP. Sourced pricing, conservative downtime quotes, and a 9-stage zero-data-loss cutover.',
   },
 ];
 
@@ -60,7 +65,7 @@ export default function Solution() {
     <section className="section solution" id="solution" ref={sectionRef}>
       <div className="container">
         <SectionRule index="03" name="System" />
-        <h2 className="reveal">See. Connect. Run.</h2>
+        <h2 className="reveal">See. Connect. Run. Move to Cloud.</h2>
 
         <div className="solution-pillars">
           {PILLARS.map((pillar, i) => (

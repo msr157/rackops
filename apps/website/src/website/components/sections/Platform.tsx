@@ -6,13 +6,13 @@ import SectionRule from '@/components/SectionRule';
 import './Platform.css';
 
 const LAYERS = [
-  { id: 'L1', name: 'Hardware & Discovery', items: ['CPU', 'RAM', 'DISK', 'GPU', 'NETWORK', 'POWER', 'THERMAL', 'SENSORS'] },
-  { id: 'L2', name: 'Infrastructure', items: ['SERVER MGMT', 'UPDATES', 'USERS', 'ACCESS'] },
-  { id: 'L3', name: 'Observability', items: ['METRICS', 'LOGS', 'TRACES', 'ALERTS', 'EVENTS', 'HEALTH'] },
-  { id: 'L4', name: 'Deployment', items: ['DOCKER', 'COMPOSE', 'KUBERNETES', 'CI/CD', 'GITOPS'] },
-  { id: 'L5', name: 'Storage', items: ['BACKUPS', 'SNAPSHOTS', 'NAS', 'OBJECT STORAGE', 'REPLICATION'] },
-  { id: 'L6', name: 'Network', items: ['VPN', 'DNS', 'TUNNELS', 'LOAD BALANCERS', 'FIREWALLS'] },
-  { id: 'L7', name: 'AI Compute', items: ['GPU POOLING', 'SCHEDULING', 'INFERENCE', 'TRAINING'] },
+  { id: 'L1', name: 'Hardware Discovery & Telemetry', items: ['CPU CORES', 'RAM', 'NVME/SSD/HDD', 'GPU ACCELERATORS', 'THERMALS', 'POWER', 'NETWORK'] },
+  { id: 'L2', name: 'Fleet & Multi-Tenancy', items: ['ORGANIZATIONS', 'PROJECTS', 'RBAC ROLES', 'SESSION REVOCATION', 'OFFLINE RECOVERY'] },
+  { id: 'L3', name: 'Real-Time Observability', items: ['METRICS', 'CONTAINER LOGS', 'LIVE SSE STREAMS', 'ALERTS', 'HARDWARE SENSORS'] },
+  { id: 'L4', name: 'Workloads & Placement', items: ['DOCKER', 'COMPOSE', 'SMART PLACEMENT', 'AUTONOMOUS REPLACEMENT', 'PORT SUGGESTION'] },
+  { id: 'L5', name: 'Encrypted Storage & Backups', items: ['AES-GCM 256', 'POSTGRESQL', 'MYSQL', 'NAMED VOLUMES', 'DISASTER RECOVERY'] },
+  { id: 'L6', name: 'Private Mesh & Front Door', items: ['WIREGUARD MESH', 'CGNAT BYPASS', 'AUTO HTTPS', 'QUIC+TCP TUNNELS'] },
+  { id: 'L7', name: 'Cloud Migration & Sizing', items: ['AWS EC2', 'AZURE VM', 'GCP COMPUTE', 'TRANSFER PRICING', 'ZERO-LOSS CUTOVER'] },
 ];
 
 export default function Platform() {

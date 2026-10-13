@@ -312,3 +312,113 @@
     animation: none;
   }
 }
+
+/* capabilities matrix */
+
+.editions-matrix {
+  margin-top: 72px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.editions-matrix-header {
+  padding: 32px 36px;
+  border-bottom: 1px solid var(--rule);
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 16px;
+  background: var(--bg-1);
+}
+
+.editions-matrix-header h3 {
+  font-size: clamp(22px, 2.5vw, 32px);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+
+.editions-matrix-header p {
+  color: var(--ink-2);
+  font-size: 14px;
+  margin-top: 6px;
+  max-width: 60ch;
+}
+
+.matrix-grid {
+  display: flex;
+  flex-direction: column;
+}
+
+.matrix-category {
+  border-bottom: 1px solid var(--rule);
+}
+
+.matrix-category:last-child {
+  border-bottom: 0;
+}
+
+.matrix-category-title {
+  padding: 16px 36px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--rule);
+  color: var(--signal);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.matrix-feature-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1px;
+  background: var(--rule);
+}
+
+.matrix-feature-card {
+  background: var(--surface);
+  padding: 24px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.matrix-feature-card strong {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.matrix-feature-card p {
+  font-size: 13px;
+  color: var(--ink-2);
+  line-height: 1.5;
+}
+
+.matrix-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--signal);
+  margin-top: 4px;
+}
+
+.matrix-status-pill::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--signal);
+}
+
+@media (max-width: 860px) {
+  .editions-matrix-header,
+  .matrix-category-title {
+    padding-left: 20px;
+    padding-right: 20px;
+  }
+}
+

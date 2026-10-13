@@ -4,6 +4,7 @@ import './Navbar.css';
 const LINKS = [
   { href: '#problem', label: 'Problem' },
   { href: '#platform', label: 'Platform' },
+  { href: '#migration', label: 'Cloud Migration' },
   { href: '#ai', label: 'Intelligence' },
   { href: '#access', label: 'Enterprise' },
   { href: '#install-lite', label: 'Install Lite', cta: true },

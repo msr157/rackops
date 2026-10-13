@@ -8,6 +8,7 @@ import Problem from '@/components/sections/Problem';
 import Shift from '@/components/sections/Shift';
 import Solution from '@/components/sections/Solution';
 import Platform from '@/components/sections/Platform';
+import Migration from '@/components/sections/Migration';
 import AI from '@/components/sections/AI';
 import Audience from '@/components/sections/Audience';
 import Editions from '@/components/sections/Editions';
@@ -33,6 +34,7 @@ export default function App() {
         <Shift />
         <Solution />
         <Platform />
+        <Migration />
         <AI />
         <Audience />
         <Editions />
