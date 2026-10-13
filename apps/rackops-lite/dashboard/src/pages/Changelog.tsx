@@ -17,7 +17,7 @@ interface Release { version: string; date: string; title: string; changes: Relea
 
 const releases: Release[] = [
   {
-    version: 'v0.7.0', date: 'October 13, 2026', title: 'Multi-cloud migration, Front Door tunnels, and hardened tenant isolation',
+    version: 'v0.7.1', date: 'October 13, 2026', title: 'Multi-cloud migration, Front Door tunnels, and hardened tenant isolation',
     changes: [
       { lead: 'Multi-Cloud Migration', text: ' — launch and cut over workloads directly to AWS, Azure, or GCP with live VM and storage pricing quotes, and real-time downtime calculation.' },
       { lead: '9-Stage Zero-Loss Engine', text: ' — deterministic cutover pipeline: quiesce, encrypt, snapshot, transfer, restore, boot, validate, and atomically cut over traffic with automatic rollback protection.' },

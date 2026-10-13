@@ -2,7 +2,7 @@
 
 Notable user-visible changes to RackOps Lite are recorded here.
 
-## v0.7.0 - 2026-10-13
+## v0.7.1 - 2026-10-13
 
 ### Multi-Cloud Migration Engine
 
