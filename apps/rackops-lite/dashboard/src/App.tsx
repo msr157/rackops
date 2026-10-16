@@ -134,10 +134,17 @@ function Shell({ onLogout }: { onLogout: () => void }) {
   const { pathname } = useLocation();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [addMachine, setAddMachine] = useState(false);
-  const [railHidden, setRailHidden] = useState(false);
+  const [railHidden, setRailHidden] = useState(() => typeof window !== 'undefined' && window.innerWidth <= 640);
   const [version, setVersion] = useState<VersionInfo | null>(null);
   const [me, setMe] = useState<User | null>(null);
   const [stripDismissed, setStripDismissed] = useState(false);
+
+  // Auto-close sidebar on mobile navigation
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.innerWidth <= 640) {
+      setRailHidden(true);
+    }
+  }, [pathname]);
 
   useEffect(() => {
     api.versionCheck().then((v) => {
@@ -229,7 +236,9 @@ function Shell({ onLogout }: { onLogout: () => void }) {
 
       <div className="app-body">
         {!railHidden && (
-          <aside className="sidebar">
+          <>
+            <div className="sidebar-backdrop" onClick={() => setRailHidden(true)} aria-hidden="true" />
+            <aside className="sidebar">
             <OrgSwitcher me={me} />
 
             {/* aria-label carries the name at narrow widths, where the visible
@@ -268,6 +277,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
               </div>
             </div>
           </aside>
+          </>
         )}
 
         <main className="main">

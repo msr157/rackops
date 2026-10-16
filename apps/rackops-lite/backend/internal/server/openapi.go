@@ -86,6 +86,10 @@ func (a *API) apiRoutes() []route {
 		{"POST", "/api/services/{id}/logs/stream", "apps", "Start a live log tail (chunks arrive on /api/stream)", a.handleStartLogStream, false},
 		{"DELETE", "/api/services/{id}/logs/stream", "apps", "Stop a live log tail", a.handleStopLogStream, false},
 		{"GET", "/api/services/{id}/deployments", "apps", "Deployment history with build logs", a.handleServiceDeployments, false},
+		{"GET", "/api/services/{id}/backups", "apps", "List database backup snapshots for a service", a.handleServiceBackups, false},
+		{"POST", "/api/services/{id}/backups", "apps", "Trigger an instant database snapshot", a.handleCreateServiceBackup, false},
+		{"GET", "/api/services/{id}/backups/{filename}/download", "apps", "Download a database backup file", a.handleDownloadServiceBackup, false},
+		{"POST", "/api/services/{id}/backups/restore", "apps", "Restore database from a snapshot (requires confirmation)", a.handleRestoreServiceBackup, false},
 
 		// Placement & templates
 		{"POST", "/api/placement", "placement", "Score the org's machines for a workload (CPU/mem/thermal/storage/GPU)", a.handlePlacement, false},

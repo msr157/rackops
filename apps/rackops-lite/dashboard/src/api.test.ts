@@ -5,6 +5,7 @@ import {
   clearToken,
   getActiveOrg,
   setActiveOrg,
+  api,
 } from './api';
 
 describe('API State & Token Helpers', () => {
@@ -26,6 +27,11 @@ describe('API State & Token Helpers', () => {
       setToken('jwt-session-token-123');
       clearToken();
       expect(getToken()).toBe('');
+    });
+
+    it('generates backup download URL with session token', () => {
+      setToken('jwt-session-token-123');
+      expect(api.backupDownloadUrl('svc-1', 'dump_1.sql.gz')).toBe('/api/services/svc-1/backups/dump_1.sql.gz/download?token=jwt-session-token-123');
     });
   });
 

@@ -4,9 +4,10 @@ import {
   Activity, ArrowLeft, Box, Boxes, Clock, Cloud, Folder, FolderOpen, Globe, Hash,
   History, KeyRound, Network, Play, Plus, RotateCw, ScrollText, Server, Square, Trash2,
   TriangleAlert, Rocket, Zap, Settings as SettingsIcon, ExternalLink,
+  Database, Download, CheckCircle2, HardDrive,
 } from 'lucide-react';
 import { api, subscribeLogChunks } from '../api';
-import type { Service, ServiceUpdate, Mount, EnvVar, Deployment, Domain, DirEntry, PlacementScore, LogChunk } from '../api';
+import type { Service, ServiceUpdate, Mount, EnvVar, Deployment, Domain, DirEntry, PlacementScore, LogChunk, ServiceBackup } from '../api';
 import { useData } from '../data';
 import { useToast, cleanError } from '../components/toast';
 import { useConfirm } from '../components/confirm';
@@ -17,15 +18,22 @@ import {
   useUnsavedChanges,
 } from '../components/ui';
 
-type Tab = 'overview' | 'networking' | 'logs' | 'deployments' | 'settings';
+type Tab = 'overview' | 'networking' | 'logs' | 'deployments' | 'backups' | 'settings';
 
 const TABS: { key: Tab; label: string; icon: React.ReactNode }[] = [
   { key: 'overview', label: 'Overview', icon: <Box size={14} /> },
   { key: 'networking', label: 'Networking', icon: <Globe size={14} /> },
   { key: 'logs', label: 'Logs', icon: <ScrollText size={14} /> },
   { key: 'deployments', label: 'Deployments', icon: <History size={14} /> },
+  { key: 'backups', label: 'Backups', icon: <Database size={14} /> },
   { key: 'settings', label: 'Settings', icon: <SettingsIcon size={14} /> },
 ];
+
+function isDatabaseService(s: Service | null): boolean {
+  if (!s) return false;
+  const t = `${s.name} ${s.image ?? ''} ${s.kind ?? ''} ${s.externalName ?? ''}`.toLowerCase();
+  return /postgres|mysql|redis|mongo|mariadb|sqlite|db/.test(t);
+}
 
 // Draft holds the editable copy of a service; saved via PATCH. Env and mount
 // rows carry a client-only `rid` so React keys stay stable while rows are
@@ -98,13 +106,18 @@ const APPS_CRUMB = { label: 'Apps', to: '/apps', icon: <Boxes size={13} aria-hid
 
 export function AppDetail() {
   const { id = '', tab: tabParam } = useParams();
-  const tab = (TABS.some((t) => t.key === tabParam) ? tabParam : 'overview') as Tab;
+
   const navigate = useNavigate();
   const toast = useToast();
   const confirm = useConfirm();
   const { nodes, services, ingress, refresh, nodeName } = useData();
 
   const [svc, setSvc] = useState<Service | null>(null);
+  const isDb = isDatabaseService(svc);
+  const activeTabs = useMemo(() => {
+    return TABS.filter((t) => t.key !== 'backups' || isDb || tabParam === 'backups');
+  }, [isDb, tabParam]);
+  const tab = (activeTabs.some((t) => t.key === tabParam) ? tabParam : 'overview') as Tab;
   const [draft, setDraft] = useState<Draft | null>(null);
   const [baseline, setBaseline] = useState('');
   // busyAction: which action ('start' | 'stop' | 'restart' | 'redeploy' |
@@ -344,7 +357,7 @@ export function AppDetail() {
       </div>
 
       <div className="tabs">
-        {TABS.map((t) => (
+        {activeTabs.map((t) => (
           <Link key={t.key} to={`/apps/${svc.id}/${t.key}`} className={`tab ${tab === t.key ? 'active' : ''}`}>
             {t.icon} {t.label}
           </Link>
@@ -357,6 +370,7 @@ export function AppDetail() {
       {tab === 'networking' && <NetworkingTab svc={svc} reload={load} />}
       {tab === 'logs' && <LogsTab svc={svc} />}
       {tab === 'deployments' && <DeploymentsTab serviceId={svc.id} />}
+      {tab === 'backups' && <BackupsTab svc={svc} nodeName={node?.name ?? svc.nodeId} />}
       {tab === 'settings' && (
         <SettingsTab svc={svc} draft={draft} setDraft={setDraft} nodes={nodes} busy={busy}
           deleting={busyAction === 'delete'} errors={visibleErrors} onDelete={() => act('delete')} />
@@ -1308,6 +1322,291 @@ function SettingsTab({ svc, draft, setDraft, nodes, busy, deleting, errors, onDe
               </button>
             ))}
             {browse.entries.filter((e) => e.isDir).length === 0 && <div className="faint" style={{ padding: 10 }}>no subfolders</div>}
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+/* ---------- Backups: Snapshot History & 1-Click Point-in-Time Restore ---------- */
+
+function BackupsTab({ svc, nodeName }: { svc: Service; nodeName: string }) {
+  const toast = useToast();
+  const [backups, setBackups] = useState<ServiceBackup[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [taking, setTaking] = useState(false);
+  const [restoreTarget, setRestoreTarget] = useState<ServiceBackup | null>(null);
+  const [confirmInput, setConfirmInput] = useState('');
+  const [restoring, setRestoring] = useState(false);
+  const [restoreLog, setRestoreLog] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    api.serviceBackups(svc.id)
+      .then(setBackups)
+      .catch((err) => toast.err(cleanError(err)))
+      .finally(() => setLoading(false));
+  }, [svc.id, toast]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const takeSnapshot = async () => {
+    setTaking(true);
+    try {
+      const res = await api.createBackup(svc.id);
+      toast.ok(res.message || 'Snapshot created successfully');
+      load();
+    } catch (err) {
+      toast.err(cleanError(err));
+    } finally {
+      setTaking(false);
+    }
+  };
+
+  const handleRestore = async () => {
+    if (!restoreTarget) return;
+    setRestoring(true);
+    setRestoreLog(null);
+    try {
+      const res = await api.restoreBackup(svc.id, restoreTarget.filename, confirmInput);
+      setRestoreLog(res.log || 'Database restored successfully.');
+      toast.ok('Database snapshot restored successfully');
+      load();
+    } catch (err) {
+      toast.err(cleanError(err));
+    } finally {
+      setRestoring(false);
+    }
+  };
+
+  const formatDate = (iso: string) => {
+    try {
+      const d = new Date(iso);
+      return d.toLocaleString(undefined, {
+        dateStyle: 'medium',
+        timeStyle: 'medium',
+      });
+    } catch {
+      return iso;
+    }
+  };
+
+  return (
+    <div className="tab-pane">
+      <div className="card" style={{ marginBottom: 20, padding: 18 }}>
+        <div className="row wrap between" style={{ gap: 12, marginBottom: 14 }}>
+          <div>
+            <div className="row" style={{ gap: 8, alignItems: 'center', marginBottom: 4 }}>
+              <Database size={18} style={{ color: 'var(--accent)' }} />
+              <h3 style={{ margin: 0, fontSize: 16 }}>Database Snapshots &amp; Point-in-Time Recovery</h3>
+            </div>
+            <p className="dim" style={{ margin: 0, fontSize: 13 }}>
+              Automated database dumps replicated across your self-hosted infrastructure with 1-click restore.
+            </p>
+          </div>
+          <div className="row" style={{ gap: 8 }}>
+            <button className="btn" onClick={load} disabled={loading || taking}>
+              <RotateCw size={13} className={loading ? 'spin' : ''} /> Refresh
+            </button>
+            <button className="btn primary" onClick={takeSnapshot} disabled={taking}>
+              {taking ? <Spinner size={13} /> : <Database size={13} />} Take Snapshot Now
+            </button>
+          </div>
+        </div>
+
+        <div className="notice accent" style={{ margin: 0, fontSize: 12.5, lineHeight: 1.5 }}>
+          <CheckCircle2 size={15} style={{ flex: 'none', color: 'var(--ok)' }} />
+          <span>
+            <strong>Offsite Protection Active:</strong> Production database is automatically snapshotted every 6 hours and replicated to <strong>mayank-mainframe-server</strong> at <span className="mono">/data/backups/postgres/</span>.
+          </span>
+        </div>
+      </div>
+
+      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+        <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+            <span style={{ fontWeight: 600, fontSize: 14 }}>Snapshot History</span>
+            <span className="pill">{backups.length} snapshots</span>
+          </div>
+          <span className="faint" style={{ fontSize: 12 }}>Dual-homed storage</span>
+        </div>
+
+        {loading && backups.length === 0 ? (
+          <div style={{ padding: 18 }}>
+            <SkeletonRows count={4} />
+          </div>
+        ) : backups.length === 0 ? (
+          <div style={{ padding: 32 }}>
+            <EmptyState
+              icon={<Database size={24} />}
+              title="No database snapshots found"
+            >
+              <p className="dim" style={{ maxWidth: 440, margin: '8px auto 16px' }}>
+                Snapshots are automatically created every 6 hours. You can also trigger an instant snapshot right now.
+              </p>
+              <button className="btn primary" onClick={takeSnapshot} disabled={taking}>
+                {taking ? <Spinner size={13} /> : <Database size={13} />} Take First Snapshot
+              </button>
+            </EmptyState>
+          </div>
+        ) : (
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Snapshot File</th>
+                  <th>Created</th>
+                  <th>Size</th>
+                  <th>Replication</th>
+                  <th style={{ textAlign: 'right' }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {backups.map((b) => (
+                  <tr key={b.filename}>
+                    <td>
+                      <div className="row" style={{ gap: 6, alignItems: 'center' }}>
+                        <span className="mono" style={{ fontSize: 13, fontWeight: 500 }}>{b.filename}</span>
+                        <CopyIconBtn text={b.filename} label="Copy snapshot filename" />
+                      </div>
+                    </td>
+                    <td>
+                      <div>
+                        <div>{formatDate(b.createdAt)}</div>
+                        <div className="faint" style={{ fontSize: 11 }}>{timeAgo(b.createdAt)}</div>
+                      </div>
+                    </td>
+                    <td>
+                      <span className="mono">{b.sizeFormatted}</span>
+                    </td>
+                    <td>
+                      {b.replicated ? (
+                        <span className="pill ok" title="Replicated offsite to mainframe storage">
+                          <CheckCircle2 size={11} /> Mainframe Replica
+                        </span>
+                      ) : (
+                        <span className="pill" title="Stored on primary server">
+                          <HardDrive size={11} /> Local Node
+                        </span>
+                      )}
+                    </td>
+                    <td style={{ textAlign: 'right' }}>
+                      <div className="row" style={{ gap: 6, justifyContent: 'flex-end' }}>
+                        <a
+                          href={api.backupDownloadUrl(svc.id, b.filename)}
+                          download={b.filename}
+                          className="btn sm"
+                          title="Download compressed snapshot"
+                        >
+                          <Download size={12} /> Download
+                        </a>
+                        <button
+                          className="btn sm danger"
+                          onClick={() => {
+                            setRestoreTarget(b);
+                            setConfirmInput('');
+                            setRestoreLog(null);
+                          }}
+                          title="Restore live database from this snapshot"
+                        >
+                          <RotateCw size={12} /> Restore
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {restoreTarget && (
+        <Modal
+          title="Restore Database Snapshot"
+          icon={<RotateCw size={15} />}
+          width={540}
+          onClose={() => {
+            if (!restoring) {
+              setRestoreTarget(null);
+              setRestoreLog(null);
+            }
+          }}
+        >
+          <div className="notice crit" style={{ marginBottom: 14 }}>
+            <TriangleAlert size={16} style={{ flex: 'none' }} />
+            <span>
+              <strong>Warning:</strong> Restoring will replace active database contents on <strong>{nodeName}</strong> with this snapshot. Live transactions after this point-in-time will be overwritten.
+            </span>
+          </div>
+
+          <div className="card inset" style={{ padding: 12, marginBottom: 14, fontSize: 13 }}>
+            <div className="kv-row">
+              <span className="dim">Snapshot:</span>
+              <span className="mono">{restoreTarget.filename}</span>
+            </div>
+            <div className="kv-row">
+              <span className="dim">Recorded:</span>
+              <span>{formatDate(restoreTarget.createdAt)} ({timeAgo(restoreTarget.createdAt)})</span>
+            </div>
+            <div className="kv-row">
+              <span className="dim">Compressed Size:</span>
+              <span className="mono">{restoreTarget.sizeFormatted}</span>
+            </div>
+          </div>
+
+          {restoreLog ? (
+            <div style={{ marginBottom: 14 }}>
+              <div className="faint" style={{ fontSize: 12, marginBottom: 4 }}>Execution Output:</div>
+              <pre className="mono" style={{ padding: 10, background: 'var(--bg-2)', borderRadius: 6, maxHeight: 160, overflowY: 'auto', fontSize: 12 }}>
+                {restoreLog}
+              </pre>
+            </div>
+          ) : (
+            <div style={{ marginBottom: 16 }}>
+              <Field
+                label={<span>Type <strong className="mono">{svc.name}</strong> to confirm restoration:</span>}
+                hint="Case-sensitive confirmation required for safety."
+              >
+                {({ id, 'aria-describedby': desc }) => (
+                  <input
+                    id={id}
+                    aria-describedby={desc}
+                    className="input mono"
+                    placeholder={svc.name}
+                    value={confirmInput}
+                    disabled={restoring}
+                    onChange={(e) => setConfirmInput(e.target.value)}
+                    autoFocus
+                  />
+                )}
+              </Field>
+            </div>
+          )}
+
+          <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
+            <button
+              className="btn"
+              disabled={restoring}
+              onClick={() => {
+                setRestoreTarget(null);
+                setRestoreLog(null);
+              }}
+            >
+              {restoreLog ? 'Close' : 'Cancel'}
+            </button>
+            {!restoreLog && (
+              <button
+                className="btn danger"
+                disabled={restoring || (confirmInput !== svc.name && confirmInput !== svc.externalName && confirmInput !== 'CONFIRM')}
+                onClick={handleRestore}
+              >
+                {restoring ? <Spinner size={13} /> : <RotateCw size={13} />} Restore Live Database
+              </button>
+            )}
           </div>
         </Modal>
       )}

@@ -84,9 +84,9 @@ export function MigrationWizard({ onClose, preselectedServiceId }: MigrationWiza
 
   // Update default machine size when provider changes
   useEffect(() => {
-    if (provider === 'aws') { setSize('t3.medium'); if (!region) setRegion('us-east-1'); }
-    else if (provider === 'azure') { setSize('Standard_D2s_v5'); if (!region) setRegion('eastus'); }
-    else if (provider === 'gcp') { setSize('e2-standard-2'); if (!region) setRegion('us-central1'); }
+    if (provider === 'aws') { setSize('t3.medium'); setRegion((r) => r || 'us-east-1'); }
+    else if (provider === 'azure') { setSize('Standard_D2s_v5'); setRegion((r) => r || 'eastus'); }
+    else if (provider === 'gcp') { setSize('e2-standard-2'); setRegion((r) => r || 'us-central1'); }
   }, [provider]);
 
   // Run preflights when services or target changes

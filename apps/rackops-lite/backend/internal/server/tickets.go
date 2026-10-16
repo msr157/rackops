@@ -8,6 +8,8 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
@@ -315,17 +317,69 @@ func (a *API) buildUsageSnapshot() map[string]any {
 		if a.Store.Ingress.Enabled {
 			features = append(features, "edge")
 		}
+		if a.Mesh != nil {
+			features = append(features, "native-mesh")
+		}
+		if a.Cluster != nil {
+			features = append(features, "ha-cluster")
+		}
+		if nodes > 1 {
+			features = append(features, "multi-node")
+		}
+		if len(a.Store.Users) > 1 {
+			features = append(features, "multi-user")
+		}
+		if len(a.Store.Orgs) > 1 {
+			features = append(features, "multi-org")
+		}
+
+		hasDatabase := false
+		hasBackups := false
+		hasCompose := false
+		hasGit := false
+		hasQuickTunnel := false
+		hasTemplate := false
 		for _, svc := range a.Store.Services {
+			img := strings.ToLower(svc.Image)
+			if svc.Kind == types.KindDatabase || strings.Contains(img, "postgres") || strings.Contains(img, "mysql") || strings.Contains(img, "mariadb") {
+				hasDatabase = true
+			}
 			if svc.QuickTunnelURL != "" {
-				features = append(features, "quick-tunnel")
-				break
+				hasQuickTunnel = true
+			}
+			if svc.GitRepo != "" {
+				hasGit = true
+			}
+			if svc.Kind == types.KindCompose {
+				hasCompose = true
+			}
+			if svc.Kind == types.KindTemplate {
+				hasTemplate = true
 			}
 		}
-		for _, svc := range a.Store.Services {
-			if svc.GitRepo != "" {
-				features = append(features, "git-deploys")
-				break
-			}
+		if _, err := os.Stat(filepath.Join(a.DataDir, "backups")); err == nil {
+			hasBackups = true
+		}
+		if hasDatabase {
+			features = append(features, "database-management")
+		}
+		if hasBackups {
+			features = append(features, "database-backups")
+		}
+		if hasGit {
+			features = append(features, "git-deploys")
+		}
+		if hasQuickTunnel {
+			features = append(features, "quick-tunnel")
+		}
+		if hasCompose {
+			features = append(features, "docker-compose")
+		}
+		if hasTemplate {
+			features = append(features, "templates")
+		}
+		if adopted > 0 {
+			features = append(features, "adopted-workloads")
 		}
 		if len(a.Store.Domains) > 0 {
 			features = append(features, "domains")

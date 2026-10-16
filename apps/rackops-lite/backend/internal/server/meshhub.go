@@ -72,6 +72,17 @@ func NewMeshHub(dataDir, advertiseHost string, udpPort int) (*MeshHub, error) {
 		MeshIP:     "10.77.0.1",
 		ListenPort: udpPort,
 	})
+	if err != nil && udpPort == 51820 {
+		// If standard 51820 is busy (e.g. NetBird, Tailscale, or kernel WireGuard), fallback to 51822
+		log.Printf("mesh: port %d busy (%v), falling back to 51822", udpPort, err)
+		udpPort = 51822
+		h.UDPPort = udpPort
+		n, err = mesh.Up(mesh.Config{
+			PrivateKey: h.Keys.Private,
+			MeshIP:     "10.77.0.1",
+			ListenPort: udpPort,
+		})
+	}
 	if err != nil {
 		return nil, err
 	}

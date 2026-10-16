@@ -827,6 +827,7 @@ const (
 	TaskListDir                      TaskKind = "listdir"
 	TaskBuild                        TaskKind = "build"
 	TaskBackup                       TaskKind = "backup"
+	TaskRestore                      TaskKind = "restore"
 	TaskMigrationQuiesce             TaskKind = "migration-quiesce"
 	TaskMigrationBackup              TaskKind = "migration-backup"
 	TaskMigrationTransferSource      TaskKind = "migration-transfer-source"

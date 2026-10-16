@@ -208,6 +208,9 @@ func runServer(args []string) {
 		}
 	}()
 
+	// Periodic opt-in telemetry to CRM (tracks fleet size, versions, feature usage).
+	go api.RunPeriodicTelemetry()
+
 	// Embedded local agent — the server manages its own machine.
 	if !*noLocal {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

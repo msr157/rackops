@@ -447,6 +447,9 @@ export function MachineDetail() {
       <div className="kv-rows" style={{ maxWidth: 860 }}>
         <KvRow icon={<Server size={14} aria-hidden />} label="Hostname" mono value={node.hostname} copy={node.hostname} />
         <KvRow icon={<NetworkIcon size={14} aria-hidden />} label="LAN IP" mono value={node.ip} copy={node.ip} />
+        {node.meshIp && (
+          <KvRow icon={<NetworkIcon size={14} aria-hidden />} label="Mesh IP (WireGuard)" mono value={node.meshIp} copy={node.meshIp} />
+        )}
         {node.publicIp && (
           <KvRow icon={<Globe size={14} aria-hidden />} label="Public IP" mono value={node.publicIp} copy={node.publicIp} />
         )}

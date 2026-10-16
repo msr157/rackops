@@ -229,6 +229,15 @@ export interface Settings {
   openaiBase?: string; openaiModel?: string;
 }
 
+export interface ServiceBackup {
+  filename: string;
+  sizeBytes: number;
+  sizeFormatted: string;
+  createdAt: string;
+  replicated: boolean;
+  format: string;
+}
+
 const base = '';
 
 // Session token management.
@@ -329,6 +338,17 @@ export const api = {
   stopLogStream: (id: string, streamId: string) =>
     req<void>(`/api/services/${id}/logs/stream?streamId=${encodeURIComponent(streamId)}`, { method: 'DELETE' }),
   serviceDeployments: (id: string) => req<Deployment[]>(`/api/services/${id}/deployments`),
+  serviceBackups: (id: string) => req<ServiceBackup[]>(`/api/services/${id}/backups`),
+  createBackup: (id: string) => req<{ ok: boolean; message: string }>(`/api/services/${id}/backups`, { method: 'POST' }),
+  restoreBackup: (id: string, filename: string, confirmDatabase: string) =>
+    req<{ ok: boolean; log: string }>(`/api/services/${id}/backups/restore`, {
+      method: 'POST',
+      body: JSON.stringify({ filename, confirmDatabase }),
+    }),
+  backupDownloadUrl: (id: string, filename: string) => {
+    const token = getToken();
+    return `/api/services/${id}/backups/${encodeURIComponent(filename)}/download${token ? `?token=${encodeURIComponent(token)}` : ''}`;
+  },
 	serviceOperations: (id: string) => req<{ id: string; kind: string; state: string; createdAt: string }[]>(`/api/services/${id}/operations`),
 	resolveServiceOperation: (id: string, operation: string) => req(`/api/services/${id}/operations/${operation}/resolve`, { method: 'POST', body: JSON.stringify({ inspected: true }) }),
   domains: () => req<Domain[]>('/api/domains'),

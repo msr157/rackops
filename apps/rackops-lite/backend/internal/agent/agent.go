@@ -421,6 +421,10 @@ func (a *Agent) execute(ctx context.Context, task types.AgentTask) *types.TaskRe
 	case types.TaskTunnelStop:
 		_, _ = runtime.Simple("rm", "-f", quickTunnelName(p.ServiceID))
 		res.OK = true
+	case types.TaskBackup:
+		res.Log, res.OK = a.executeBackup(p)
+	case types.TaskRestore:
+		res.Log, res.OK = a.executeRestore(p)
 	default:
 		res.Log = "unknown task kind: " + string(task.Kind)
 	}

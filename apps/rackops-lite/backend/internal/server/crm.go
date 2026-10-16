@@ -83,3 +83,29 @@ func (a *API) relayResetEmail(email, link string) error {
 	}
 	return err
 }
+
+// RunPeriodicTelemetry periodically sends an opt-in usage snapshot to the CRM.
+// It reports shortly after boot (giving services time to reconcile) and once every 24 hours.
+func (a *API) RunPeriodicTelemetry() {
+	time.Sleep(30 * time.Second)
+	a.PostUsageSnapshot()
+
+	ticker := time.NewTicker(24 * time.Hour)
+	defer ticker.Stop()
+	for range ticker.C {
+		a.PostUsageSnapshot()
+	}
+}
+
+// PostUsageSnapshot sends the current fleet and feature snapshot to the CRM.
+func (a *API) PostUsageSnapshot() {
+	var name string
+	a.Store.View(func() { name = a.Store.InstanceName })
+	usage := a.buildUsageSnapshot()
+	_ = crmPost("/ingest/v1/snapshots", map[string]any{
+		"installId":   a.InstallID,
+		"installName": name,
+		"version":     ServerVersion,
+		"usage":       usage,
+	}, nil)
+}

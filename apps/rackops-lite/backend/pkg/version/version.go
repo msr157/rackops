@@ -6,4 +6,4 @@
 package version
 
 // Current is the RackOps version. Bump this on release — nothing else.
-const Current = "0.7.2"
+const Current = "0.8.0"

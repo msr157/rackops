@@ -6,6 +6,7 @@ node_modules/
 bin/
 dist/
 dist-release/
+scratch/
 *.exe
 apps/website/dist/
 apps/rackops-lite/backend/rackops

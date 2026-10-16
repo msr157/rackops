@@ -632,6 +632,10 @@ func (a *API) applyTaskResult(nodeID string, res types.TaskResult) {
 	if deliverLogs(res.TaskID, res.Log) {
 		return
 	}
+	// Database backup/restore results route straight to waiting HTTP requests.
+	if deliverBackup(res.TaskID, res) {
+		return
+	}
 	// Quick-tunnel starts resolve to a service URL, not a deployment.
 	if a.applyTunnelResult(nodeID, res) {
 		return
